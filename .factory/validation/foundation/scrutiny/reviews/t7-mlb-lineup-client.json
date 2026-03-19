@@ -1,0 +1,39 @@
+{
+  "featureId": "t7-mlb-lineup-client",
+  "reviewedAt": "2026-03-19T15:54:31.843624Z",
+  "commitId": "d569e910dfa8111d4dc428b2ff51e2b4b42c89a7",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature adds a substantial lineup client and test coverage, but it does not fully satisfy the contract yet. Two blocking correctness gaps remain: projected scraping is not tied to the requested date, and the advertised RotoBaller fallback is implemented with an unreliable HTML regex and no direct test coverage.",
+    "issues": [
+      {
+        "file": "src/clients/lineup_client.py",
+        "line": 343,
+        "severity": "blocking",
+        "description": "`fetch_confirmed_lineups(date)` is supposed to return lineups for the requested date, but projected scraping ignores that date entirely. The client always fetches the fixed current-day RotoGrinders/RotoBaller URLs (`ROTOGRINDERS_LINEUPS_URL`/`ROTOBALLER_LINEUPS_URL`) and unconditionally merges those results into whatever schedule was requested. For historical/future dates, that can attach the wrong projected players/starters and create false starter-change detections instead of date-correct lineups."
+      },
+      {
+        "file": "src/clients/lineup_client.py",
+        "line": 408,
+        "severity": "blocking",
+        "description": "The explicit RotoBaller primary-source path is not reviewably correct. `_parse_rotoballer_html()` tries to parse nested HTML with a single regex (`<...data-team=...>(?P<body>.*?)</(?:section|div)>`), which stops at the first inner closing tag rather than the matching container boundary, so it cannot reliably capture a full team card. The test file exercises only RotoGrinders parsing and MLB fallback (`tests/test_lineup_client.py:215`, `:271`, `:298`) and never verifies a real RotoBaller success case, so the required RotoBaller/RotoGrinders scraping contract is still unproven and likely broken when RotoGrinders is unavailable."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The shared skill guidance is out of sync with the actual Windows environment. `data-worker` still instructs workers to follow the generic startup/verification procedure, but this worker had to bypass `.factory/init.sh` and use direct `.venv\\Scripts\\python.exe` commands. The environment library already documents the Windows shell gotcha, so the skill should reference that exception explicitly.",
+      "evidence": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\skills\\data-worker\\SKILL.md (Work Procedure) vs C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\library\\environment.md ('Windows shell gotcha') and handoff.skillFeedback.deviations[0] in C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\handoffs\\2026-03-19T15-36-01-522Z__t7-mlb-lineup-client__8eb1cd35-abfd-4b80-b1b7-efa72090edb1.json"
+    },
+    {
+      "area": "knowledge",
+      "observation": "The mission shared state does not capture an important upstream limitation for this feature: the public RotoGrinders/RotoBaller lineup pages used here are fixed daily pages, not obviously date-parameterized sources. Because that limitation is undocumented, the implementation ended up accepting an arbitrary `date` argument while still consuming current-day projected pages.",
+      "evidence": "Feature contract requires `fetch_confirmed_lineups()` for a given date (`features.json` expectedBehavior and .sisyphus/plans/mlb-prediction-2026.md:810), but src/clients/lineup_client.py hardcodes `https://rotogrinders.com/lineups/mlb` and `https://www.rotoballer.com/fantasy-baseball-daily-projected-starting-mlb-lineups` at lines 25-26 with no date parameter handling."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed commit d569e910dfa8111d4dc428b2ff51e2b4b42c89a7, the worker handoff, the transcript skeleton, and the relevant skill/shared-state files. The feature should fail review because the projected-source merge is not date-correct and the required RotoBaller fallback path is not reliably implemented or tested."
+}

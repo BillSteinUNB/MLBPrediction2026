@@ -3,10 +3,15 @@
 
 commands:
   install: pip install -e ".[dev]"
+  install_windows: '& ".\\.venv\\Scripts\\python.exe" -m pip install -e ".[dev]"'
   typecheck: python -m py_compile src/**/*.py
+  typecheck_windows: '$env:PYTHONDONTWRITEBYTECODE=1; & ".\\.venv\\Scripts\\python.exe" -m py_compile (Get-ChildItem -Path ".\\src" -Recurse -Filter "*.py" | ForEach-Object { $_.FullName })'
   build: pip install -e "."
   test: pytest tests/ -v --tb=short
+  test_windows: '& ".\\.venv\\Scripts\\python.exe" -m pytest ".\\tests" -v --tb=short'
   lint: python -m py_compile src/**/*.py
+  lint_ruff: python -m ruff check src tests
+  lint_ruff_windows: '& ".\\.venv\\Scripts\\python.exe" -m ruff check ".\\src" ".\\tests"'
   coverage: pytest tests/ --cov=src --cov-report=term-missing
 
 services: {}

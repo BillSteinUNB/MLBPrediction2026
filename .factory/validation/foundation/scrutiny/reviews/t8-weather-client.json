@@ -1,0 +1,28 @@
+{
+  "featureId": "t8-weather-client",
+  "reviewedAt": "2026-03-19T15:53:25.492739+00:00",
+  "commitId": "c829f574b5fe8819ac2733fd0c1956390459f9c8",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature covers dome skipping, SQLite persistence, air-density calculation, and cosine-based wind projection, but the cache freshness marker is wired to the forecast slot time instead of the actual retrieval time, so cached weather can remain stale far longer than the intended 6-hour TTL.",
+    "issues": [
+      {
+        "file": "src/clients/weather_client.py",
+        "line": 354,
+        "severity": "blocking",
+        "description": "`_build_weather_data()` sets `fetched_at` from `forecast['dt']`, and that value is what `_cache_weather()` persists and `_get_cached_weather()` later compares to `now - 6h` (see lines 212-213 and 238). This makes cache freshness depend on the game/forecast timestamp instead of when the API response was retrieved, so a forecast fetched well ahead of first pitch can be reused for many hours or days without refreshing even though `WEATHER_CACHE_HOURS` is 6."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The `data-worker` skill still omits the Windows fallback for environment initialization even though workers on this repo need it in practice.",
+      "evidence": "`C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\skills\\data-worker\\SKILL.md:19-45` lists the work procedure but does not mention the Windows-specific `init.sh` failure path, while `C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\library\\environment.md:54-57` documents using `.venv\\Scripts\\python.exe` directly. The handoff `2026-03-19T15-48-35-255Z__t8-weather-client__a6d4c9a8-39ee-45dc-9209-e7f90dea155e.json` also records a deviation for step 1.2 because `.factory/init.sh` failed on Windows."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed. The weather client's TTL logic is incorrect because cached rows use the forecast timestamp as `fetched_at`, allowing stale weather to survive past the intended 6-hour cache window. I also noted a shared-state skill gap around the Windows init-script fallback."
+}

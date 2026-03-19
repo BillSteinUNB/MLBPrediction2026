@@ -1,0 +1,38 @@
+{
+  "featureId": "t1-project-scaffolding",
+  "reviewedAt": "2026-03-19T15:54:27.346546Z",
+  "commitId": "28f634d01b902c6b861639706156148045ddc120",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The scaffold commit creates the requested directories, env template, gitignore entries, and importable src package, but it does not fully satisfy the dependency contract because pyproject.toml replaces the required `pybaseball>=2.3` spec with an unpinned GitHub checkout that the handoff says resolves to version 2.2.7.",
+    "issues": [
+      {
+        "file": "pyproject.toml",
+        "line": 11,
+        "severity": "blocking",
+        "description": "The feature contract explicitly requires `pybaseball>=2.3`, but the committed dependency is `pybaseball @ git+https://github.com/jldbc/pybaseball.git` instead of the requested versioned requirement. The worker handoff also notes this checkout currently builds as version 2.2.7, so the scaffold is not contract-compliant and installs are not reproducible."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The data-worker procedure assumes a runnable repo and mandatory red-phase TDD, which does not fit first-pass project scaffolding. This feature had to deviate on environment init, baseline validation, and TDD because the repo initially lacked pyproject/pytest/scaffold files.",
+      "evidence": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\skills\\data-worker\\SKILL.md:23-27 requires tests-first/red-phase; C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\handoffs\\2026-03-19T14-17-20-455Z__t1-project-scaffolding__b0b77d0b-b2e4-465d-9469-59489787846a.json:87-102 records justified deviations for init, baseline validation, and TDD."
+    },
+    {
+      "area": "services",
+      "observation": "The shared command manifest still advertises Windows-fragile setup/check commands even though the environment notes now document that Git Bash could not reliably run `.factory/init.sh` and that direct `.venv\\Scripts\\python.exe -m ...` commands are preferred.",
+      "evidence": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\services.yaml:5-9 still uses `pip install -e \".[dev]\"` and globbed `python -m py_compile src/**/*.py`; C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\init.sh:20-24 shells into activation then calls bare `pip`; C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\library\\environment.md:54-57 documents the Windows shell gotcha."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The mission/shared library does not capture that the requested `pybaseball>=2.3` dependency was unavailable on PyPI, forcing the worker to research alternatives and fall back to GitHub HEAD. That missing note leaves future workers with the same requirement ambiguity.",
+      "evidence": "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\features.json:754-765 requires `pybaseball>=2.3`; C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\handoffs\\2026-03-19T14-17-20-455Z__t1-project-scaffolding__b0b77d0b-b2e4-465d-9469-59489787846a.json:81-83 says PyPI did not provide that version and the chosen dependency resolves to 2.2.7; C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\worker-transcripts.jsonl:1 includes WebSearch queries for PyPI/GitHub pybaseball version discovery."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Fail: the scaffold shape and validations are present, but the committed dependency spec does not satisfy the feature's explicit `pybaseball>=2.3` requirement. I also noted shared-state gaps around scaffolding-specific skill guidance, Windows-safe command manifests, and undocumented pybaseball version availability."
+}

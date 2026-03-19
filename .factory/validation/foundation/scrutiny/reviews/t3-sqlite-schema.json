@@ -1,0 +1,33 @@
+{
+  "featureId": "t3-sqlite-schema",
+  "reviewedAt": "2026-03-19T15:54:03.532447Z",
+  "commitId": "33cf37f",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The feature delivers an idempotent SQLite initializer with the six required domain tables, schema version tracking, `features.as_of_timestamp` enforced as NOT NULL, and `odds_snapshots.is_frozen` present with a default unfrozen state. The diff and handoff align with the task contract, and the added tests exercise the core acceptance criteria, but the features-table uniqueness rule has a SQLite NULL edge case for non-windowed features.",
+    "issues": [
+      {
+        "file": "src/db.py",
+        "line": 49,
+        "severity": "non_blocking",
+        "description": "`UNIQUE (game_pk, feature_name, window_size, as_of_timestamp)` will not deduplicate rows when `window_size` is NULL, because SQLite treats NULL values as distinct. The mission plan expects non-windowed park/weather/baseline features, so rerunning those computations can silently create duplicates unless the schema or writer normalizes NULL window sizes."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "services",
+      "observation": "Shared state is inconsistent on Windows: the environment library documents using the venv interpreter directly, but `.factory/init.sh` and `.factory/services.yaml` still prescribe bare `pip install` and glob-based `py_compile` commands that the worker had to bypass.",
+      "evidence": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\library\\environment.md:54-57 documents the Windows workaround; C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\init.sh:24 uses `pip install -e \".[dev]\"`; C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\services.yaml:5-9 still lists `pip install -e` and `python -m py_compile src/**/*.py`; the handoff at C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\handoffs\\2026-03-19T14-49-49-185Z__t3-sqlite-schema__a8725dde-6941-488b-8b3b-a68e7d758900.json:101-116 records the resulting justified deviations."
+    },
+    {
+      "area": "skills",
+      "observation": "The `data-worker` skill still instructs workers to run `python -m py_compile src/**/*.py`, which does not match the documented Windows-safe workflow and caused a justified procedure deviation in this feature.",
+      "evidence": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\skills\\data-worker\\SKILL.md:44-45 requires `python -m py_compile src/**/*.py`; C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\library\\environment.md:54-57 documents the Windows-safe alternative; the same handoff file records the deviation at lines 109-116."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Pass. The commit satisfies the requested SQLite foundation work: it creates the six domain tables with `CREATE TABLE IF NOT EXISTS`, enforces `features.as_of_timestamp` as NOT NULL, adds `odds_snapshots.is_frozen`, and records schema version state. One non-blocking schema caveat remains: SQLite NULL semantics mean the current `features` uniqueness constraint will not prevent duplicate non-window feature rows."
+}

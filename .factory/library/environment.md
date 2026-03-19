@@ -24,6 +24,8 @@ Copy `.env.example` to `.env` and configure:
 - **Free tier:** 500 requests/month
 - **Markets needed:** F5 h2h (moneyline), F5 spreads (run line)
 - **Rate limiting:** Client tracks usage in SQLite, fails before exceeding limit
+- **Implementation note:** Current client flow lists events via `/v4/sports/baseball_mlb/events` and then fetches per-event odds via `/v4/sports/baseball_mlb/events/{id}/odds`
+- **Quota accounting:** Current implementation reads `x-requests-used` and `x-requests-last` response headers when available
 
 ### OpenWeatherMap
 - **Endpoint:** `api.openweathermap.org/data/2.5/forecast`
@@ -39,6 +41,7 @@ Copy `.env.example` to `.env` and configure:
 - **Auth:** None required
 - **Caching:** Enable with `cache.enable()` for production
 - **Statcast limit:** 30K rows per query, chunk date ranges
+- **Current environment note:** The repo's installed `pybaseball` currently reports version `2.2.7`, while mission text still references `pybaseball>=2.3`; treat that as a known contract mismatch during review/fix work
 
 ### Discord Webhook
 - **Format:** POST JSON to webhook URL
@@ -55,6 +58,7 @@ Copy `.env.example` to `.env` and configure:
 
 - In this repo, `bash .factory/init.sh` under Git Bash did not resolve `pip` after activation on Windows.
 - Prefer invoking the project interpreter directly for installs and validation commands, e.g. `& .venv\Scripts\python.exe -m pip install -e ".[dev]"` and `& .venv\Scripts\python.exe -m pytest tests/ -v --tb=short`.
+- `python -m py_compile src/**/*.py` is not reliable in PowerShell; expand files with `Get-ChildItem` or use the Windows-specific commands in `.factory/services.yaml`.
 
 ## Data Storage
 
