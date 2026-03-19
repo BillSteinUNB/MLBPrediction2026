@@ -1,0 +1,22 @@
+# MLB F5 Prediction System - Services Manifest
+# Single source of truth for commands and services
+
+commands:
+  install: pip install -e ".[dev]"
+  typecheck: python -m py_compile src/**/*.py
+  build: pip install -e "."
+  test: pytest tests/ -v --tb=short
+  lint: python -m py_compile src/**/*.py
+  coverage: pytest tests/ --cov=src --cov-report=term-missing
+
+services: {}
+  # No long-running services for this batch processing system
+  # SQLite is embedded, no port needed
+  # Parquet files are static storage
+
+# Pipeline entry points (not services, but useful commands)
+pipeline:
+  daily: python -m src.pipeline.daily --date today --mode prod
+  daily_dryrun: python -m src.pipeline.daily --date today --mode prod --dry-run
+  backtest: python -m src.backtest.run --start 2019-03-20 --end 2025-10-31
+  calibrate_eval: python -m src.model.calibrate --eval
