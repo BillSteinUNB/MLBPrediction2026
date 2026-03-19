@@ -279,7 +279,7 @@ def test_compute_defense_features_builds_season_thirty_and_sixty_game_windows(
     assert by_name["home_team_drs_30g"] > by_name["home_team_drs_60g"] > by_name["home_team_drs_season"]
 
 
-def test_compute_defense_features_uses_snapshot_totals_when_daily_history_is_unavailable(
+def test_compute_defense_features_uses_prior_season_baselines_when_current_season_only_has_snapshots(
     tmp_path: Path,
 ) -> None:
     from src.features.defense import compute_defense_features
@@ -296,6 +296,34 @@ def test_compute_defense_features_uses_snapshot_totals_when_daily_history_is_una
 
     prior_dates = pd.date_range("2025-04-01", periods=20, freq="D")
     team_logs = {
+        (2024, "NYY"): pd.DataFrame(
+            [
+                {
+                    "Date": game_day.strftime("%Y-%m-%d"),
+                    "Opp": "BOS",
+                    "AB": 30,
+                    "H": 8,
+                    "HR": 1,
+                    "SO": 7,
+                    "SF": 1,
+                }
+                for game_day in pd.date_range("2024-04-01", periods=20, freq="D")
+            ]
+        ),
+        (2024, "BOS"): pd.DataFrame(
+            [
+                {
+                    "Date": game_day.strftime("%Y-%m-%d"),
+                    "Opp": "NYY",
+                    "AB": 30,
+                    "H": 7,
+                    "HR": 1,
+                    "SO": 6,
+                    "SF": 1,
+                }
+                for game_day in pd.date_range("2024-04-01", periods=20, freq="D")
+            ]
+        ),
         (2025, "NYY"): pd.DataFrame(
             [
                 {
@@ -332,6 +360,15 @@ def test_compute_defense_features_uses_snapshot_totals_when_daily_history_is_una
         windows=(30, 60),
         fielding_fetcher=_fake_fielding_fetcher(
             {
+                2024: pd.DataFrame(
+                    {
+                        "Name": ["NYY Shortstop", "BOS Shortstop"],
+                        "Team": ["NYY", "BOS"],
+                        "Pos": ["SS", "SS"],
+                        "DRS": [12.0, 8.0],
+                        "OAA": [18.0, 6.0],
+                    }
+                ),
                 2025: pd.DataFrame(
                     {
                         "Name": ["NYY Shortstop", "BOS Shortstop"],
@@ -345,6 +382,12 @@ def test_compute_defense_features_uses_snapshot_totals_when_daily_history_is_una
         ),
         framing_fetcher=_fake_framing_fetcher(
             {
+                2024: pd.DataFrame(
+                    {
+                        "team": ["NYY", "BOS"],
+                        "runs_extra_strikes": [4.0, 2.0],
+                    }
+                ),
                 2025: pd.DataFrame(
                     {
                         "team": ["NYY", "BOS"],
@@ -357,14 +400,50 @@ def test_compute_defense_features_uses_snapshot_totals_when_daily_history_is_una
     )
 
     by_name = {row.feature_name: row.feature_value for row in rows}
-    expected_home_drs_per_game = (40.0 * SS_WEIGHT) / 20
-    expected_home_oaa_per_game = (30.0 * SS_WEIGHT) / 20
-    expected_home_adjusted_framing_per_game = (6.0 * ABS_RETENTION) / 20
+    expected_home_drs_per_game = (12.0 * SS_WEIGHT) / 20
+    expected_home_oaa_per_game = (18.0 * SS_WEIGHT) / 20
+    expected_home_adjusted_framing_per_game = (4.0 * ABS_RETENTION) / 20
+    leaked_current_snapshot_drs = (40.0 * SS_WEIGHT) / 20
 
     assert by_name["home_team_drs_season"] == pytest.approx(expected_home_drs_per_game)
     assert by_name["home_team_drs_30g"] == pytest.approx(expected_home_drs_per_game)
     assert by_name["home_team_drs_60g"] == pytest.approx(expected_home_drs_per_game)
+    assert by_name["home_team_drs_season"] != pytest.approx(leaked_current_snapshot_drs)
     assert by_name["home_team_oaa_season"] == pytest.approx(expected_home_oaa_per_game)
     assert by_name["home_team_adjusted_framing_season"] == pytest.approx(
         expected_home_adjusted_framing_per_game
     )
+
+
+def test_compute_defense_features_falls_back_to_league_averages_without_team_history(
+    tmp_path: Path,
+) -> None:
+    from src.features.defense import compute_defense_features
+
+    db_path = tmp_path / "defense.db"
+    init_db(db_path)
+    _seed_game(
+        db_path,
+        game_pk=804,
+        game_date="2025-04-02T20:05:00+00:00",
+        home_team="NYY",
+        away_team="BOS",
+    )
+
+    rows = compute_defense_features(
+        "2025-04-02",
+        db_path=db_path,
+        windows=(30, 60),
+        fielding_fetcher=_fake_fielding_fetcher({}),
+        framing_fetcher=_fake_framing_fetcher({}),
+        team_logs_fetcher=_fake_team_logs_fetcher({}),
+    )
+
+    by_name = {row.feature_name: row.feature_value for row in rows}
+
+    assert by_name["home_team_drs_season"] == pytest.approx(0.0)
+    assert by_name["home_team_oaa_season"] == pytest.approx(0.0)
+    assert by_name["home_team_adjusted_framing_season"] == pytest.approx(0.0)
+    assert by_name["home_team_defensive_efficiency_season"] == pytest.approx(0.700)
+    assert by_name["home_team_drs_30g"] == pytest.approx(0.0)
+    assert by_name["home_team_drs_60g"] == pytest.approx(0.0)

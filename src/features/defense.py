@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -25,6 +25,7 @@ from src.models.features import GameFeatures
 
 DEFAULT_WINDOWS: tuple[int, ...] = (30, 60)
 DEFAULT_DEFENSIVE_EFFICIENCY = 0.700
+DEFAULT_SNAPSHOT_GAMES_PLAYED = 162
 POSITION_IMPORTANCE_WEIGHTS: dict[str, float] = {
     "C": 1.30,
     "SS": 1.25,
@@ -47,6 +48,8 @@ POSITION_ALIASES: dict[str, str] = {
 }
 FIELDING_VALUE_COLUMNS: tuple[str, ...] = ("drs", "oaa")
 TEAM_CODES: tuple[str, ...] = tuple(sorted(_load_settings_yaml()["teams"].keys()))
+DEFAULT_FIELDING_BASELINES: dict[str, float] = {"drs": 0.0, "oaa": 0.0}
+DEFAULT_FRAMING_BASELINES: dict[str, float] = {"raw_framing": 0.0}
 
 
 _FieldingFetcher = Callable[..., pd.DataFrame]
@@ -75,6 +78,7 @@ def compute_defense_features(
     if games.empty:
         return []
 
+    prior_season = target_day.year - 1
     defensive_efficiency_histories = _build_defensive_efficiency_histories(
         season=target_day.year,
         target_day=target_day,
@@ -86,9 +90,28 @@ def compute_defense_features(
         for team, history in defensive_efficiency_histories.items()
         if not history.empty
     }
-    defensive_efficiency_baseline = _resolve_defensive_efficiency_baseline(
-        defensive_efficiency_histories
+    prior_defensive_efficiency_histories = _build_defensive_efficiency_histories(
+        season=prior_season,
+        target_day=date(target_day.year, 1, 1),
+        team_logs_fetcher=team_logs_fetcher,
+        refresh=refresh,
     )
+    prior_games_played_lookup = {
+        team: len(history)
+        for team, history in prior_defensive_efficiency_histories.items()
+        if not history.empty
+    }
+    defensive_efficiency_defaults = _resolve_metric_defaults(
+        prior_defensive_efficiency_histories,
+        value_columns=("defensive_efficiency",),
+        fallback_defaults={"defensive_efficiency": DEFAULT_DEFENSIVE_EFFICIENCY},
+    )
+    prior_defensive_efficiency_baselines = _build_metric_baselines(
+        prior_defensive_efficiency_histories,
+        value_columns=("defensive_efficiency",),
+        default_values=defensive_efficiency_defaults,
+    )
+    defensive_efficiency_baseline = defensive_efficiency_defaults["defensive_efficiency"]
 
     fielding_frame = _safe_fetch_fielding_frame(
         season=target_day.year,
@@ -101,8 +124,34 @@ def compute_defense_features(
         target_day=target_day,
         value_columns=FIELDING_VALUE_COLUMNS,
         games_played_lookup=games_played_lookup,
+        allow_snapshot_fallback=False,
+    )
+
+    prior_fielding_frame = _safe_fetch_fielding_frame(
+        season=prior_season,
+        fielding_fetcher=fielding_fetcher,
+        refresh=refresh,
+    )
+    prior_normalized_fielding = _normalize_fielding_frame(prior_fielding_frame)
+    prior_fielding_histories = _build_metric_histories(
+        prior_normalized_fielding,
+        target_day=target_day,
+        value_columns=FIELDING_VALUE_COLUMNS,
+        games_played_lookup=prior_games_played_lookup,
+        allow_snapshot_fallback=True,
+    )
+    fielding_defaults = _resolve_metric_defaults(
+        prior_fielding_histories,
+        value_columns=FIELDING_VALUE_COLUMNS,
+        fallback_defaults=DEFAULT_FIELDING_BASELINES,
+    )
+    prior_fielding_baselines = _build_metric_baselines(
+        prior_fielding_histories,
+        value_columns=FIELDING_VALUE_COLUMNS,
+        default_values=fielding_defaults,
     )
     name_team_lookup = _build_name_team_lookup(normalized_fielding)
+    prior_name_team_lookup = _build_name_team_lookup(prior_normalized_fielding)
 
     framing_frame = _safe_fetch_framing_frame(
         season=target_day.year,
@@ -115,6 +164,34 @@ def compute_defense_features(
         target_day=target_day,
         value_columns=("raw_framing",),
         games_played_lookup=games_played_lookup,
+        allow_snapshot_fallback=False,
+    )
+
+    prior_framing_frame = _safe_fetch_framing_frame(
+        season=prior_season,
+        framing_fetcher=framing_fetcher,
+        refresh=refresh,
+    )
+    prior_normalized_framing = _normalize_framing_frame(
+        prior_framing_frame,
+        prior_name_team_lookup,
+    )
+    prior_framing_histories = _build_metric_histories(
+        prior_normalized_framing,
+        target_day=target_day,
+        value_columns=("raw_framing",),
+        games_played_lookup=prior_games_played_lookup,
+        allow_snapshot_fallback=True,
+    )
+    framing_defaults = _resolve_metric_defaults(
+        prior_framing_histories,
+        value_columns=("raw_framing",),
+        fallback_defaults=DEFAULT_FRAMING_BASELINES,
+    )
+    prior_framing_baselines = _build_metric_baselines(
+        prior_framing_histories,
+        value_columns=("raw_framing",),
+        default_values=framing_defaults,
     )
 
     as_of_timestamp = datetime.combine(
@@ -134,14 +211,22 @@ def compute_defense_features(
                 team,
                 _empty_metric_history(("defensive_efficiency",)),
             )
+            fielding_baseline = prior_fielding_baselines.get(team, fielding_defaults)
+            framing_baseline = prior_framing_baselines.get(team, framing_defaults)
+            defensive_efficiency_team_baseline = prior_defensive_efficiency_baselines.get(
+                team,
+                {"defensive_efficiency": defensive_efficiency_baseline},
+            )["defensive_efficiency"]
 
             season_values = _build_feature_values(
                 fielding_history=fielding_history,
                 framing_history=framing_history,
                 defensive_efficiency_history=defensive_efficiency_history,
+                fielding_baseline=fielding_baseline,
+                framing_baseline=framing_baseline,
                 abs_retention_factor=abs_retention_factor,
                 abs_active=abs_active,
-                defensive_efficiency_baseline=defensive_efficiency_baseline,
+                defensive_efficiency_baseline=defensive_efficiency_team_baseline,
                 window=None,
             )
             features.extend(
@@ -160,9 +245,11 @@ def compute_defense_features(
                     fielding_history=fielding_history,
                     framing_history=framing_history,
                     defensive_efficiency_history=defensive_efficiency_history,
+                    fielding_baseline=fielding_baseline,
+                    framing_baseline=framing_baseline,
                     abs_retention_factor=abs_retention_factor,
                     abs_active=abs_active,
-                    defensive_efficiency_baseline=defensive_efficiency_baseline,
+                    defensive_efficiency_baseline=defensive_efficiency_team_baseline,
                     window=window,
                 )
                 features.extend(
@@ -290,23 +377,6 @@ def _build_defensive_efficiency_histories(
             .reset_index(drop=True)
         )
     return histories
-
-
-def _resolve_defensive_efficiency_baseline(
-    histories: dict[str, pd.DataFrame],
-) -> float:
-    values = [
-        frame["defensive_efficiency"]
-        for frame in histories.values()
-        if not frame.empty and "defensive_efficiency" in frame
-    ]
-    if not values:
-        return DEFAULT_DEFENSIVE_EFFICIENCY
-
-    combined = pd.concat(values, ignore_index=True)
-    if combined.dropna().empty:
-        return DEFAULT_DEFENSIVE_EFFICIENCY
-    return float(combined.mean())
 
 
 def _normalize_offensive_game_logs(dataframe: pd.DataFrame) -> pd.DataFrame:
@@ -460,6 +530,7 @@ def _build_metric_histories(
     target_day: date,
     value_columns: Sequence[str],
     games_played_lookup: dict[str, int],
+    allow_snapshot_fallback: bool,
 ) -> dict[str, pd.DataFrame]:
     if dataframe.empty:
         return {}
@@ -486,8 +557,11 @@ def _build_metric_histories(
         if has_dated_history:
             continue
 
+        if not allow_snapshot_fallback:
+            continue
+
         totals = team_group[list(value_columns)].sum(numeric_only=True)
-        games_played = max(int(games_played_lookup.get(str(team), 0)), 1)
+        games_played = max(int(games_played_lookup.get(str(team), DEFAULT_SNAPSHOT_GAMES_PLAYED)), 1)
         histories[str(team)] = pd.DataFrame(
             {
                 "game_date": [pd.Timestamp(target_day - timedelta(days=1))],
@@ -498,20 +572,81 @@ def _build_metric_histories(
     return histories
 
 
+def _resolve_metric_defaults(
+    histories: Mapping[str, pd.DataFrame],
+    *,
+    value_columns: Sequence[str],
+    fallback_defaults: Mapping[str, float],
+) -> dict[str, float]:
+    defaults: dict[str, float] = {}
+    for column in value_columns:
+        values = [
+            frame[column]
+            for frame in histories.values()
+            if not frame.empty and column in frame
+        ]
+        if values:
+            combined = pd.concat(values, ignore_index=True).dropna()
+            if not combined.empty:
+                defaults[column] = float(combined.mean())
+                continue
+
+        defaults[column] = float(fallback_defaults[column])
+
+    return defaults
+
+
+def _build_metric_baselines(
+    histories: Mapping[str, pd.DataFrame],
+    *,
+    value_columns: Sequence[str],
+    default_values: Mapping[str, float],
+) -> dict[str, dict[str, float]]:
+    baselines: dict[str, dict[str, float]] = {}
+    for team, history in histories.items():
+        baselines[str(team)] = {
+            column: _history_mean(
+                history,
+                column,
+                window=None,
+                default=float(default_values[column]),
+            )
+            for column in value_columns
+        }
+    return baselines
+
+
 def _build_feature_values(
     *,
     fielding_history: pd.DataFrame,
     framing_history: pd.DataFrame,
     defensive_efficiency_history: pd.DataFrame,
+    fielding_baseline: Mapping[str, float],
+    framing_baseline: Mapping[str, float],
     abs_retention_factor: float,
     abs_active: bool,
     defensive_efficiency_baseline: float,
     window: int | None,
 ) -> dict[str, float]:
-    raw_framing = _history_mean(framing_history, "raw_framing", window=window, default=0.0)
+    raw_framing = _history_mean(
+        framing_history,
+        "raw_framing",
+        window=window,
+        default=float(framing_baseline.get("raw_framing", 0.0)),
+    )
     return {
-        "drs": _history_mean(fielding_history, "drs", window=window, default=0.0),
-        "oaa": _history_mean(fielding_history, "oaa", window=window, default=0.0),
+        "drs": _history_mean(
+            fielding_history,
+            "drs",
+            window=window,
+            default=float(fielding_baseline.get("drs", 0.0)),
+        ),
+        "oaa": _history_mean(
+            fielding_history,
+            "oaa",
+            window=window,
+            default=float(fielding_baseline.get("oaa", 0.0)),
+        ),
         "defensive_efficiency": _history_mean(
             defensive_efficiency_history,
             "defensive_efficiency",
