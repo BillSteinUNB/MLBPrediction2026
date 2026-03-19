@@ -18,3 +18,6 @@
 - To run milestone validators cleanly without committing unrelated WIP, these repo-local stashes were created:
   - `worker-0cac70ef isolate unrelated data_builder test`
   - `worker-0cac70ef isolate unrelated data_builder WIP`
+
+- During feature `fix-t7-lineup-date-scoping`, another repo-local stash was created to isolate unrelated training-data work before validation:
+  - `worker-ba06611d isolate unrelated data_builder WIP`

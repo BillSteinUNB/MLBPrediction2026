@@ -1,0 +1,26 @@
+{
+  "featureId": "fix-t5-odds-api-commit-games",
+  "reviewedAt": "2026-03-19T16:32:17.563234+00:00",
+  "commitId": "89c52d0a73027b714e78126c97dbef53a8578c72",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Reviewed the prior failing review, the fix handoff, the fix session transcript skeleton, both commit diffs, and the current `src/clients/odds_client.py` / `tests/test_odds_client.py` implementation. The fix now backfills a `games` row when team/date matching misses and commits each event inside its own transaction boundary; the new regression tests directly exercise both formerly blocking scenarios. I did not find a remaining defect that leaves either original blocking issue unresolved.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The startup procedure still appears to be mismatched with the Windows repo workflow: the worker had to deviate from the initialization step because `.factory/init.sh` is Bash-oriented, even though the repo library already documents the direct-`.venv\\Scripts\\python.exe` fallback.",
+      "evidence": "Fix handoff `C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\handoffs\\2026-03-19T16-10-23-744Z__fix-t5-odds-api-commit-games__ea65a6a9-7813-4b0e-917d-89221aa4dce6.json`:56-67 records `skillFeedback.followedProcedure=false` because the worker first tried `.factory/init.sh`; `.factory/library/environment.md`:57-61 already says Windows workers should prefer direct `.venv\\Scripts\\python.exe` commands."
+    },
+    {
+      "area": "services",
+      "observation": "The shared services manifest still mislabels linting: the canonical `lint` command is `py_compile`, while workers are actually using Ruff for lint validation.",
+      "evidence": "`.factory/services.yaml`:12-14 defines `lint` as `python -m py_compile ...` and only exposes Ruff under separate keys, while the fix handoff shows the actual lint step was `ruff check` (`...fix-t5-odds-api-commit-games__ea65a6a9-7813-4b0e-917d-89221aa4dce6.json`:30-33)."
+    }
+  ],
+  "addressesFailureFrom": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\foundation\\scrutiny\\reviews\\t5-odds-api-client.json",
+  "summary": "Pass. The fix closes both previously blocking odds-client gaps: odds ingestion now backfills missing `games` rows and earlier event writes survive when a later event fails. I also noted an outstanding Windows startup skill mismatch and the still-inaccurate `lint` entry in the shared services manifest."
+}

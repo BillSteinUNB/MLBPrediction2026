@@ -1,0 +1,34 @@
+{
+  "featureId": "fix-t6-pybaseball-raw-fielding",
+  "reviewedAt": "2026-03-19T16:32:04.554627+00:00",
+  "commitId": "c5482602de2aeb06bb4afaf87be5dd08e998cc1d",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "Reviewed the prior failing review, both handoffs, the fix transcript skeleton, both feature diffs, and the resulting statcast client/test files. The fix now passes explicit all-player thresholds (`qual=0`, `min_att=0`, `min_called_p=0`) and the tests assert those overrides, but it still leaves the originally persisted qualified-only parquet files on the default read path. Because both defensive fetchers short-circuit on existing parquet files before refetching, an upgrade from the failed feature can still serve the old incomplete datasets unless callers know to force `refresh=True` or delete the cached parquet files manually.",
+    "issues": [
+      {
+        "file": "src/clients/statcast_client.py",
+        "line": 185,
+        "severity": "blocking",
+        "description": "`fetch_fielding_stats()` still returns `fielding_{season}.parquet` unchanged whenever that file already exists. The original `t6-pybaseball-ingestion` commit wrote that same path using `fielding_stats(season)` with pybaseball's qualified-only default, so this fix does not repair already-persisted bad fielding data on the normal `refresh=False` path. Users upgrading from the failed feature will keep reading the old qualified-only leaderboard until they manually delete the parquet or force a refetch."
+      },
+      {
+        "file": "src/clients/statcast_client.py",
+        "line": 238,
+        "severity": "blocking",
+        "description": "`fetch_catcher_framing()` has the same upgrade-path bug for `catcher_framing_{season}.parquet`: the new `min_called_p=0` override is only applied when the function refetches, but the default code path still returns any existing parquet created by the original qualified-only `statcast_catcher_framing(season)` call. That means the original blocking omission of unqualified catchers can remain in persisted data unless callers bypass or clear the cache."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The `data-worker` skill still tells workers to use generic `pytest tests/ -v --tb=short` and `python -m py_compile src/**/*.py` commands even though this mission's shared state already documents that Windows workers should use the interpreter-direct / `*_windows` commands instead. The fix worker had to deviate again for that reason.",
+      "evidence": "`C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\skills\\data-worker\\SKILL.md:35-45` vs `C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\library\\environment.md:57-61` and `.factory/services.yaml:6,8,11,14`; the fix handoff records `skillFeedback.followedProcedure=false` because the worker used the virtualenv interpreter directly after the documented Windows shell issue."
+    }
+  ],
+  "addressesFailureFrom": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\foundation\\scrutiny\\reviews\\t6-pybaseball-ingestion.json",
+  "summary": "Review failed. The code now sends the correct all-player parameters and the updated tests cover those call sites, but the fix does not remediate the qualified-only parquet files already persisted by the original feature. Normal cached reads can therefore still serve the old incomplete fielding and framing data."
+}

@@ -1,6 +1,6 @@
 {
   "milestone": "foundation",
-  "round": 1,
+  "round": 2,
   "status": "fail",
   "validatorsRun": {
     "test": {
@@ -20,99 +20,57 @@
     }
   },
   "reviewsSummary": {
-    "total": 8,
+    "total": 5,
     "passed": 3,
-    "failed": 5,
+    "failed": 2,
     "failedFeatures": [
       "t1-project-scaffolding",
-      "t5-odds-api-client",
-      "t6-pybaseball-ingestion",
-      "t7-mlb-lineup-client",
-      "t8-weather-client"
+      "fix-t6-pybaseball-raw-fielding"
     ]
   },
   "blockingIssues": [
     {
       "featureId": "t1-project-scaffolding",
       "severity": "blocking",
-      "description": "pyproject.toml does not satisfy the feature's explicit `pybaseball>=2.3` dependency requirement; it installs pybaseball from GitHub HEAD, and the current environment reports version 2.2.7."
+      "description": "Carried forward from round 1: `pyproject.toml` still specifies `pybaseball @ git+https://github.com/jldbc/pybaseball.git` instead of the feature's explicit `pybaseball>=2.3` requirement, and the current virtualenv still reports pybaseball 2.2.7. No dedicated fix feature has landed for this mismatch yet."
     },
     {
-      "featureId": "t5-odds-api-client",
+      "featureId": "fix-t6-pybaseball-raw-fielding",
       "severity": "blocking",
-      "description": "fetch_mlb_odds() silently drops events when it cannot resolve a pre-seeded `games` row, so a fresh database can return no odds snapshots for real API data."
+      "description": "`fetch_fielding_stats()` still returns an existing `fielding_{season}.parquet` unchanged on the default `refresh=False` path, so qualified-only parquet data written by the original failed feature remains in use unless callers manually delete or refresh the cache."
     },
     {
-      "featureId": "t5-odds-api-client",
+      "featureId": "fix-t6-pybaseball-raw-fielding",
       "severity": "blocking",
-      "description": "Odds snapshot inserts and monthly usage updates are committed only after the full event loop, so one later event failure can roll back earlier successful writes and undercount quota usage."
-    },
-    {
-      "featureId": "t6-pybaseball-ingestion",
-      "severity": "blocking",
-      "description": "fetch_fielding_stats() persists only qualified fielders because it calls Fangraphs fielding_stats() without overriding the default qualification filter, rather than storing the raw defensive dataset required by the feature."
-    },
-    {
-      "featureId": "t6-pybaseball-ingestion",
-      "severity": "blocking",
-      "description": "fetch_catcher_framing() persists only qualified catchers because pybaseball's default framing qualification threshold is left in place, so raw framing data is incomplete."
-    },
-    {
-      "featureId": "t7-mlb-lineup-client",
-      "severity": "blocking",
-      "description": "fetch_confirmed_lineups(date) ignores the requested date when merging projected scraping sources, so non-today requests can attach the wrong projected lineups and starter changes."
-    },
-    {
-      "featureId": "t7-mlb-lineup-client",
-      "severity": "blocking",
-      "description": "The advertised RotoBaller fallback is implemented with a brittle regex-based HTML parser and lacks direct success-path test coverage, so the required fallback contract is not reliably met."
-    },
-    {
-      "featureId": "t8-weather-client",
-      "severity": "blocking",
-      "description": "Weather cache freshness uses the forecast slot timestamp as `fetched_at` instead of the actual API retrieval time, allowing stale cached weather to survive beyond the intended 6-hour TTL."
+      "description": "`fetch_catcher_framing()` has the same upgrade-path bug for existing `catcher_framing_{season}.parquet` files, leaving previously persisted qualified-only framing data in place unless callers force a refetch or remove the cache."
     }
   ],
   "appliedUpdates": [
     {
-      "target": "services.yaml",
-      "description": "Added Windows-safe install/test/typecheck commands plus explicit Ruff lint commands so future workers have manifest-backed validation options in PowerShell.",
-      "sourceFeature": "t3-sqlite-schema"
-    },
-    {
       "target": "library",
-      "description": "Updated `.factory/library/environment.md` with the Odds API events/per-event-odds flow and quota-header accounting details used by the current odds client.",
-      "sourceFeature": "t5-odds-api-client"
-    },
-    {
-      "target": "library",
-      "description": "Updated `.factory/library/environment.md` with the current pybaseball version mismatch note and a PowerShell-specific `py_compile` caveat.",
-      "sourceFeature": "t1-project-scaffolding"
+      "description": "Added the missing `worker-ba06611d isolate unrelated data_builder WIP` stash note to `.factory/library/workspace-state.md` so future workers can account for the repo-local stash surfaced during lineup-fix validation.",
+      "sourceFeature": "fix-t7-lineup-date-scoping"
     }
   ],
   "suggestedGuidanceUpdates": [
     {
       "target": "data-worker skill",
-      "suggestion": "Replace the PowerShell-fragile `python -m py_compile src/**/*.py` guidance with Windows-aware validation commands or an explicit pointer to `.factory/services.yaml` / `.factory/library/environment.md` for platform-safe equivalents.",
-      "evidence": "Features t1-project-scaffolding, t3-sqlite-schema, t4-pydantic-models, t6-pybaseball-ingestion, t7-mlb-lineup-client, and t8-weather-client all recorded justified deviations because the current Windows environment could not reliably use the documented glob-based validation/init flow.",
+      "suggestion": "Document the Windows-specific initialization and validation fallback (direct `.venv\\Scripts\\python.exe` commands and the existing `*_windows` manifest commands) instead of assuming `.factory/init.sh`, bare `pytest`, and glob-based `py_compile` work on Windows.",
+      "evidence": "Fix reviews for fix-t5-odds-api-commit-games, fix-t6-pybaseball-raw-fielding, fix-t7-lineup-date-scoping, and fix-t8-weather-cache-ttl all reported justified deviations because `.factory/init.sh` or the generic shell/glob commands were not reliable in this Windows repo, even though the workaround is already documented in `.factory/library/environment.md` and `.factory/services.yaml`.",
       "isSystemic": true
     },
     {
-      "target": "data-worker skill",
-      "suggestion": "Add an explicit exception path for first-pass scaffolding/bootstrap features so workers can document why strict red-phase TDD and baseline validator requirements are not always possible before the repo exists.",
-      "evidence": "t1-project-scaffolding had to deviate from the default tests-first/bootstrap procedure because the repository, test harness, and packaging files were being created for the first time.",
-      "isSystemic": false
+      "target": ".factory/services.yaml",
+      "suggestion": "Promote Ruff to the canonical lint command (or rename the current `lint` entry to compile) so the manifest's primary lint label matches how scrutiny validators actually run linting.",
+      "evidence": "The fix-t5-odds-api-commit-games review found that `.factory/services.yaml` still defines `lint` as `py_compile` while actual scrutiny lint validation uses `ruff check`, so the current canonical lint label is misleading for future workers.",
+      "isSystemic": true
     }
   ],
   "rejectedObservations": [
     {
-      "observation": "Repeated notes that `.factory/services.yaml` and `.factory/init.sh` use Windows-fragile commands.",
-      "reason": "deduplicated and partially addressed: services.yaml received additive Windows-safe commands, while the remaining init.sh mismatch was left for orchestrator follow-up rather than patched here."
-    },
-    {
-      "observation": "The lineup-client review's note that public projected lineup pages are daily/current-day sources rather than date-parameterized APIs.",
-      "reason": "rejected for shared-state application because it is currently an implementation-specific failure mode rather than broad guidance that is safe to codify before the feature is fixed."
+      "observation": "Repeated Windows startup/validation mismatch notes across the four fix reviews.",
+      "reason": "deduplicated into one systemic data-worker skill recommendation rather than listing the same process gap four times."
     }
   ],
-  "previousRound": null
+  "previousRound": ".factory/validation/foundation/scrutiny/synthesis.round1.json"
 }

@@ -1,0 +1,26 @@
+{
+  "featureId": "fix-t7-lineup-date-scoping",
+  "reviewedAt": "2026-03-19T16:32:03.114734Z",
+  "commitId": "77e82f11509b95fae63a3a15f88b3497e28869ed",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Reviewed the original failing commit d569e910dfa8111d4dc428b2ff51e2b4b42c89a7 and the fix commit 77e82f11509b95fae63a3a15f88b3497e28869ed. The fix addresses both prior blocking issues: projected-source scraping is now explicitly scoped to the requested date by skipping current-day-only RotoGrinders/RotoBaller sources when `game_date` does not match the current Eastern Time game date (`src/clients/lineup_client.py:426-438`), and the RotoBaller fallback now uses an `HTMLParser`-based parser with defensive error handling plus direct success/fallback coverage in `tests/test_lineup_client.py:265-276`, `:399-433`, `:436-468`, and `:471-507`.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The fix handoff reports a new repo-local stash, `worker-ba06611d isolate unrelated data_builder WIP`, but `.factory/library/workspace-state.md` does not record that stash entry. Future workers trying to recover or understand isolated local WIP would miss it.",
+      "evidence": "Handoff discoveredIssues in C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\handoffs\\2026-03-19T16-21-56-883Z__fix-t7-lineup-date-scoping__ba06611d-576a-4a2d-ad2e-8e02478f60c5.json:55-59 records the stash, while C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\library\\workspace-state.md:16-20 lists other data_builder-related stashes but not the `worker-ba06611d` entry."
+    },
+    {
+      "area": "skills",
+      "observation": "Startup guidance remains mismatched with the actual Windows workflow. The worker again had to deviate from the init/startup path because `bash .factory/init.sh` could not resolve `pip`, even though the repo's shared environment notes and services manifest already prescribe direct `.venv\\Scripts\\python.exe` commands on Windows.",
+      "evidence": "The fix handoff marks `followedProcedure: false` and documents the Windows init deviation in C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\handoffs\\2026-03-19T16-21-56-883Z__fix-t7-lineup-date-scoping__ba06611d-576a-4a2d-ad2e-8e02478f60c5.json:62-72. The repo already documents the workaround in C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\library\\environment.md:57-61 and exposes Windows-native commands in C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\services.yaml:5-14."
+    }
+  ],
+  "addressesFailureFrom": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\foundation\\scrutiny\\reviews\\t7-mlb-lineup-client.json",
+  "summary": "Pass. The fix adequately resolves the original review's two blocking issues by preventing current-day projected pages from contaminating non-matching requested dates and by hardening plus directly testing the RotoBaller fallback path. I also recorded two shared-state observations: the new local stash was not added to workspace-state, and the Windows startup guidance remains inconsistent with the documented repo workaround."
+}
