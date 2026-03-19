@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.clients.weather_client import _calculate_air_density
+from src.clients.weather_client import _calculate_air_density, _calculate_wind_factor
 from src.features.adjustments.weather import (
     NEUTRAL_WEATHER_FACTOR,
     WeatherAdjustment,
@@ -69,7 +69,7 @@ def test_compute_weather_adjustment_calculates_all_open_air_factors() -> None:
             temperature_f=90.0,
             humidity_pct=70.0,
             wind_speed_mph=12.0,
-            wind_direction_deg=35.0,
+            wind_direction_deg=215.0,
             air_density=1.18,
         ),
         team_code="NYY",
@@ -86,9 +86,26 @@ def test_compute_weather_adjustment_calculates_all_open_air_factors() -> None:
 
 
 def test_wind_factor_uses_cosine_projection_for_blowing_out_in_and_crosswind() -> None:
-    assert calculate_wind_factor(10.0, 0.0, 0.0) == pytest.approx(10.0)
-    assert calculate_wind_factor(10.0, 180.0, 0.0) == pytest.approx(-10.0)
+    assert calculate_wind_factor(10.0, 180.0, 0.0) == pytest.approx(10.0)
+    assert calculate_wind_factor(10.0, 0.0, 0.0) == pytest.approx(-10.0)
     assert calculate_wind_factor(10.0, 90.0, 0.0) == pytest.approx(0.0, abs=1e-9)
+
+
+def test_wind_factor_matches_weather_client_convention() -> None:
+    blowing_out = _weather(wind_speed_mph=10.0, wind_direction_deg=180.0)
+    blowing_in = _weather(wind_speed_mph=10.0, wind_direction_deg=0.0)
+
+    blowing_out_factor = _calculate_wind_factor(10.0, 180.0, 0.0)
+    blowing_in_factor = _calculate_wind_factor(10.0, 0.0, 0.0)
+
+    assert compute_weather_adjustment(
+        blowing_out.model_copy(update={"wind_factor": blowing_out_factor}),
+        center_field_orientation_deg=0.0,
+    ).wind_factor == pytest.approx(blowing_out_factor)
+    assert compute_weather_adjustment(
+        blowing_in.model_copy(update={"wind_factor": blowing_in_factor}),
+        center_field_orientation_deg=0.0,
+    ).wind_factor == pytest.approx(blowing_in_factor)
 
 
 def test_air_density_factor_rewards_less_dense_more_humid_air() -> None:

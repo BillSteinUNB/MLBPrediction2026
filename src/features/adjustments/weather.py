@@ -158,14 +158,19 @@ def calculate_wind_factor(
     wind_direction_deg: float,
     stadium_cf_orientation_deg: float,
 ) -> float:
-    """Project wind onto the home-plate-to-center-field axis using cosine."""
+    """Project source-direction wind onto the home-plate-to-center-field axis.
+
+    OpenWeather reports meteorological source direction, so a value 180° off the
+    center-field bearing means the wind is blowing out toward center field and
+    should be positive.
+    """
 
     resolved_wind_speed = max(float(wind_speed_mph), 0.0)
     if resolved_wind_speed <= 0:
         return 0.0
 
     angle_diff = (float(wind_direction_deg) - float(stadium_cf_orientation_deg)) % 360
-    projected_component = resolved_wind_speed * cos(radians(angle_diff))
+    projected_component = -resolved_wind_speed * cos(radians(angle_diff))
     return 0.0 if abs(projected_component) < 1e-9 else projected_component
 
 
