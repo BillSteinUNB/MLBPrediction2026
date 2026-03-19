@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import Field
-
 from src.models._base import (
     AmericanOdds,
     BetSide,
