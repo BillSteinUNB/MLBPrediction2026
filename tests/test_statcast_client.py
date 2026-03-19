@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -151,6 +152,86 @@ def test_fetch_fielding_stats_merges_fangraphs_drs_with_statcast_oaa(
     assert (tmp_path / "fielding" / "fielding_2025.parquet").exists()
 
 
+def test_fetch_fielding_stats_regenerates_stale_cache_without_metadata(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from src.clients import statcast_client
+
+    stale_path = tmp_path / "fielding" / "fielding_2025.parquet"
+    stale_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        {
+            "Name": ["Qualified Only"],
+            "Team": ["NYY"],
+            "DRS": [1],
+            "OAA": [2],
+        }
+    ).to_parquet(stale_path, index=False)
+
+    calls = {"fielding": 0, "oaa": 0}
+
+    def fake_fielding_stats(season: int, qual: int | None = None) -> pd.DataFrame:
+        calls["fielding"] += 1
+        assert season == 2025
+        assert qual == 0
+        return pd.DataFrame({"Name": ["Anthony Volpe"], "Team": ["NYY"], "DRS": [12]})
+
+    def fake_oaa(
+        year: int,
+        pos: int,
+        min_att: int | str = "q",
+        view: str = "Fielder",
+    ) -> pd.DataFrame:
+        calls["oaa"] += 1
+        assert year == 2025
+        assert min_att == 0
+        assert view == "Fielder"
+        return pd.DataFrame(
+            {
+                "name": ["Anthony Volpe"],
+                "team": ["NYY"],
+                "outs_above_average": [1],
+            }
+        )
+
+    monkeypatch.setattr(statcast_client, "fielding_stats", fake_fielding_stats)
+    monkeypatch.setattr(statcast_client, "statcast_outs_above_average", fake_oaa)
+
+    refreshed = statcast_client.fetch_fielding_stats(2025, raw_data_root=tmp_path)
+
+    assert calls == {"fielding": 1, "oaa": 7}
+    assert refreshed["Name"].tolist() == ["Anthony Volpe"]
+    assert refreshed.loc[0, "OAA"] == 7
+
+    metadata = json.loads((tmp_path / "fielding" / "fielding_2025.metadata.json").read_text())
+    assert metadata == {
+        "cache_version": statcast_client.FIELDING_CACHE_VERSION,
+        "fielding_qual": 0,
+        "oaa_min_att": 0,
+        "oaa_positions": [3, 4, 5, 6, 7, 8, 9],
+    }
+
+    monkeypatch.setattr(
+        statcast_client,
+        "fielding_stats",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("fielding_stats should use fresh cache metadata")
+        ),
+    )
+    monkeypatch.setattr(
+        statcast_client,
+        "statcast_outs_above_average",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("statcast_outs_above_average should use fresh cache metadata")
+        ),
+    )
+
+    cached = statcast_client.fetch_fielding_stats(2025, raw_data_root=tmp_path)
+
+    assert cached.equals(refreshed)
+
+
 def test_fetch_catcher_framing_and_team_game_logs_persist_parquet(
     tmp_path: Path,
     monkeypatch,
@@ -189,3 +270,59 @@ def test_fetch_catcher_framing_and_team_game_logs_persist_parquet(
     assert {"Offense_Date", "Offense_R", "Home"}.issubset(team_logs_df.columns)
     assert (tmp_path / "catcher_framing" / "catcher_framing_2025.parquet").exists()
     assert (tmp_path / "team_game_logs" / "TBR_2025.parquet").exists()
+
+
+def test_fetch_catcher_framing_regenerates_stale_cache_when_metadata_changes(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from src.clients import statcast_client
+
+    stale_path = tmp_path / "catcher_framing" / "catcher_framing_2025.parquet"
+    stale_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame({"name": ["Qualified Catcher"], "runs_extra_strikes": [2.1]}).to_parquet(
+        stale_path,
+        index=False,
+    )
+    (tmp_path / "catcher_framing" / "catcher_framing_2025.metadata.json").write_text(
+        json.dumps(
+            {
+                "cache_version": 1,
+                "min_called_p": 15,
+            }
+        )
+    )
+
+    calls = {"framing": 0}
+
+    def fake_catcher_framing(season: int, min_called_p: int | str = "q") -> pd.DataFrame:
+        calls["framing"] += 1
+        assert season == 2025
+        assert min_called_p == 0
+        return pd.DataFrame({"name": ["Jose Trevino"], "runs_extra_strikes": [6.2]})
+
+    monkeypatch.setattr(statcast_client, "statcast_catcher_framing", fake_catcher_framing)
+
+    refreshed = statcast_client.fetch_catcher_framing(2025, raw_data_root=tmp_path)
+
+    assert calls == {"framing": 1}
+    assert refreshed["name"].tolist() == ["Jose Trevino"]
+    metadata = json.loads(
+        (tmp_path / "catcher_framing" / "catcher_framing_2025.metadata.json").read_text()
+    )
+    assert metadata == {
+        "cache_version": statcast_client.CATCHER_FRAMING_CACHE_VERSION,
+        "min_called_p": 0,
+    }
+
+    monkeypatch.setattr(
+        statcast_client,
+        "statcast_catcher_framing",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("statcast_catcher_framing should use fresh cache metadata")
+        ),
+    )
+
+    cached = statcast_client.fetch_catcher_framing(2025, raw_data_root=tmp_path)
+
+    assert cached.equals(refreshed)

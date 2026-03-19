@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -25,6 +26,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RAW_DATA_ROOT = REPO_ROOT / "data" / "raw"
 DEFAULT_PYBASEBALL_CACHE_DIR = DEFAULT_RAW_DATA_ROOT / "pybaseball_cache"
 UNQUALIFIED_LEADERBOARD_MINIMUM = 0
+FIELDING_CACHE_VERSION = 2
+CATCHER_FRAMING_CACHE_VERSION = 2
 OAA_POSITIONS: tuple[int, ...] = (3, 4, 5, 6, 7, 8, 9)
 TEAM_GAME_LOG_CODES = {
     "ARI": "ARI",
@@ -181,9 +184,15 @@ def fetch_fielding_stats(
     raw_root = Path(raw_data_root)
     parquet_path = raw_root / "fielding" / f"fielding_{season}.parquet"
     enable_pybaseball_cache(raw_root / "pybaseball_cache")
+    expected_metadata = _fielding_cache_metadata()
 
-    if parquet_path.exists() and not refresh:
-        return pd.read_parquet(parquet_path)
+    cached_frame = _load_versioned_parquet_cache(
+        parquet_path,
+        expected_metadata=expected_metadata,
+        refresh=refresh,
+    )
+    if cached_frame is not None:
+        return cached_frame
 
     fangraphs_frame = _stringify_columns(
         fielding_stats(season, qual=UNQUALIFIED_LEADERBOARD_MINIMUM).copy()
@@ -220,6 +229,7 @@ def fetch_fielding_stats(
         merged["OAA"] = 0.0
 
     _write_parquet(merged, parquet_path)
+    _write_cache_metadata(parquet_path, expected_metadata)
     return merged
 
 
@@ -234,9 +244,15 @@ def fetch_catcher_framing(
     raw_root = Path(raw_data_root)
     parquet_path = raw_root / "catcher_framing" / f"catcher_framing_{season}.parquet"
     enable_pybaseball_cache(raw_root / "pybaseball_cache")
+    expected_metadata = _catcher_framing_cache_metadata()
 
-    if parquet_path.exists() and not refresh:
-        return pd.read_parquet(parquet_path)
+    cached_frame = _load_versioned_parquet_cache(
+        parquet_path,
+        expected_metadata=expected_metadata,
+        refresh=refresh,
+    )
+    if cached_frame is not None:
+        return cached_frame
 
     dataframe = _stringify_columns(
         statcast_catcher_framing(
@@ -245,6 +261,7 @@ def fetch_catcher_framing(
         ).copy()
     )
     _write_parquet(dataframe, parquet_path)
+    _write_cache_metadata(parquet_path, expected_metadata)
     return dataframe
 
 
@@ -379,6 +396,50 @@ def _combine_frames(frames: Sequence[pd.DataFrame]) -> pd.DataFrame:
     return combined
 
 
+def _fielding_cache_metadata() -> dict[str, object]:
+    return {
+        "cache_version": FIELDING_CACHE_VERSION,
+        "fielding_qual": UNQUALIFIED_LEADERBOARD_MINIMUM,
+        "oaa_min_att": UNQUALIFIED_LEADERBOARD_MINIMUM,
+        "oaa_positions": list(OAA_POSITIONS),
+    }
+
+
+def _catcher_framing_cache_metadata() -> dict[str, object]:
+    return {
+        "cache_version": CATCHER_FRAMING_CACHE_VERSION,
+        "min_called_p": UNQUALIFIED_LEADERBOARD_MINIMUM,
+    }
+
+
+def _load_versioned_parquet_cache(
+    parquet_path: Path,
+    *,
+    expected_metadata: dict[str, object],
+    refresh: bool,
+) -> pd.DataFrame | None:
+    if refresh or not parquet_path.exists() or not _cache_metadata_matches(parquet_path, expected_metadata):
+        return None
+
+    try:
+        return pd.read_parquet(parquet_path)
+    except (OSError, ValueError):
+        return None
+
+
+def _cache_metadata_matches(parquet_path: Path, expected_metadata: dict[str, object]) -> bool:
+    metadata_path = _cache_metadata_path(parquet_path)
+    if not metadata_path.exists():
+        return False
+
+    try:
+        raw_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+
+    return raw_metadata == expected_metadata
+
+
 def _stringify_columns(dataframe: pd.DataFrame) -> pd.DataFrame:
     normalized = dataframe.copy()
     columns: list[str] = []
@@ -405,6 +466,15 @@ def _stringify_columns(dataframe: pd.DataFrame) -> pd.DataFrame:
 
     normalized.columns = columns
     return normalized
+
+
+def _cache_metadata_path(parquet_path: Path) -> Path:
+    return parquet_path.with_suffix(".metadata.json")
+
+
+def _write_cache_metadata(parquet_path: Path, metadata: dict[str, object]) -> None:
+    metadata_path = _cache_metadata_path(parquet_path)
+    metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
 
 def _write_parquet(dataframe: pd.DataFrame, parquet_path: Path) -> None:
