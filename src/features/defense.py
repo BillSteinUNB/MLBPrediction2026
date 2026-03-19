@@ -16,6 +16,10 @@ from src.clients.statcast_client import (
 )
 from src.config import _load_settings_yaml
 from src.db import DEFAULT_DB_PATH, init_db
+from src.features.adjustments.abs_adjustment import (
+    DEFAULT_ABS_RETENTION_FACTOR,
+    adjust_framing_for_abs,
+)
 from src.models.features import GameFeatures
 
 
@@ -43,7 +47,6 @@ POSITION_ALIASES: dict[str, str] = {
 }
 FIELDING_VALUE_COLUMNS: tuple[str, ...] = ("drs", "oaa")
 TEAM_CODES: tuple[str, ...] = tuple(sorted(_load_settings_yaml()["teams"].keys()))
-DEFAULT_ABS_RETENTION_FACTOR = float(_load_settings_yaml()["abs_retention_factor"])
 
 
 _FieldingFetcher = Callable[..., pd.DataFrame]
@@ -185,7 +188,11 @@ def adjust_framing_runs(
 ) -> float:
     """Adjust catcher framing runs for ABS-active environments."""
 
-    return float(raw_framing_runs) * (retention_factor if abs_active else 1.0)
+    return adjust_framing_for_abs(
+        raw_framing_runs,
+        retention_factor=retention_factor,
+        abs_active=abs_active,
+    )
 
 
 def _coerce_date(value: str | date | datetime) -> date:

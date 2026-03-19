@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 
 from src.config import DEFAULT_ENV_FILE, _load_settings_yaml
 from src.db import DEFAULT_DB_PATH, init_db
+from src.features.adjustments.abs_adjustment import is_abs_active
 from src.models.odds import OddsSnapshot
 
 
@@ -48,9 +49,6 @@ def _build_team_name_index() -> dict[str, str]:
 
 TEAM_NAME_TO_CODE = _build_team_name_index()
 STADIUMS_BY_TEAM_CODE = _SETTINGS_PAYLOAD["stadiums"]
-ABS_EXCEPTION_VENUES = {
-    str(venue).strip().casefold() for venue in _SETTINGS_PAYLOAD.get("abs_exceptions", [])
-}
 
 
 def _parse_iso_datetime(value: str) -> datetime:
@@ -234,7 +232,7 @@ def _ensure_game_row(
         venue = home_team_name
 
     is_dome = bool(stadium.get("is_dome")) if isinstance(stadium, Mapping) else False
-    is_abs_active = venue.strip().casefold() not in ABS_EXCEPTION_VENUES
+    abs_active = is_abs_active(venue)
     game_pk = _fallback_game_pk(event_id)
 
     existing_row = connection.execute(
@@ -267,7 +265,7 @@ def _ensure_game_row(
             away_team_code,
             venue,
             int(is_dome),
-            int(is_abs_active),
+            int(abs_active),
             "scheduled",
         ),
     )
