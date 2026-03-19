@@ -1,8 +1,8 @@
 {
   "milestone": "feature-engineering",
-  "round": 1,
+  "round": 2,
   "status": "pass",
-  "overrideJustification": "ORCHESTRATOR OVERRIDE: VAL-CROSS-004 deferred to future milestones. Requires src/backtest/run.py (ml-pipeline) and src/pipeline/daily.py (decision-engine) entrypoints that don't exist yet. Assertion moved to pending state and will be validated when those milestones complete. All other 10 assertions passed.",
+  "overrideJustification": "ORCHESTRATOR OVERRIDE: VAL-CROSS-004 remains deferred to future milestones. Round 2 rechecked the real CLI surface and confirmed src/backtest/run.py (ml-pipeline) and src/pipeline/daily.py (decision-engine) still do not exist, so the assertion stays pending for those later milestones while the other 10 feature-engineering assertions remain passed.",
   "assertionsSummary": {
     "total": 11,
     "passed": 10,
@@ -26,7 +26,7 @@
   "blockedAssertions": [
     {
       "id": "VAL-CROSS-004",
-      "blockedBy": "The current repo snapshot does not expose separate src/pipeline/daily.py and src/backtest/run.py CLI entrypoints, so backtest-versus-production feature parity cannot be exercised from the real CLI surface."
+      "blockedBy": "Round 2 rechecked the real CLI surface and confirmed `src/pipeline/daily.py` and `src/backtest/run.py` are still absent; both documented commands fail with module-not-found errors, so parity validation remains deferred to later ml-pipeline and decision-engine milestones."
     }
   ],
   "appliedUpdates": [
@@ -39,7 +39,12 @@
       "target": "user-testing.md",
       "description": "Documented the missing `src/pipeline/daily.py` and `src/backtest/run.py` entrypoints as the current blocker for `VAL-CROSS-004` CLI parity validation.",
       "source": "flow-report"
+    },
+    {
+      "target": "user-testing.md",
+      "description": "Documented the Windows setup friction where direct `bash .factory/init.sh` can fail to find `pip`, and that validators should prefer the manifest's Windows init flow instead.",
+      "source": "setup"
     }
   ],
-  "previousRound": null
+  "previousRound": ".factory/validation/feature-engineering/user-testing/synthesis.json (round 1)"
 }
