@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
 from src.db import init_db
+from src.models.lineup import Lineup
 
 
 def _seed_game(
@@ -351,6 +353,26 @@ def _fake_start_metrics_fetcher(metrics_by_season: dict[int, pd.DataFrame]):
     return _fetcher
 
 
+def _lineup_for(
+    *,
+    game_pk: int,
+    team: str,
+    starter_id: int,
+    is_opener: bool,
+) -> Lineup:
+    return Lineup(
+        game_pk=game_pk,
+        team=team,
+        source="test",
+        confirmed=True,
+        as_of_timestamp=datetime(2025, 4, 20, 12, 0, tzinfo=timezone.utc),
+        starting_pitcher_id=starter_id,
+        projected_starting_pitcher_id=starter_id,
+        is_opener=is_opener,
+        is_bullpen_game=is_opener,
+    )
+
+
 def test_compute_pitching_features_uses_starter_starts_only_and_excludes_current_game(
     tmp_path: Path,
 ) -> None:
@@ -429,6 +451,41 @@ def test_compute_pitching_features_applies_pitcher_marcel_blend(tmp_path: Path) 
     assert by_name["home_starter_xfip_7s"] > 3.2
 
 
+def test_compute_pitching_features_uses_team_composite_when_lineup_flags_opener(
+    tmp_path: Path,
+) -> None:
+    from src.features.pitching import compute_pitching_features
+
+    db_path = tmp_path / "pitching.db"
+    init_db(db_path)
+    _seed_game(
+        db_path,
+        game_pk=9310,
+        game_date="2025-04-10T20:05:00+00:00",
+        home_team="NYY",
+        away_team="BOS",
+        home_starter_id=100,
+        away_starter_id=400,
+    )
+
+    rows = compute_pitching_features(
+        "2025-04-10",
+        db_path=db_path,
+        windows=(2,),
+        regression_weight=0,
+        start_metrics_fetcher=_fake_start_metrics_fetcher(_start_metrics_by_season()),
+        lineup_fetcher=lambda *_args, **_kwargs: [
+            _lineup_for(game_pk=9310, team="NYY", starter_id=100, is_opener=True)
+        ],
+    )
+
+    by_name = {row.feature_name: row.feature_value for row in rows}
+    assert by_name["home_starter_is_opener"] == 1.0
+    assert by_name["home_starter_uses_team_composite"] == 1.0
+    assert by_name["home_starter_xfip_2s"] == pytest.approx((4.0 + 7.5) / 2)
+    assert by_name["home_starter_xfip_2s"] != pytest.approx((3.0 + 4.0) / 2)
+
+
 def test_compute_pitching_features_detects_opener_and_uses_team_composite(
     tmp_path: Path,
 ) -> None:
@@ -453,6 +510,41 @@ def test_compute_pitching_features_detects_opener_and_uses_team_composite(
         regression_weight=0,
         start_metrics_fetcher=_fake_start_metrics_fetcher(_start_metrics_by_season()),
         lineup_fetcher=lambda *_args, **_kwargs: [],
+    )
+
+    by_name = {row.feature_name: row.feature_value for row in rows}
+    assert by_name["home_starter_is_opener"] == 1.0
+    assert by_name["home_starter_uses_team_composite"] == 1.0
+    assert by_name["home_starter_xfip_2s"] == pytest.approx((3.0 + 3.5) / 2)
+    assert by_name["home_starter_xfip_2s"] != pytest.approx((8.0 + 9.0) / 2)
+
+
+def test_compute_pitching_features_still_uses_history_based_opener_when_lineup_flag_is_false(
+    tmp_path: Path,
+) -> None:
+    from src.features.pitching import compute_pitching_features
+
+    db_path = tmp_path / "pitching.db"
+    init_db(db_path)
+    _seed_game(
+        db_path,
+        game_pk=9311,
+        game_date="2025-04-20T20:05:00+00:00",
+        home_team="TB",
+        away_team="TOR",
+        home_starter_id=900,
+        away_starter_id=950,
+    )
+
+    rows = compute_pitching_features(
+        "2025-04-20",
+        db_path=db_path,
+        windows=(2,),
+        regression_weight=0,
+        start_metrics_fetcher=_fake_start_metrics_fetcher(_start_metrics_by_season()),
+        lineup_fetcher=lambda *_args, **_kwargs: [
+            _lineup_for(game_pk=9311, team="TB", starter_id=900, is_opener=False)
+        ],
     )
 
     by_name = {row.feature_name: row.feature_value for row in rows}

@@ -243,7 +243,8 @@ def _build_pitching_context(
     team_history = team_histories.get(team, _empty_start_metrics())
 
     inferred_opener = _is_opener_from_history(pitcher_history)
-    is_opener = lineup.is_opener if lineup is not None else inferred_opener
+    lineup_indicates_opener = lineup is not None and lineup.is_opener
+    is_opener = lineup_indicates_opener or inferred_opener
     uses_team_composite = starter_id is None or is_opener
 
     if uses_team_composite:
