@@ -89,11 +89,17 @@ def _ensure_weather_cache_table(db_path: str | Path) -> Path:
                 air_density REAL NOT NULL,
                 wind_factor REAL NOT NULL,
                 is_dome_default INTEGER NOT NULL CHECK (is_dome_default IN (0, 1)),
+                forecast_time TEXT,
                 fetched_at TEXT NOT NULL,
                 PRIMARY KEY (team_abbr, game_datetime)
             )
             """
         )
+        existing_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(weather_cache)").fetchall()
+        }
+        if "forecast_time" not in existing_columns:
+            connection.execute("ALTER TABLE weather_cache ADD COLUMN forecast_time TEXT")
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_weather_cache_fetched_at ON weather_cache (fetched_at)"
         )
@@ -164,6 +170,7 @@ def _get_default_weather(is_dome: bool = False) -> WeatherData:
         air_density=DEFAULT_AIR_DENSITY,
         wind_factor=0.0,
         is_dome_default=is_dome,
+        forecast_time=None,
         fetched_at=None,
     )
 
@@ -181,6 +188,8 @@ def _get_cached_weather(
     if not database_path.exists():
         return None
 
+    database_path = _ensure_weather_cache_table(database_path)
+
     normalized_team = team_abbr.upper()
     normalized_game_time = _iso_datetime(game_datetime)
 
@@ -197,6 +206,7 @@ def _get_cached_weather(
                     air_density,
                     wind_factor,
                     is_dome_default,
+                    forecast_time,
                     fetched_at
                 FROM weather_cache
                 WHERE team_abbr = ? AND game_datetime = ?
@@ -209,7 +219,11 @@ def _get_cached_weather(
     if row is None:
         return None
 
-    fetched_at = _normalize_datetime(row[8])
+    forecast_time_raw = row[8]
+    if forecast_time_raw is None:
+        return None
+
+    fetched_at = _normalize_datetime(row[9])
     if fetched_at < datetime.now(timezone.utc) - timedelta(hours=cache_hours):
         return None
 
@@ -222,6 +236,7 @@ def _get_cached_weather(
         air_density=row[5],
         wind_factor=row[6],
         is_dome_default=bool(row[7]),
+        forecast_time=_normalize_datetime(forecast_time_raw),
         fetched_at=fetched_at,
     )
 
@@ -235,6 +250,7 @@ def _cache_weather(
     """Store weather data in the SQLite cache."""
 
     database_path = _ensure_weather_cache_table(db_path)
+    forecast_time = weather.forecast_time or _normalize_datetime(game_datetime)
     fetched_at = weather.fetched_at or datetime.now(timezone.utc)
 
     with sqlite3.connect(database_path) as connection:
@@ -251,9 +267,10 @@ def _cache_weather(
                 air_density,
                 wind_factor,
                 is_dome_default,
+                forecast_time,
                 fetched_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 team_abbr.upper(),
@@ -266,6 +283,7 @@ def _cache_weather(
                 weather.air_density,
                 weather.wind_factor,
                 int(weather.is_dome_default),
+                forecast_time.isoformat(),
                 fetched_at.isoformat(),
             ),
         )
@@ -335,6 +353,7 @@ def _build_weather_data(
     forecast: Mapping[str, Any],
     *,
     stadium_cf_orientation_deg: float,
+    retrieved_at: datetime | str,
 ) -> WeatherData:
     """Build validated weather data from a forecast object."""
 
@@ -351,7 +370,7 @@ def _build_weather_data(
     pressure_hpa = float(main["pressure"])
     wind_speed_mph = _mps_to_mph(float(wind.get("speed", 0.0)))
     wind_direction_deg = float(wind.get("deg", 0.0))
-    fetched_at = datetime.fromtimestamp(float(forecast["dt"]), tz=timezone.utc)
+    forecast_time = datetime.fromtimestamp(float(forecast["dt"]), tz=timezone.utc)
 
     return WeatherData(
         temperature_f=_kelvin_to_fahrenheit(temperature_k),
@@ -366,7 +385,8 @@ def _build_weather_data(
             stadium_cf_orientation_deg,
         ),
         is_dome_default=False,
-        fetched_at=fetched_at,
+        forecast_time=forecast_time,
+        fetched_at=_normalize_datetime(retrieved_at),
     )
 
 
@@ -399,6 +419,7 @@ def fetch_game_weather(
             api_key=resolved_api_key,
             client=client,
         )
+        retrieved_at = datetime.now(timezone.utc)
         forecasts = payload.get("list")
         if not isinstance(forecasts, list):
             raise WeatherClientError("Forecast payload missing list data")
@@ -416,6 +437,7 @@ def fetch_game_weather(
         weather = _build_weather_data(
             closest_forecast,
             stadium_cf_orientation_deg=float(stadium["center_field_orientation_deg"]),
+            retrieved_at=retrieved_at,
         )
     except (httpx.HTTPError, ValidationError, ValueError, TypeError, KeyError, WeatherClientError) as exc:
         logger.warning(

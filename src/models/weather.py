@@ -16,6 +16,7 @@ class WeatherData(ModelBase):
     air_density: float = Field(gt=0)
     wind_factor: float
     is_dome_default: bool = False
+    forecast_time: UtcDatetime | None = None
     fetched_at: UtcDatetime | None = None
 
     @field_validator("wind_direction_deg", mode="before")

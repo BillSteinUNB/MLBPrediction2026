@@ -12,3 +12,9 @@
   - `worker-ea65a6a9 isolate reserved nul path`
   - `worker-ea65a6a9 isolate unrelated feature-engineering WIP`
 - A stray untracked `nul` path required Git Bash removal (`rm -f`) after Windows git operations hit reserved-path handling; if `git status` ever shows `?? nul` again, inspect it from Bash under `/mnt/c/...` instead of standard Windows file APIs.
+
+- During feature `fix-t8-weather-cache-ttl`, pre-existing local `src/model/data_builder.py` and `tests/test_data_builder.py` WIP surfaced while validating the weather cache fix.
+- `tests/test_data_builder.py` broke full-suite pytest collection because `src.model.data_builder` is not part of the committed milestone yet.
+- To run milestone validators cleanly without committing unrelated WIP, these repo-local stashes were created:
+  - `worker-0cac70ef isolate unrelated data_builder test`
+  - `worker-0cac70ef isolate unrelated data_builder WIP`

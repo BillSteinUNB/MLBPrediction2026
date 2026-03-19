@@ -98,6 +98,7 @@ def test_get_default_weather_sets_neutral_values() -> None:
         air_density=1.225,
         wind_factor=0.0,
         is_dome_default=True,
+        forecast_time=None,
         fetched_at=None,
     )
 
@@ -113,6 +114,7 @@ def test_cache_round_trip_and_expiry(tmp_path: Path) -> None:
         air_density=1.21,
         wind_factor=5.5,
         is_dome_default=False,
+        forecast_time=GAME_TIME,
         fetched_at=datetime.now(UTC),
     )
 
@@ -122,6 +124,7 @@ def test_cache_round_trip_and_expiry(tmp_path: Path) -> None:
     assert cached_weather is not None
     assert cached_weather.temperature_f == pytest.approx(72.5)
     assert cached_weather.wind_factor == pytest.approx(5.5)
+    assert cached_weather.forecast_time == GAME_TIME
 
     stale_weather = fresh_weather.model_copy(
         update={"fetched_at": datetime.now(UTC) - timedelta(hours=8)}
@@ -129,6 +132,43 @@ def test_cache_round_trip_and_expiry(tmp_path: Path) -> None:
     _cache_weather(db_path, "NYY", GAME_TIME, stale_weather)
 
     assert _get_cached_weather(db_path, "NYY", GAME_TIME) is None
+
+
+def test_fetch_game_weather_uses_retrieval_time_for_cache_ttl(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "weather.db"
+    monkeypatch.setattr("src.clients.weather_client._load_settings_yaml", _stadium_settings)
+
+    forecast_time = GAME_TIME + timedelta(hours=3)
+    payload = {
+        "list": [
+            {
+                "dt": int(forecast_time.timestamp()),
+                "main": {"temp": 298.15, "humidity": 60, "pressure": 1015},
+                "wind": {"speed": 4.4704, "deg": 180},
+            }
+        ]
+    }
+
+    monkeypatch.setattr(
+        "src.clients.weather_client._fetch_from_api",
+        lambda **_kwargs: payload,
+    )
+
+    retrieved_before = datetime.now(UTC)
+    weather = fetch_game_weather("NYY", GAME_TIME, api_key="test-key", db_path=db_path)
+    retrieved_after = datetime.now(UTC)
+
+    assert weather.forecast_time == forecast_time
+    assert weather.fetched_at is not None
+    assert retrieved_before <= weather.fetched_at <= retrieved_after
+    assert weather.fetched_at != weather.forecast_time
+
+    cached_weather = _get_cached_weather(db_path, "NYY", GAME_TIME)
+
+    assert cached_weather == weather
 
 
 def test_resolve_api_key_prefers_parameter_and_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -244,6 +284,7 @@ def test_weather_data_validates_ranges() -> None:
         air_density=1.21,
         wind_factor=5.5,
         is_dome_default=False,
+        forecast_time=datetime.now(UTC),
         fetched_at=datetime.now(UTC),
     )
 
