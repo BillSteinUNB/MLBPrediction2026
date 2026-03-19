@@ -11,6 +11,7 @@ from src.models.game import Game
 from src.models.lineup import Lineup, LineupPlayer
 from src.models.odds import OddsSnapshot
 from src.models.prediction import Prediction
+from src.models.weather import WeatherData
 
 
 UTC = timezone.utc
@@ -152,8 +153,20 @@ def test_all_models_serialize_and_deserialize_to_json() -> None:
             ),
         ],
     )
+    weather = WeatherData(
+        temperature_f=72.0,
+        humidity_pct=55.0,
+        wind_speed_mph=8.0,
+        wind_direction_deg=180.0,
+        pressure_hpa=1013.0,
+        air_density=1.21,
+        wind_factor=5.5,
+        is_dome_default=False,
+        fetched_at=scheduled_start,
+    )
 
     assert Game.model_validate_json(game.model_dump_json()) == game
     assert Prediction.model_validate_json(prediction.model_dump_json()) == prediction
     assert OddsSnapshot.model_validate_json(odds_snapshot.model_dump_json()) == odds_snapshot
     assert Lineup.model_validate_json(lineup.model_dump_json()) == lineup
+    assert WeatherData.model_validate_json(weather.model_dump_json()) == weather

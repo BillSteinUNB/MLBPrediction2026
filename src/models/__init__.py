@@ -4,6 +4,7 @@ from src.models.game import Game
 from src.models.lineup import Lineup, LineupPlayer
 from src.models.odds import OddsSnapshot
 from src.models.prediction import Prediction
+from src.models.weather import WeatherData
 
 __all__ = [
     "BetDecision",
@@ -14,4 +15,5 @@ __all__ = [
     "LineupPlayer",
     "OddsSnapshot",
     "Prediction",
+    "WeatherData",
 ]

@@ -1,108 +1,167 @@
+from __future__ import annotations
+
 import logging
+import os
+import sqlite3
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
-from math import cos, radians
+from math import cos, exp, radians
 from pathlib import Path
-from typing import Optional
-from urllib.parse import urlencode
+from typing import Any, Mapping
 
 import httpx
-from sqlalchemy import create_engine, Column, String, Float, DateTime, Boolean
-from sqlalchemy.orm import declarative_base, Session
+from dotenv import load_dotenv
+from pydantic import ValidationError
 
-from src.config import Settings
+from src.config import DEFAULT_ENV_FILE, _load_settings_yaml
+from src.db import DEFAULT_DB_PATH, init_db
 from src.models.weather import WeatherData
 
+
 logger = logging.getLogger(__name__)
-OPENWEATHER_API_BASE_URL = "https://api.openweathermap.org/data/2.5"
+
+OPENWEATHER_API_BASE_URL = "https://api.openweathermap.org"
+OPENWEATHER_FORECAST_PATH = "/data/2.5/forecast"
+HTTP_TIMEOUT = 30.0
 WEATHER_CACHE_HOURS = 6
-DEFAULT_DB_PATH = Path("data/cache.db")
-R_DRY = 287.05
-R_VAPOR = 461.5
-
-Base = declarative_base()
+DEFAULT_AIR_DENSITY = 1.225
+R_DRY_AIR = 287.05
+R_WATER_VAPOR = 461.495
 
 
-class WeatherCache(Base):
-    __tablename__ = "weather_cache"
-    team_abbr = Column(String, primary_key=True)
-    game_datetime = Column(DateTime, primary_key=True)
-    temperature_f = Column(Float)
-    humidity_pct = Column(Float)
-    wind_speed_mph = Column(Float)
-    wind_direction_deg = Column(Float)
-    pressure_hpa = Column(Float)
-    air_density = Column(Float)
-    wind_factor = Column(Float)
-    is_dome_default = Column(Boolean)
-    fetched_at = Column(DateTime)
+class WeatherClientError(RuntimeError):
+    """Base exception for weather client failures."""
 
 
-def _resolve_api_key(api_key: Optional[str] = None) -> str:
+def _normalize_datetime(value: datetime | str) -> datetime:
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+    if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
+        return value.replace(tzinfo=timezone.utc)
+
+    return value.astimezone(timezone.utc)
+
+
+def _iso_datetime(value: datetime | str) -> str:
+    return _normalize_datetime(value).isoformat()
+
+
+def _resolve_api_key(api_key: str | None = None) -> str:
+    """Resolve OpenWeatherMap API key from a parameter or `.env`."""
+
     if api_key:
         return api_key
-    api_key = Settings().openweathermap_api_key
-    if not api_key:
-        raise ValueError("OpenWeatherMap API key not found")
-    return api_key
+
+    load_dotenv(DEFAULT_ENV_FILE)
+    resolved_api_key = os.getenv("OPENWEATHER_API_KEY")
+    if not resolved_api_key:
+        raise ValueError(
+            "OpenWeatherMap API key not found. Set OPENWEATHER_API_KEY or pass api_key."
+        )
+
+    return resolved_api_key
 
 
-def _ensure_weather_cache_table(db_path: Path) -> None:
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    engine = create_engine(f"sqlite:///{db_path}")
-    Base.metadata.create_all(engine)
+def _load_stadium(team_abbr: str) -> Mapping[str, Any]:
+    stadiums = _load_settings_yaml()["stadiums"]
+    normalized_team = team_abbr.upper()
+    if normalized_team not in stadiums:
+        raise ValueError(f"Team {normalized_team} not found in stadium configuration")
+    return stadiums[normalized_team]
+
+
+def _ensure_weather_cache_table(db_path: str | Path) -> Path:
+    """Create the SQLite weather cache table if it does not exist."""
+
+    database_path = init_db(db_path)
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS weather_cache (
+                team_abbr TEXT NOT NULL,
+                game_datetime TEXT NOT NULL,
+                temperature_f REAL NOT NULL,
+                humidity_pct REAL NOT NULL,
+                wind_speed_mph REAL NOT NULL,
+                wind_direction_deg REAL NOT NULL,
+                pressure_hpa REAL NOT NULL,
+                air_density REAL NOT NULL,
+                wind_factor REAL NOT NULL,
+                is_dome_default INTEGER NOT NULL CHECK (is_dome_default IN (0, 1)),
+                fetched_at TEXT NOT NULL,
+                PRIMARY KEY (team_abbr, game_datetime)
+            )
+            """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_weather_cache_fetched_at ON weather_cache (fetched_at)"
+        )
+        connection.commit()
+    return database_path
 
 
 def _kelvin_to_fahrenheit(kelvin: float) -> float:
+    """Convert temperature from Kelvin to Fahrenheit."""
+
     celsius = kelvin - 273.15
-    return celsius * 9 / 5 + 32
+    return (celsius * 9 / 5) + 32
 
 
 def _mps_to_mph(mps: float) -> float:
-    return mps * 2.237
+    """Convert wind speed from meters per second to miles per hour."""
+
+    return mps * 2.2369362920544
 
 
 def _pa_to_hpa(pa: float) -> float:
+    """Convert atmospheric pressure from Pascals to hectopascals."""
+
     return pa / 100
 
 
 def _calculate_air_density(temperature_k: float, pressure_pa: float, humidity_pct: float) -> float:
-    try:
-        if temperature_k <= 0 or pressure_pa <= 0 or humidity_pct < 0:
-            return 1.225
-        alpha = 17.27 if temperature_k >= 273.15 else 21.87
-        beta = 237.7 if temperature_k >= 273.15 else 265.5
-        celsius = temperature_k - 273.15
-        ln_term = alpha * celsius / (beta + celsius)
-        saturation_vp = 610.5 * (2.71828**ln_term)
-        vapor_pressure = (humidity_pct / 100) * saturation_vp
-        dry_pressure = pressure_pa - vapor_pressure
-        rho = (dry_pressure / (R_DRY * temperature_k)) + (
-            vapor_pressure / (R_VAPOR * temperature_k)
-        )
-        return max(rho, 0.4)
-    except:
-        return 1.225
+    """Calculate humid-air density in kg/m³ using the ideal gas law."""
+
+    if temperature_k <= 0 or pressure_pa <= 0 or not 0 <= humidity_pct <= 100:
+        return DEFAULT_AIR_DENSITY
+
+    celsius = temperature_k - 273.15
+    saturation_vapor_pressure = 610.94 * exp((17.625 * celsius) / (celsius + 243.04))
+    vapor_pressure = (humidity_pct / 100.0) * saturation_vapor_pressure
+    dry_air_pressure = max(pressure_pa - vapor_pressure, 0.0)
+    density = (dry_air_pressure / (R_DRY_AIR * temperature_k)) + (
+        vapor_pressure / (R_WATER_VAPOR * temperature_k)
+    )
+
+    return density if density > 0 else DEFAULT_AIR_DENSITY
 
 
 def _calculate_wind_factor(
-    wind_speed_mph: float, wind_direction_deg: float, stadium_cf_orientation_deg: float
+    wind_speed_mph: float,
+    wind_direction_deg: float,
+    stadium_cf_orientation_deg: float,
 ) -> float:
-    try:
-        angle_diff = wind_direction_deg - stadium_cf_orientation_deg
-        wind_component = -wind_speed_mph * cos(radians(angle_diff))
-        return wind_component
-    except:
+    """Project wind onto the home-plate-to-center-field axis."""
+
+    if wind_speed_mph <= 0:
         return 0.0
+
+    angle_diff = (wind_direction_deg - stadium_cf_orientation_deg) % 360
+    wind_component = -wind_speed_mph * cos(radians(angle_diff))
+    return 0.0 if abs(wind_component) < 1e-9 else wind_component
 
 
 def _get_default_weather(is_dome: bool = False) -> WeatherData:
+    """Return neutral/default weather values."""
+
     return WeatherData(
         temperature_f=70.0,
         humidity_pct=50.0,
         wind_speed_mph=0.0,
         wind_direction_deg=0.0,
         pressure_hpa=1013.25,
-        air_density=1.225,
+        air_density=DEFAULT_AIR_DENSITY,
         wind_factor=0.0,
         is_dome_default=is_dome,
         fetched_at=None,
@@ -110,176 +169,262 @@ def _get_default_weather(is_dome: bool = False) -> WeatherData:
 
 
 def _get_cached_weather(
-    db_path: Path, team_abbr: str, game_datetime: datetime
-) -> Optional[WeatherData]:
-    try:
-        if not db_path.exists():
-            return None
-        engine = create_engine(f"sqlite:///{db_path}")
-        session = Session(engine)
-        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=WEATHER_CACHE_HOURS)
-        records = (
-            session.query(WeatherCache)
-            .filter(
-                WeatherCache.team_abbr == team_abbr,
-                WeatherCache.game_datetime == game_datetime,
-                WeatherCache.fetched_at >= cutoff_time,
-            )
-            .all()
-        )
-        session.close()
-        if not records:
-            return None
-        record = records[0]
-        fetched_at = record.fetched_at
-        if fetched_at and fetched_at.tzinfo is None:
-            fetched_at = fetched_at.replace(tzinfo=timezone.utc)
-        return WeatherData(
-            temperature_f=record.temperature_f,
-            humidity_pct=record.humidity_pct,
-            wind_speed_mph=record.wind_speed_mph,
-            wind_direction_deg=record.wind_direction_deg,
-            pressure_hpa=record.pressure_hpa,
-            air_density=record.air_density,
-            wind_factor=record.wind_factor,
-            is_dome_default=record.is_dome_default,
-            fetched_at=fetched_at,
-        )
-    except Exception as e:
-        logger.warning(f"Failed to retrieve cached weather: {e}")
+    db_path: str | Path,
+    team_abbr: str,
+    game_datetime: datetime | str,
+    *,
+    cache_hours: int = WEATHER_CACHE_HOURS,
+) -> WeatherData | None:
+    """Return a fresh cached weather row when one exists."""
+
+    database_path = Path(db_path)
+    if not database_path.exists():
         return None
+
+    normalized_team = team_abbr.upper()
+    normalized_game_time = _iso_datetime(game_datetime)
+
+    try:
+        with sqlite3.connect(database_path) as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    temperature_f,
+                    humidity_pct,
+                    wind_speed_mph,
+                    wind_direction_deg,
+                    pressure_hpa,
+                    air_density,
+                    wind_factor,
+                    is_dome_default,
+                    fetched_at
+                FROM weather_cache
+                WHERE team_abbr = ? AND game_datetime = ?
+                """,
+                (normalized_team, normalized_game_time),
+            ).fetchone()
+    except sqlite3.Error:
+        return None
+
+    if row is None:
+        return None
+
+    fetched_at = _normalize_datetime(row[8])
+    if fetched_at < datetime.now(timezone.utc) - timedelta(hours=cache_hours):
+        return None
+
+    return WeatherData(
+        temperature_f=row[0],
+        humidity_pct=row[1],
+        wind_speed_mph=row[2],
+        wind_direction_deg=row[3],
+        pressure_hpa=row[4],
+        air_density=row[5],
+        wind_factor=row[6],
+        is_dome_default=bool(row[7]),
+        fetched_at=fetched_at,
+    )
 
 
 def _cache_weather(
-    db_path: Path, team_abbr: str, game_datetime: datetime, weather: WeatherData
+    db_path: str | Path,
+    team_abbr: str,
+    game_datetime: datetime | str,
+    weather: WeatherData,
 ) -> None:
-    try:
-        _ensure_weather_cache_table(db_path)
-        engine = create_engine(f"sqlite:///{db_path}")
-        session = Session(engine)
-        session.query(WeatherCache).filter(
-            WeatherCache.team_abbr == team_abbr, WeatherCache.game_datetime == game_datetime
-        ).delete()
-        cache_record = WeatherCache(
-            team_abbr=team_abbr,
-            game_datetime=game_datetime,
-            temperature_f=weather.temperature_f,
-            humidity_pct=weather.humidity_pct,
-            wind_speed_mph=weather.wind_speed_mph,
-            wind_direction_deg=weather.wind_direction_deg,
-            pressure_hpa=weather.pressure_hpa,
-            air_density=weather.air_density,
-            wind_factor=weather.wind_factor,
-            is_dome_default=weather.is_dome_default,
-            fetched_at=datetime.now(timezone.utc),
+    """Store weather data in the SQLite cache."""
+
+    database_path = _ensure_weather_cache_table(db_path)
+    fetched_at = weather.fetched_at or datetime.now(timezone.utc)
+
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO weather_cache (
+                team_abbr,
+                game_datetime,
+                temperature_f,
+                humidity_pct,
+                wind_speed_mph,
+                wind_direction_deg,
+                pressure_hpa,
+                air_density,
+                wind_factor,
+                is_dome_default,
+                fetched_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                team_abbr.upper(),
+                _iso_datetime(game_datetime),
+                weather.temperature_f,
+                weather.humidity_pct,
+                weather.wind_speed_mph,
+                weather.wind_direction_deg,
+                weather.pressure_hpa,
+                weather.air_density,
+                weather.wind_factor,
+                int(weather.is_dome_default),
+                fetched_at.isoformat(),
+            ),
         )
-        session.add(cache_record)
-        session.commit()
-        session.close()
-    except Exception as e:
-        logger.warning(f"Failed to cache weather: {e}")
+        connection.commit()
 
 
 def _find_closest_forecast(
-    forecasts: list[dict], target_time: datetime, max_hours: int = 3
-) -> Optional[dict]:
-    try:
-        target_timestamp = target_time.timestamp()
-        max_diff = max_hours * 3600
-        closest = None
-        min_diff = max_diff + 1
-        for forecast in forecasts:
-            forecast_timestamp = forecast["dt"]
-            diff = abs(forecast_timestamp - target_timestamp)
-            if diff < min_diff and diff <= max_diff:
-                min_diff = diff
-                closest = forecast
-        return closest
-    except:
-        return None
+    forecasts: list[Mapping[str, Any]],
+    target_time: datetime | str,
+    *,
+    max_hours: int = WEATHER_CACHE_HOURS,
+) -> Mapping[str, Any] | None:
+    """Return the closest forecast entry inside the allowed time window."""
+
+    normalized_target_time = _normalize_datetime(target_time)
+    max_seconds = max_hours * 3600
+    best_match: Mapping[str, Any] | None = None
+    best_diff: float | None = None
+
+    for forecast in forecasts:
+        timestamp = forecast.get("dt")
+        if not isinstance(timestamp, (int, float)):
+            continue
+
+        forecast_time = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        diff_seconds = abs((forecast_time - normalized_target_time).total_seconds())
+        if diff_seconds > max_seconds:
+            continue
+
+        if best_diff is None or diff_seconds < best_diff:
+            best_match = forecast
+            best_diff = diff_seconds
+
+    return best_match
 
 
 def _fetch_from_api(
-    latitude: float, longitude: float, api_key: str, client: Optional[httpx.Client] = None
-) -> Optional[dict]:
-    try:
-        params = {"lat": latitude, "lon": longitude, "appid": api_key, "units": "metric"}
-        url = f"{OPENWEATHER_API_BASE_URL}/forecast?{urlencode(params)}"
-        should_close = False
-        if client is None:
-            client = httpx.Client(timeout=10.0)
-            should_close = True
-        try:
-            response = client.get(url)
-            response.raise_for_status()
-            return response.json()
-        finally:
-            if should_close:
-                client.close()
-    except Exception as e:
-        logger.error(f"Failed to fetch weather from API: {e}")
-        return None
+    *,
+    latitude: float,
+    longitude: float,
+    api_key: str,
+    client: httpx.Client | None = None,
+) -> dict[str, Any]:
+    """Fetch the OpenWeatherMap five-day forecast payload."""
+
+    client_context = (
+        nullcontext(client)
+        if client is not None
+        else httpx.Client(base_url=OPENWEATHER_API_BASE_URL, timeout=HTTP_TIMEOUT)
+    )
+
+    with client_context as http_client:
+        response = http_client.get(
+            OPENWEATHER_FORECAST_PATH,
+            params={"lat": latitude, "lon": longitude, "appid": api_key},
+        )
+        response.raise_for_status()
+        payload = response.json()
+
+    if not isinstance(payload, dict):
+        raise WeatherClientError("Unexpected weather API response payload")
+
+    return payload
+
+
+def _build_weather_data(
+    forecast: Mapping[str, Any],
+    *,
+    stadium_cf_orientation_deg: float,
+) -> WeatherData:
+    """Build validated weather data from a forecast object."""
+
+    main = forecast.get("main")
+    if not isinstance(main, Mapping):
+        raise WeatherClientError("Forecast payload missing main weather data")
+
+    wind = forecast.get("wind")
+    if not isinstance(wind, Mapping):
+        wind = {}
+
+    temperature_k = float(main["temp"])
+    humidity_pct = float(main["humidity"])
+    pressure_hpa = float(main["pressure"])
+    wind_speed_mph = _mps_to_mph(float(wind.get("speed", 0.0)))
+    wind_direction_deg = float(wind.get("deg", 0.0))
+    fetched_at = datetime.fromtimestamp(float(forecast["dt"]), tz=timezone.utc)
+
+    return WeatherData(
+        temperature_f=_kelvin_to_fahrenheit(temperature_k),
+        humidity_pct=humidity_pct,
+        wind_speed_mph=wind_speed_mph,
+        wind_direction_deg=wind_direction_deg,
+        pressure_hpa=pressure_hpa,
+        air_density=_calculate_air_density(temperature_k, pressure_hpa * 100.0, humidity_pct),
+        wind_factor=_calculate_wind_factor(
+            wind_speed_mph,
+            wind_direction_deg,
+            stadium_cf_orientation_deg,
+        ),
+        is_dome_default=False,
+        fetched_at=fetched_at,
+    )
 
 
 def fetch_game_weather(
     team_abbr: str,
     game_datetime: datetime | str,
-    api_key: Optional[str] = None,
-    db_path: Path = DEFAULT_DB_PATH,
-    client: Optional[httpx.Client] = None,
+    *,
+    api_key: str | None = None,
+    db_path: str | Path = DEFAULT_DB_PATH,
+    client: httpx.Client | None = None,
 ) -> WeatherData:
-    if isinstance(game_datetime, str):
-        game_datetime = datetime.fromisoformat(game_datetime.replace(" ", "T"))
-    if game_datetime.tzinfo is None:
-        game_datetime = game_datetime.replace(tzinfo=timezone.utc)
-    settings = Settings()
-    if team_abbr not in settings.stadiums:
-        raise ValueError(f"Team {team_abbr} not found")
-    stadium = settings.stadiums[team_abbr]
-    if stadium.get("is_dome", False):
+    """Fetch, cache, and return game-time weather for a stadium."""
+
+    stadium = _load_stadium(team_abbr)
+    normalized_game_time = _normalize_datetime(game_datetime)
+
+    if bool(stadium["is_dome"]):
         return _get_default_weather(is_dome=True)
-    cached = _get_cached_weather(db_path, team_abbr, game_datetime)
-    if cached:
-        return cached
+
+    cached_weather = _get_cached_weather(db_path, team_abbr, normalized_game_time)
+    if cached_weather is not None:
+        return cached_weather
+
+    resolved_api_key = _resolve_api_key(api_key)
+
     try:
-        api_key = _resolve_api_key(api_key)
-        response = _fetch_from_api(
-            latitude=stadium["latitude"],
-            longitude=stadium["longitude"],
-            api_key=api_key,
+        payload = _fetch_from_api(
+            latitude=float(stadium["latitude"]),
+            longitude=float(stadium["longitude"]),
+            api_key=resolved_api_key,
             client=client,
         )
-        if not response or "list" not in response:
+        forecasts = payload.get("list")
+        if not isinstance(forecasts, list):
+            raise WeatherClientError("Forecast payload missing list data")
+
+        closest_forecast = _find_closest_forecast(forecasts, normalized_game_time)
+        if closest_forecast is None:
+            logger.warning(
+                "No forecast within %s hours for %s at %s",
+                WEATHER_CACHE_HOURS,
+                team_abbr.upper(),
+                normalized_game_time.isoformat(),
+            )
             return _get_default_weather(is_dome=False)
-        forecast = _find_closest_forecast(response["list"], game_datetime)
-        if not forecast:
-            return _get_default_weather(is_dome=False)
-        temp_c = forecast["main"]["temp"]
-        temp_k = temp_c + 273.15
-        humidity = forecast["main"]["humidity"]
-        pressure_pa = forecast["main"]["pressure"] * 100
-        wind_speed_mps = forecast["wind"]["speed"]
-        wind_direction = forecast["wind"].get("deg", 0)
-        temp_f = _kelvin_to_fahrenheit(temp_k)
-        wind_speed_mph = _mps_to_mph(wind_speed_mps)
-        pressure_hpa = _pa_to_hpa(pressure_pa)
-        air_density = _calculate_air_density(temp_k, pressure_pa, humidity)
-        wind_factor = _calculate_wind_factor(
-            wind_speed_mph, wind_direction, stadium.get("center_field_orientation_deg", 0)
+
+        weather = _build_weather_data(
+            closest_forecast,
+            stadium_cf_orientation_deg=float(stadium["center_field_orientation_deg"]),
         )
-        weather = WeatherData(
-            temperature_f=temp_f,
-            humidity_pct=humidity,
-            wind_speed_mph=wind_speed_mph,
-            wind_direction_deg=wind_direction,
-            pressure_hpa=pressure_hpa,
-            air_density=air_density,
-            wind_factor=wind_factor,
-            is_dome_default=False,
-            fetched_at=datetime.now(timezone.utc),
+    except (httpx.HTTPError, ValidationError, ValueError, TypeError, KeyError, WeatherClientError) as exc:
+        logger.warning(
+            "Failed to fetch weather for %s at %s: %s",
+            team_abbr.upper(),
+            normalized_game_time.isoformat(),
+            exc,
         )
-        _cache_weather(db_path, team_abbr, game_datetime, weather)
-        return weather
-    except Exception as e:
-        logger.error(f"Error fetching weather for {team_abbr}: {e}")
         return _get_default_weather(is_dome=False)
+
+    _cache_weather(db_path, team_abbr, normalized_game_time, weather)
+    return weather
