@@ -21,3 +21,6 @@
 
 - During feature `fix-t7-lineup-date-scoping`, another repo-local stash was created to isolate unrelated training-data work before validation:
   - `worker-ba06611d isolate unrelated data_builder WIP`
+
+- During feature `fix-t6-cache-invalidation`, another repo-local stash was created to isolate unrelated model/training work before validation:
+  - `worker-4991f8d1 isolate unrelated model WIP`
