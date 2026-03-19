@@ -4,6 +4,7 @@ import os
 import sqlite3
 from contextlib import nullcontext
 from datetime import datetime, timezone
+from hashlib import blake2b
 from math import ceil
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -24,6 +25,7 @@ ODDS_API_F5_MARKETS = {
     "h2h_1st_5_innings": "f5_ml",
     "spreads_1st_5_innings": "f5_rl",
 }
+_SETTINGS_PAYLOAD = _load_settings_yaml()
 
 
 class OddsApiError(RuntimeError):
@@ -35,7 +37,7 @@ class OddsApiRateLimitError(OddsApiError):
 
 
 def _build_team_name_index() -> dict[str, str]:
-    teams = _load_settings_yaml()["teams"]
+    teams = _SETTINGS_PAYLOAD["teams"]
     team_name_to_code = {
         team_payload["full_name"]: team_code
         for team_code, team_payload in teams.items()
@@ -45,6 +47,10 @@ def _build_team_name_index() -> dict[str, str]:
 
 
 TEAM_NAME_TO_CODE = _build_team_name_index()
+STADIUMS_BY_TEAM_CODE = _SETTINGS_PAYLOAD["stadiums"]
+ABS_EXCEPTION_VENUES = {
+    str(venue).strip().casefold() for venue in _SETTINGS_PAYLOAD.get("abs_exceptions", [])
+}
 
 
 def _parse_iso_datetime(value: str) -> datetime:
@@ -185,12 +191,87 @@ def _resolve_game_pk(
         WHERE home_team = ?
           AND away_team = ?
           AND date LIKE ?
-        ORDER BY date ASC
+        ORDER BY CASE WHEN game_pk > 0 THEN 0 ELSE 1 END ASC,
+                 ABS(julianday(date) - julianday(?)) ASC,
+                 date ASC
         LIMIT 1
         """,
-        (home_team_code, away_team_code, f"{game_date}%"),
+        (home_team_code, away_team_code, f"{game_date}%", commence_time.isoformat()),
     ).fetchone()
     return int(row[0]) if row else None
+
+
+def _fallback_game_pk(event_id: str) -> int:
+    digest = blake2b(event_id.encode("utf-8"), digest_size=8).digest()
+    return -((int.from_bytes(digest, byteorder="big") & ((1 << 63) - 1)) or 1)
+
+
+def _ensure_game_row(
+    connection: sqlite3.Connection,
+    *,
+    event_id: str,
+    home_team_name: str,
+    away_team_name: str,
+    commence_time: datetime,
+) -> int | None:
+    existing_game_pk = _resolve_game_pk(
+        connection,
+        home_team_name=home_team_name,
+        away_team_name=away_team_name,
+        commence_time=commence_time,
+    )
+    if existing_game_pk is not None:
+        return existing_game_pk
+
+    home_team_code = TEAM_NAME_TO_CODE.get(home_team_name)
+    away_team_code = TEAM_NAME_TO_CODE.get(away_team_name)
+    if home_team_code is None or away_team_code is None:
+        return None
+
+    stadium = STADIUMS_BY_TEAM_CODE.get(home_team_code, {})
+    venue = stadium.get("park_name") if isinstance(stadium, Mapping) else None
+    if not isinstance(venue, str) or not venue:
+        venue = home_team_name
+
+    is_dome = bool(stadium.get("is_dome")) if isinstance(stadium, Mapping) else False
+    is_abs_active = venue.strip().casefold() not in ABS_EXCEPTION_VENUES
+    game_pk = _fallback_game_pk(event_id)
+
+    existing_row = connection.execute(
+        "SELECT date, home_team, away_team FROM games WHERE game_pk = ?",
+        (game_pk,),
+    ).fetchone()
+    if existing_row is not None:
+        if existing_row == (commence_time.isoformat(), home_team_code, away_team_code):
+            return game_pk
+        raise OddsApiError(f"Synthetic game_pk collision while backfilling event {event_id}")
+
+    connection.execute(
+        """
+        INSERT INTO games (
+            game_pk,
+            date,
+            home_team,
+            away_team,
+            venue,
+            is_dome,
+            is_abs_active,
+            status
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            game_pk,
+            commence_time.isoformat(),
+            home_team_code,
+            away_team_code,
+            venue,
+            int(is_dome),
+            int(is_abs_active),
+            "scheduled",
+        ),
+    )
+    return game_pk
 
 
 def _extract_market_prices(
@@ -319,91 +400,98 @@ def fetch_mlb_odds(
 
         for event in events_payload:
             commence_time = _parse_iso_datetime(event["commence_time"])
-            game_pk = _resolve_game_pk(
-                connection,
-                home_team_name=event["home_team"],
-                away_team_name=event["away_team"],
-                commence_time=commence_time,
-            )
-            if game_pk is None:
-                continue
-
-            _ensure_quota_available(
-                connection,
-                usage_month=usage_month,
-                additional_cost=per_event_cost,
-                quota_limit=quota_limit,
-            )
-
-            event_params: dict[str, str] = {
-                "apiKey": resolved_api_key,
-                "regions": regions,
-                "markets": ",".join(ODDS_API_F5_MARKETS),
-                "oddsFormat": "american",
-                "dateFormat": "iso",
-            }
-            if bookmakers:
-                event_params["bookmakers"] = ",".join(bookmakers)
-
-            event_response = http_client.get(
-                f"/v4/sports/{ODDS_API_SPORT_KEY}/events/{event['id']}/odds",
-                params=event_params,
-            )
-            event_response.raise_for_status()
-            event_payload = event_response.json()
-
-            event_snapshots: list[OddsSnapshot] = []
-            for bookmaker in event_payload.get("bookmakers", []):
-                book_name = bookmaker.get("title") or bookmaker.get("key")
-                if not isinstance(book_name, str) or not book_name:
+            try:
+                game_pk = _ensure_game_row(
+                    connection,
+                    event_id=event["id"],
+                    home_team_name=event["home_team"],
+                    away_team_name=event["away_team"],
+                    commence_time=commence_time,
+                )
+                if game_pk is None:
                     continue
 
-                for market in bookmaker.get("markets", []):
-                    market_key = market.get("key")
-                    market_type = ODDS_API_F5_MARKETS.get(market_key)
-                    if market_type is None:
+                _ensure_quota_available(
+                    connection,
+                    usage_month=usage_month,
+                    additional_cost=per_event_cost,
+                    quota_limit=quota_limit,
+                )
+
+                event_params: dict[str, str] = {
+                    "apiKey": resolved_api_key,
+                    "regions": regions,
+                    "markets": ",".join(ODDS_API_F5_MARKETS),
+                    "oddsFormat": "american",
+                    "dateFormat": "iso",
+                }
+                if bookmakers:
+                    event_params["bookmakers"] = ",".join(bookmakers)
+
+                event_response = http_client.get(
+                    f"/v4/sports/{ODDS_API_SPORT_KEY}/events/{event['id']}/odds",
+                    params=event_params,
+                )
+                event_response.raise_for_status()
+                event_payload = event_response.json()
+                if not isinstance(event_payload, dict):
+                    raise OddsApiError("Unexpected event odds response payload")
+
+                event_snapshots: list[OddsSnapshot] = []
+                for bookmaker in event_payload.get("bookmakers", []):
+                    book_name = bookmaker.get("title") or bookmaker.get("key")
+                    if not isinstance(book_name, str) or not book_name:
                         continue
 
-                    prices = _extract_market_prices(
-                        market.get("outcomes", []),
-                        home_team_name=event["home_team"],
-                        away_team_name=event["away_team"],
-                    )
-                    if prices is None:
-                        continue
+                    for market in bookmaker.get("markets", []):
+                        market_key = market.get("key")
+                        market_type = ODDS_API_F5_MARKETS.get(market_key)
+                        if market_type is None:
+                            continue
 
-                    fetched_at_raw = (
-                        market.get("last_update")
-                        or bookmaker.get("last_update")
-                        or event.get("commence_time")
-                    )
-                    if not isinstance(fetched_at_raw, str):
-                        continue
-
-                    event_snapshots.append(
-                        OddsSnapshot(
-                            game_pk=game_pk,
-                            book_name=book_name,
-                            market_type=market_type,
-                            home_odds=prices[0],
-                            away_odds=prices[1],
-                            fetched_at=_parse_iso_datetime(fetched_at_raw),
+                        prices = _extract_market_prices(
+                            market.get("outcomes", []),
+                            home_team_name=event["home_team"],
+                            away_team_name=event["away_team"],
                         )
-                    )
+                        if prices is None:
+                            continue
 
-            _record_usage(
-                connection,
-                usage_month=usage_month,
-                headers=dict(event_response.headers),
-                estimated_cost=per_event_cost,
-                quota_limit=quota_limit,
-            )
+                        fetched_at_raw = (
+                            market.get("last_update")
+                            or bookmaker.get("last_update")
+                            or event.get("commence_time")
+                        )
+                        if not isinstance(fetched_at_raw, str):
+                            continue
 
-            if event_snapshots:
-                _persist_snapshots(connection, event_snapshots)
-                snapshots.extend(event_snapshots)
+                        event_snapshots.append(
+                            OddsSnapshot(
+                                game_pk=game_pk,
+                                book_name=book_name,
+                                market_type=market_type,
+                                home_odds=prices[0],
+                                away_odds=prices[1],
+                                fetched_at=_parse_iso_datetime(fetched_at_raw),
+                            )
+                        )
 
-        connection.commit()
+                _record_usage(
+                    connection,
+                    usage_month=usage_month,
+                    headers=dict(event_response.headers),
+                    estimated_cost=per_event_cost,
+                    quota_limit=quota_limit,
+                )
+
+                if event_snapshots:
+                    _persist_snapshots(connection, event_snapshots)
+                    snapshots.extend(event_snapshots)
+
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
 
     return sorted(snapshots, key=lambda snapshot: (snapshot.game_pk, snapshot.book_name, snapshot.market_type))
 
