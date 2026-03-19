@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import date as date_type, datetime, timezone
 from html.parser import HTMLParser
 from typing import Any, Callable
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -27,6 +28,7 @@ ROTOBALLER_LINEUPS_URL = "https://www.rotoballer.com/fantasy-baseball-daily-proj
 HTTP_TIMEOUT = 30.0
 OPENER_IP_THRESHOLD = 3.0
 RECENT_START_WINDOW = 5
+PROJECTED_SOURCE_TIMEZONE = ZoneInfo("America/New_York")
 
 
 PlayerIdResolver = Callable[[str], int | None]
@@ -212,6 +214,78 @@ class _RotoGrindersParser(HTMLParser):
         self._depth -= 1
 
 
+class _RotoBallerParser(HTMLParser):
+    """HTML parser for RotoBaller lineup cards."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.team_cards: list[tuple[str, _RawProjectedLineupCard]] = []
+        self._depth = 0
+        self._current_team: str | None = None
+        self._current_lineup: _RawProjectedLineupCard | None = None
+        self._team_depth: int | None = None
+        self._pitcher_depth: int | None = None
+        self._pitcher_buffer: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._depth += 1
+        attr_map = {key: value or "" for key, value in attrs}
+        classes = set(attr_map.get("class", "").split())
+
+        if self._current_team is None:
+            team_code = _normalize_team_label(attr_map.get("data-team", ""))
+            if team_code:
+                self._current_team = team_code
+                self._current_lineup = _RawProjectedLineupCard()
+                self._team_depth = self._depth
+                pitcher_name = _clean_text(attr_map.get("data-pitcher", ""))
+                if pitcher_name:
+                    self._current_lineup.pitcher_name = pitcher_name
+            return
+
+        if self._current_lineup is None:
+            return
+
+        pitcher_name = _clean_text(attr_map.get("data-pitcher", ""))
+        if pitcher_name:
+            self._current_lineup.pitcher_name = pitcher_name
+
+        player_name = _clean_text(attr_map.get("data-player", ""))
+        if player_name:
+            self._current_lineup.players.append(
+                _RawProjectedPlayer(
+                    name=player_name,
+                    position=_clean_text(attr_map.get("data-position", "")) or None,
+                )
+            )
+
+        if self._current_lineup.pitcher_name is None and "starting-pitcher" in classes:
+            self._pitcher_depth = self._depth
+            self._pitcher_buffer = []
+
+    def handle_data(self, data: str) -> None:
+        text = data.strip()
+        if text and self._pitcher_depth is not None:
+            self._pitcher_buffer.append(text)
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._pitcher_depth == self._depth and self._current_lineup is not None:
+            pitcher_name = _clean_text(" ".join(self._pitcher_buffer))
+            if pitcher_name:
+                self._current_lineup.pitcher_name = pitcher_name
+            self._pitcher_depth = None
+            self._pitcher_buffer = []
+
+        if self._team_depth == self._depth:
+            if self._current_team is not None and self._current_lineup is not None:
+                self.team_cards.append((self._current_team, self._current_lineup))
+            self._current_team = None
+            self._current_lineup = None
+            self._team_depth = None
+
+        self._depth -= 1
+
+
 def _build_team_label_index() -> dict[str, str]:
     teams = _load_settings_yaml()["teams"]
     team_map: dict[str, str] = {}
@@ -266,6 +340,15 @@ def _coerce_date_string(value: str | date_type | datetime) -> str:
     if isinstance(value, date_type):
         return value.isoformat()
     return value
+
+
+def _projected_source_game_date(now: datetime | None = None) -> str:
+    reference = now or datetime.now(PROJECTED_SOURCE_TIMEZONE)
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=PROJECTED_SOURCE_TIMEZONE)
+    else:
+        reference = reference.astimezone(PROJECTED_SOURCE_TIMEZONE)
+    return reference.date().isoformat()
 
 
 def _fallback_player_id(full_name: str) -> int:
@@ -341,10 +424,18 @@ def _fetch_game_feed(game_pk: int, http_client: httpx.Client) -> dict[str, Any]:
 
 
 def _fetch_primary_projected_lineups(
+    game_date: str,
     http_client: httpx.Client,
     *,
     player_id_resolver: PlayerIdResolver | None = None,
 ) -> dict[str, _ProjectedLineupData]:
+    if game_date != _projected_source_game_date():
+        logger.info(
+            "Skipping projected lineup scrape for %s because projected sources are current-day only",
+            game_date,
+        )
+        return {}
+
     sources = (
         (ROTOGRINDERS_LINEUPS_URL, _parse_rotogrinders_html),
         (ROTOBALLER_LINEUPS_URL, _parse_rotoballer_html),
@@ -365,10 +456,16 @@ def _fetch_primary_projected_lineups(
             logger.info("Primary lineup source failed: %s", url, exc_info=True)
             continue
 
-        for team, lineup in parser(
-            response.text,
-            player_id_resolver=player_id_resolver,
-        ).items():
+        try:
+            parsed_lineups = parser(
+                response.text,
+                player_id_resolver=player_id_resolver,
+            )
+        except Exception:  # pragma: no cover - defensive parsing guard
+            logger.warning("Projected lineup parser failed for %s", url, exc_info=True)
+            continue
+
+        for team, lineup in parsed_lineups.items():
             projected_lineups.setdefault(team, lineup)
 
     return projected_lineups
@@ -405,52 +502,29 @@ def _parse_rotoballer_html(
     *,
     player_id_resolver: PlayerIdResolver | None = None,
 ) -> dict[str, _ProjectedLineupData]:
-    team_pattern = re.compile(
-        r'<(?:section|div)[^>]*data-team="(?P<team>[A-Za-z\s]+)"[^>]*>(?P<body>.*?)</(?:section|div)>',
-        re.DOTALL,
-    )
-    pitcher_pattern = re.compile(
-        r'data-pitcher="(?P<pitcher>[^"]+)"|<[^>]*class="[^"]*starting-pitcher[^"]*"[^>]*>(?P<pitcher_html>.*?)</',
-        re.DOTALL,
-    )
-    player_pattern = re.compile(
-        r'data-player="(?P<name>[^"]+)"(?:[^>]*data-position="(?P<position>[^"]+)")?',
-        re.DOTALL,
-    )
+    parser = _RotoBallerParser()
+    try:
+        parser.feed(html)
+        parser.close()
+    except Exception:  # pragma: no cover - HTMLParser is already tolerant; keep fetch resilient
+        logger.warning("Failed to parse RotoBaller HTML", exc_info=True)
+        return {}
 
     projected_lineups: dict[str, _ProjectedLineupData] = {}
-    for match in team_pattern.finditer(html):
-        team_code = _normalize_team_label(match.group("team") or "")
-        if team_code is None:
+    for team_code, lineup_card in parser.team_cards:
+        if not lineup_card.players and lineup_card.pitcher_name is None:
             continue
 
-        body = match.group("body") or ""
-        pitcher_match = pitcher_pattern.search(body)
-        pitcher_name = None
-        if pitcher_match is not None:
-            pitcher_name = _clean_text(
-                pitcher_match.group("pitcher") or re.sub(r"<[^>]+>", " ", pitcher_match.group("pitcher_html") or "")
+        try:
+            projected_lineups[team_code] = _build_projected_lineup_data(
+                team=team_code,
+                source="rotoballer",
+                pitcher_name=lineup_card.pitcher_name,
+                players=lineup_card.players,
+                player_id_resolver=player_id_resolver,
             )
-
-        players = [
-            _RawProjectedPlayer(
-                name=_clean_text(player_match.group("name") or ""),
-                position=_clean_text(player_match.group("position") or "") or None,
-            )
-            for player_match in player_pattern.finditer(body)
-            if _clean_text(player_match.group("name") or "")
-        ]
-
-        if not players and pitcher_name is None:
-            continue
-
-        projected_lineups[team_code] = _build_projected_lineup_data(
-            team=team_code,
-            source="rotoballer",
-            pitcher_name=pitcher_name,
-            players=players,
-            player_id_resolver=player_id_resolver,
-        )
+        except Exception:  # pragma: no cover - defensive guard for malformed cards
+            logger.warning("Skipping malformed RotoBaller lineup card for %s", team_code, exc_info=True)
 
     return projected_lineups
 
@@ -660,6 +734,7 @@ def fetch_confirmed_lineups(
 
     with _client_context(client) as http_client:
         projected_lineups = _fetch_primary_projected_lineups(
+            game_date,
             http_client,
             player_id_resolver=player_id_resolver,
         )

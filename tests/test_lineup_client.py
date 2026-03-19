@@ -72,6 +72,40 @@ ROTROGRINDERS_HTML = """
 """
 
 
+ROTOBALLER_HTML = """
+<section class="lineup-card" data-team="Boston Red Sox">
+  <div class="card-body">
+    <div class="starting-pitcher">
+      <strong>Chris Sale</strong>
+    </div>
+    <ol>
+      <li data-player="Jarren Duran" data-position="LF">
+        <span>Lead-off</span>
+      </li>
+      <li data-player="Rafael Devers" data-position="3B"></li>
+    </ol>
+  </div>
+</section>
+<section class="lineup-card" data-team="New York Yankees">
+  <div class="card-body" data-pitcher="Clarke Schmidt">
+    <div>
+      <ol>
+        <li>
+          <span data-player="Aaron Judge" data-position="RF"></span>
+        </li>
+        <li>
+          <span data-player="Paul Goldschmidt" data-position="1B"></span>
+        </li>
+      </ol>
+    </div>
+  </div>
+</section>
+<section class="lineup-card" data-team="Unknown Club">
+  <div class="starting-pitcher">Mystery Arm</div>
+</section>
+"""
+
+
 def _schedule_payload() -> dict:
     return {
         "dates": [
@@ -173,18 +207,22 @@ def _build_transport(
     rotogrinders_status: int = 200,
     rotoballer_status: int = 200,
     rotogrinders_html: str = ROTROGRINDERS_HTML,
+    rotoballer_html: str = "<html></html>",
     pitcher_logs: dict[int, dict] | None = None,
+    request_log: list[str] | None = None,
 ) -> httpx.MockTransport:
     pitcher_logs = pitcher_logs or {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         url = str(request.url)
+        if request_log is not None:
+            request_log.append(url)
         if request.url.path == "/api/v1/schedule":
             return httpx.Response(200, json=schedule_payload or _schedule_payload())
         if request.url.path == "/lineups/mlb":
             return httpx.Response(rotogrinders_status, text=rotogrinders_html)
         if request.url.host == "www.rotoballer.com":
-            return httpx.Response(rotoballer_status, text="<html></html>")
+            return httpx.Response(rotoballer_status, text=rotoballer_html)
         if request.url.path == "/api/v1.1/game/12345/feed/live":
             return httpx.Response(200, json=live_feed_payload or _live_feed_payload(home_confirmed=True, away_confirmed=True, home_pitcher_id=2002))
         if request.url.path.startswith("/api/v1/people/") and request.url.path.endswith("/stats"):
@@ -224,10 +262,30 @@ def test_parse_rotogrinders_html_extracts_projected_lineups(player_id_resolver: 
     assert parsed["NYY"].players[0].player_id == 9001
 
 
+def test_parse_rotoballer_html_extracts_projected_lineups_and_ignores_unknown_team(
+    player_id_resolver: Callable[[str], int | None],
+) -> None:
+    from src.clients.lineup_client import _parse_rotoballer_html
+
+    parsed = _parse_rotoballer_html(ROTOBALLER_HTML, player_id_resolver=player_id_resolver)
+
+    assert set(parsed) == {"BOS", "NYY"}
+    assert parsed["BOS"].projected_starting_pitcher_id == 1001
+    assert [player.player_name for player in parsed["BOS"].players] == ["Jarren Duran", "Rafael Devers"]
+    assert parsed["NYY"].projected_starting_pitcher_id == 1003
+    assert [player.batting_order for player in parsed["NYY"].players] == [1, 2]
+
+
 def test_fetch_confirmed_lineups_prefers_primary_projection_and_detects_starter_change(
+    monkeypatch: pytest.MonkeyPatch,
     player_id_resolver: Callable[[str], int | None],
 ) -> None:
     from src.clients.lineup_client import fetch_confirmed_lineups
+
+    monkeypatch.setattr(
+        "src.clients.lineup_client._projected_source_game_date",
+        lambda: "2025-09-15",
+    )
 
     transport = _build_transport(
         pitcher_logs={
@@ -269,9 +327,15 @@ def test_fetch_confirmed_lineups_prefers_primary_projection_and_detects_starter_
 
 
 def test_fetch_confirmed_lineups_falls_back_to_mlb_api_when_primary_sources_fail(
+    monkeypatch: pytest.MonkeyPatch,
     player_id_resolver: Callable[[str], int | None],
 ) -> None:
     from src.clients.lineup_client import fetch_confirmed_lineups
+
+    monkeypatch.setattr(
+        "src.clients.lineup_client._projected_source_game_date",
+        lambda: "2025-09-15",
+    )
 
     transport = _build_transport(
         rotogrinders_status=503,
@@ -296,9 +360,15 @@ def test_fetch_confirmed_lineups_falls_back_to_mlb_api_when_primary_sources_fail
 
 
 def test_fetch_confirmed_lineups_returns_unconfirmed_lineup_when_official_lineup_missing(
+    monkeypatch: pytest.MonkeyPatch,
     player_id_resolver: Callable[[str], int | None],
 ) -> None:
     from src.clients.lineup_client import fetch_confirmed_lineups
+
+    monkeypatch.setattr(
+        "src.clients.lineup_client._projected_source_game_date",
+        lambda: "2025-09-16",
+    )
 
     transport = _build_transport(
         rotogrinders_status=503,
@@ -321,5 +391,114 @@ def test_fetch_confirmed_lineups_returns_unconfirmed_lineup_when_official_lineup
     for lineup in lineups:
         assert lineup.confirmed is False
         assert lineup.players == []
+        assert lineup.source == "schedule"
         assert lineup.starting_pitcher_id is not None
         assert lineup.projected_starting_pitcher_id is not None
+
+
+def test_fetch_confirmed_lineups_uses_rotoballer_when_rotogrinders_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    player_id_resolver: Callable[[str], int | None],
+) -> None:
+    from src.clients.lineup_client import fetch_confirmed_lineups
+
+    monkeypatch.setattr(
+        "src.clients.lineup_client._projected_source_game_date",
+        lambda: "2025-09-15",
+    )
+
+    transport = _build_transport(
+        rotogrinders_status=503,
+        rotoballer_html=ROTOBALLER_HTML,
+        live_feed_payload=_live_feed_payload(home_confirmed=False, away_confirmed=False, home_pitcher_id=2002),
+        pitcher_logs={
+            1001: _pitcher_game_log_payload("5.0", "6.0"),
+            1003: _pitcher_game_log_payload("4.0", "4.0"),
+        },
+    )
+
+    with httpx.Client(transport=transport, base_url="https://statsapi.mlb.com") as client:
+        lineups = fetch_confirmed_lineups(
+            "2025-09-15",
+            client=client,
+            player_id_resolver=player_id_resolver,
+        )
+
+    lineup_by_team = {lineup.team: lineup for lineup in lineups}
+    assert lineup_by_team["BOS"].source == "rotoballer"
+    assert lineup_by_team["NYY"].source == "rotoballer"
+    assert lineup_by_team["BOS"].confirmed is False
+    assert [player.player_id for player in lineup_by_team["BOS"].players] == [8001, 8002]
+    assert lineup_by_team["NYY"].projected_starting_pitcher_id == 1003
+    assert [player.player_name for player in lineup_by_team["NYY"].players] == ["Aaron Judge", "Paul Goldschmidt"]
+
+
+def test_fetch_confirmed_lineups_skips_projected_sources_for_non_matching_date(
+    monkeypatch: pytest.MonkeyPatch,
+    player_id_resolver: Callable[[str], int | None],
+) -> None:
+    from src.clients.lineup_client import fetch_confirmed_lineups
+
+    monkeypatch.setattr(
+        "src.clients.lineup_client._projected_source_game_date",
+        lambda: "2025-09-16",
+    )
+
+    request_log: list[str] = []
+    transport = _build_transport(
+        live_feed_payload=_live_feed_payload(home_confirmed=False, away_confirmed=False, home_pitcher_id=2002),
+        pitcher_logs={
+            1001: _pitcher_game_log_payload("5.0", "6.0"),
+            2002: _pitcher_game_log_payload("4.0", "4.0"),
+        },
+        request_log=request_log,
+    )
+
+    with httpx.Client(transport=transport, base_url="https://statsapi.mlb.com") as client:
+        lineups = fetch_confirmed_lineups(
+            "2025-09-15",
+            client=client,
+            player_id_resolver=player_id_resolver,
+        )
+
+    assert len(lineups) == 2
+    assert all(lineup.source == "schedule" for lineup in lineups)
+    assert all(lineup.players == [] for lineup in lineups)
+    assert not any(url.endswith("/lineups/mlb") for url in request_log)
+    assert not any("rotoballer.com" in url for url in request_log)
+
+
+def test_fetch_confirmed_lineups_handles_rotoballer_parse_failure_gracefully(
+    monkeypatch: pytest.MonkeyPatch,
+    player_id_resolver: Callable[[str], int | None],
+) -> None:
+    from src.clients.lineup_client import fetch_confirmed_lineups
+
+    monkeypatch.setattr(
+        "src.clients.lineup_client._projected_source_game_date",
+        lambda: "2025-09-15",
+    )
+    monkeypatch.setattr(
+        "src.clients.lineup_client._parse_rotoballer_html",
+        lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("broken rotoballer html")),
+    )
+
+    transport = _build_transport(
+        rotogrinders_status=503,
+        live_feed_payload=_live_feed_payload(home_confirmed=False, away_confirmed=False, home_pitcher_id=2002),
+        pitcher_logs={
+            1001: _pitcher_game_log_payload("5.0", "6.0"),
+            2002: _pitcher_game_log_payload("4.0", "4.0"),
+        },
+    )
+
+    with httpx.Client(transport=transport, base_url="https://statsapi.mlb.com") as client:
+        lineups = fetch_confirmed_lineups(
+            "2025-09-15",
+            client=client,
+            player_id_resolver=player_id_resolver,
+        )
+
+    assert len(lineups) == 2
+    assert all(lineup.source == "schedule" for lineup in lineups)
+    assert all(lineup.players == [] for lineup in lineups)
