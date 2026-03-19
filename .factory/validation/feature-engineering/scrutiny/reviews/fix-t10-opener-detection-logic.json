@@ -1,0 +1,22 @@
+{
+  "featureId": "fix-t10-opener-detection-logic",
+  "reviewedAt": "2026-03-19T19:54:52.985950+00:00",
+  "commitId": "b5f5173f36f4adb88c830498d29a1c4ac0ea7139",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Reviewed the fix feature entry, prior failed review, original and fix handoffs, transcript skeleton, commit diffs, and the current pitching/test files. The fix directly resolves the prior blocker: `_build_pitching_context()` now combines lineup-provided opener flags with history-based opener detection using OR semantics, and the updated tests cover both the lineup-flag path and the regression case where low-IP history must still force team-composite usage when `lineup.is_opener` is false. I did not find a new blocking problem in the fix itself; the remaining issue below is pre-existing and non-blocking.",
+    "issues": [
+      {
+        "file": "src/features/pitching.py",
+        "line": 452,
+        "severity": "non_blocking",
+        "description": "The empty-Statcast fallback is still unchanged from the original review: `_build_start_metrics_from_statcast()` fabricates baseline rows when pitch data is missing (lines 452-458), and `_compute_start_metrics()` later encodes empty pitch sets as `innings_pitched = 0.0` (lines 503-506). That means missing Statcast data can still look like a string of zero-inning starts and influence `_is_opener_from_history()` as if the pitcher were an opener, even though the underlying problem is absent pitch data rather than true opener usage."
+      }
+    ]
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": "t10-pitching-features",
+  "summary": "Pass. The rerun fix adequately addresses the original blocking opener-detection failure by preventing a present lineup with `is_opener=false` from suppressing history-based opener detection, and it adds regression coverage for both required detection paths. I found no new blocking issues in the fix review; only the previously non-blocking empty-Statcast edge case remains."
+}

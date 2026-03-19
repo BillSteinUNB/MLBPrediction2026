@@ -1,0 +1,15 @@
+{
+  "featureId": "fix-t9-lineup-asof-leakage",
+  "reviewedAt": "2026-03-19T19:54:54.706756+00:00",
+  "commitId": "344512fa3bbb6991ecf861acb23fb1e5895842fa",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "I reviewed the prior failing implementation in commit 56de0940c97158784ae8af8d40e989a5ddea68be and the fix in commit 344512fa3bbb6991ecf861acb23fb1e5895842fa. The fix resolves the original blocking issue: `src/features/offense.py` now refuses undated batting snapshots for lineup weighting, filters dated player rows strictly before the target day, computes per-window lineup metrics keyed by `(game_pk, team, window)`, and otherwise falls back to the already anti-leakage-safe team values. Updated tests cover both the undated-snapshot fallback and the dated as-of lineup path, so I did not find any remaining or new blocking issues in scope.",
+    "issues": []
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": "t9-offensive-features",
+  "summary": "Pass. I reviewed the prior failed feature context, the fix feature transcript skeleton and handoff, and both relevant diffs. The fix adequately closes the original lineup as-of leakage by preventing season-snapshot lineup weighting, using only dated pre-game player history when available, and otherwise safely reusing team-level values; I found no new blocking problems in the reviewed change set."
+}

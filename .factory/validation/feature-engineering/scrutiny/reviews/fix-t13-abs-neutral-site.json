@@ -1,0 +1,28 @@
+{
+  "featureId": "fix-t13-abs-neutral-site",
+  "reviewedAt": "2026-03-19T19:55:52.424151Z",
+  "commitId": "a48699b02acf5ba6d3d7d9b9e92a736d7ee0e075",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix closes the original blocking ABS-neutral-site bug: odds backfill now extracts explicit event venue metadata, uses the ABS exception resolver for venues like Mexico City, and conservatively persists `is_abs_active = 0` when the venue is still unknown, which prevents the prior false-positive ABS activation on synthetic game rows. I did find one follow-up edge case in the new refresh path: if a synthetic row is first corrected with a real neutral-site venue and a later odds pull omits venue metadata again, the refresh logic would overwrite the stored venue back to the home team's default park while keeping `is_abs_active = 0`.",
+    "issues": [
+      {
+        "file": "src/clients/odds_client.py",
+        "line": 288,
+        "severity": "non_blocking",
+        "description": "`_refresh_synthetic_game_row()` always recomputes venue/is_dome/ABS state from the latest event payload, and `_resolve_backfill_game_context()` falls back to the home team's default stadium when `event_venue` is missing (`src/clients/odds_client.py:275`). That means a synthetic neutral-site row that was previously corrected to a real venue could be overwritten back to the home park on a later odds pull that omits venue metadata. The current regression coverage only exercises the initial unknown-venue insert and the initial Mexico City insert (`tests/test_odds_client.py:339` and `tests/test_odds_client.py:398`), so this mixed refresh sequence is untested." 
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The shared feature-engineering library note is now stale: it still documents the old odds-backfill quirk as if synthetic rows always derive venue from the home team's default stadium, but the fix now extracts event venue metadata and defers ABS activation when venue metadata is missing. Future workers could rely on outdated guidance or repeat the same API-doc research.",
+      "evidence": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\library\\feature-engineering.md:8 still describes the pre-fix behavior, while C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\src\\clients\\odds_client.py:217-275 and 513 show the current `venue`/`stadium`/`site` extraction and deferred-ABS backfill logic. The fix worker transcript skeleton (workerSessionId `b9919279-f1e0-41e5-9ef2-5a058b5023ef`) also shows a `WebSearch` + `FetchUrl` detour into The Odds API docs before implementing `_extract_event_venue()`."
+    }
+  ],
+  "addressesFailureFrom": "t13-park-abs-adjustments",
+  "summary": "Pass. I reviewed the prior failing review for `t13-park-abs-adjustments`, both commit diffs, the fix handoff, the fix transcript skeleton, the feature-worker skill, and the shared-state docs. The new odds-client logic adequately fixes the original neutral-site ABS failure by no longer defaulting synthetic rows to ABS-active when the true venue is unknown and by honoring explicit Mexico City-style venue metadata; I only found one non-blocking refresh edge case plus one stale shared-state note."
+}

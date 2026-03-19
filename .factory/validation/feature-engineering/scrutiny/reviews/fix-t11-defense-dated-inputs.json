@@ -1,0 +1,21 @@
+{
+  "featureId": "fix-t11-defense-dated-inputs",
+  "reviewedAt": "2026-03-19T19:55:09.970293+00:00",
+  "commitId": "e3193ae61e5220263a7260b554ba81284f0c6b88",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix addresses the original leakage bug. In src/features/defense.py, current-season fielding and framing snapshots no longer backfill rolling histories when they lack dates; the code now only uses dated current-season observations for 30/60 windows and falls back to prior-season or league baselines when no safe history exists. The updated tests cover both the prior-season fallback and the no-history league-average path, and I did not find a new blocking issue in the reviewed diff.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "Workers on this repo still have to deviate from the startup procedure on Windows because the feature-worker guidance does not point them to the already-documented Windows-specific init path.",
+      "evidence": "The reviewed worker reported skillFeedback.followedProcedure = false in C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\handoffs\\2026-03-19T19-13-17-089Z__fix-t11-defense-dated-inputs__8442c7e1-7314-4588-9b3e-45ebe0611cb6.json after .factory/init.sh failed on Windows. C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\skills\\feature-worker\\SKILL.md:8,41 still only references generic worker-base startup and non-Windows pytest commands, while the repo-specific fallback already exists at C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\skills\\data-worker\\SKILL.md:19-24, C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\library\\environment.md:59-60, and C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\services.yaml:7."
+    }
+  ],
+  "addressesFailureFrom": "t11-defense-features",
+  "summary": "Pass. I reviewed the original failed feature, its prior scrutiny report, the fix handoff/transcript skeleton, and both diffs. The fix removes the unsafe current-season snapshot fallback that caused the original blocking leakage issue and replaces it with safe prior-season or league baselines when dated defense history is unavailable, without introducing a new blocking problem."
+}

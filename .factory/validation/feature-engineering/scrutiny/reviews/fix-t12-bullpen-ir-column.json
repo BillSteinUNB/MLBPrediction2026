@@ -1,0 +1,21 @@
+{
+  "featureId": "fix-t12-bullpen-ir-column",
+  "reviewedAt": "2026-03-19T19:55:20.832767+00:00",
+  "commitId": "6c22c8e6312676eb37f95d9331738f7237dad231",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Reviewed the fix feature entry, prior failing review, worker handoff/transcript skeleton, skill/shared-state docs, and commit 6c22c8e6312676eb37f95d9331738f7237dad231. The fix directly addresses the original blocker: `_normalize_inherited_runner_logs()` now accepts flattened `Pitching_Date`/`Pitching_IR`/`Pitching_IS` columns, preserves team/date alignment by building the normalized frame from the parsed dates first, and reuses `_normalize_date_series()` so the team-log, game-schedule, and statcast dates merge on the same normalized form. The added regression test exercises a flattened pitching-log payload and confirms `home_team_bullpen_ir_pct_30g` is computed as 2/6 instead of silently falling back to 0.0. I did not find any remaining or newly introduced blocking code issues in scope.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The shared feature-worker procedure still omits the Windows-safe validation commands this repo needs, so workers continue deviating to `.venv\\Scripts\\python.exe` and `.factory/services.yaml` even though the environment library already documents that fallback.",
+      "evidence": "`C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\skills\\feature-worker\\SKILL.md:40-50` only lists generic `pytest tests/test_feature_*.py -v --tb=short` and `python -m py_compile src/features/*.py`, while `C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\library\\environment.md:57-61` says `bash .factory/init.sh` / plain `py_compile` are unreliable on Windows and points workers to direct `.venv\\Scripts\\python.exe` / manifest commands. The transcript skeleton for worker session `a246808d-999b-4fc7-b27d-7ae4ee143308` shows that Windows-specific path, and the handoff records `skillFeedback.followedProcedure = false` for the same reason."
+    }
+  ],
+  "addressesFailureFrom": "t12-bullpen-features",
+  "summary": "Review passed. The fix adequately resolves the original bullpen IR% parsing failure by recognizing flattened `Pitching_*` columns and preserving the date/team alignment needed for lookup joins, and the new regression test demonstrates that `bullpen_ir_pct_30g` now returns real non-zero values for the previously broken payload shape."
+}

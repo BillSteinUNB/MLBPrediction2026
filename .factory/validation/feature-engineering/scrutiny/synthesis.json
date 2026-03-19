@@ -1,7 +1,7 @@
 {
   "milestone": "feature-engineering",
-  "round": 1,
-  "status": "fail",
+  "round": 2,
+  "status": "pass",
   "validatorsRun": {
     "test": {
       "passed": true,
@@ -20,85 +20,51 @@
     }
   },
   "reviewsSummary": {
-    "total": 7,
-    "passed": 1,
-    "failed": 6,
-    "failedFeatures": [
+    "total": 6,
+    "passed": 6,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Updated `.factory/library/feature-engineering.md` to replace the stale odds-backfill note with the current event-venue extraction plus deferred-ABS behavior, and documented the remaining refresh caveat when later odds payloads omit venue metadata.",
+      "sourceFeature": "fix-t13-abs-neutral-site"
+    }
+  ],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "feature-worker skill",
+      "suggestion": "Document the repo's Windows-safe startup and validation workflow by directing workers to `.factory/services.yaml` `*_windows` commands and direct `.venv\\Scripts\\python.exe` usage when `.factory/init.sh` or generic glob commands fail on Windows.",
+      "evidence": "Rerun reviews for `fix-t11-defense-dated-inputs`, `fix-t12-bullpen-ir-column`, and `fix-t14-wind-sign-convention` all recorded justified deviations because the current `feature-worker` guidance still omits the Windows path already documented in `.factory/library/environment.md`, `.factory/services.yaml`, and the `data-worker` skill.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "Repeated Windows workflow observations across `fix-t11-defense-dated-inputs`, `fix-t12-bullpen-ir-column`, and `fix-t14-wind-sign-convention`.",
+      "reason": "deduplicated into one systemic `feature-worker` skill recommendation"
+    }
+  ],
+  "previousRound": ".factory/validation/feature-engineering/scrutiny/synthesis.round1.json",
+  "rerunContext": {
+    "priorFailedFeatures": [
       "t9-offensive-features",
       "t10-pitching-features",
       "t11-defense-features",
       "t12-bullpen-features",
       "t13-park-abs-adjustments",
       "t14-weather-engine"
-    ]
-  },
-  "blockingIssues": [
-    {
-      "featureId": "t9-offensive-features",
-      "severity": "blocking",
-      "description": "Lineup-weighted offense metrics are built from season-level FanGraphs batting snapshots with no as-of date scoping, so 7/14/30/60 historical lineup features can leak future player performance and collapse to a non-rolling value."
-    },
-    {
-      "featureId": "t10-pitching-features",
-      "severity": "blocking",
-      "description": "Opener detection trusts `lineup.is_opener` whenever a lineup object exists, which suppresses pitcher-history fallback for real opener/bullpen games and can skip the required team-composite pitching path."
-    },
-    {
-      "featureId": "t11-defense-features",
-      "severity": "blocking",
-      "description": "Defense histories are synthesized from season-level fielding/framing snapshots by stamping one prior-day row, which leaks future season totals into historical dates and prevents real 30/60-game rolling DRS/OAA/framing windows."
-    },
-    {
-      "featureId": "t12-bullpen-features",
-      "severity": "blocking",
-      "description": "The bullpen inherited-runner parser does not recognize `Pitching_*` team-log columns produced by `fetch_team_game_logs(log_type=\"pitching\")`, so live IR% lookups drop all rows and silently fill `*_bullpen_ir_pct_30g` with zeros."
-    },
-    {
-      "featureId": "t13-park-abs-adjustments",
-      "severity": "blocking",
-      "description": "When odds ingestion backfills a missing `games` row, it derives the venue from the home team's default stadium instead of event metadata, so neutral-site ABS exception games can still persist with `is_abs_active = True`."
-    },
-    {
-      "featureId": "t14-weather-engine",
-      "severity": "blocking",
-      "description": "The weather adjustment module uses a wind-direction sign convention opposite to the existing weather client, so real fetched weather can invert wind impact and distort `weather_composite`."
-    }
-  ],
-  "appliedUpdates": [
-    {
-      "target": "services.yaml",
-      "description": "Added an `init_windows` command that creates the venv if needed, installs dependencies through `.venv\\Scripts\\python.exe`, creates data directories, warns about missing `.env`, and initializes SQLite without relying on Git Bash activation behavior.",
-      "sourceFeature": "t9-offensive-features"
-    },
-    {
-      "target": "library",
-      "description": "Added `.factory/library/feature-engineering.md` documenting season-snapshot vs as-of data-source constraints, pitching team-log column naming, canonical weather wind semantics, the SQLite games-table baseline source, and the current odds-backfill venue quirk.",
-      "sourceFeature": "t11-defense-features"
-    }
-  ],
-  "suggestedGuidanceUpdates": [
-    {
-      "target": "feature-worker skill",
-      "suggestion": "Add Windows-specific startup and validation guidance that points feature workers to `.factory/services.yaml` Windows commands and direct `.venv\\Scripts\\python.exe` invocation instead of relying on `.factory/init.sh` under Git Bash.",
-      "evidence": "t11-defense-features and t14-weather-engine both reported justified deviations because the current feature-worker procedure omits the Windows shell caveat already captured elsewhere in shared state.",
-      "isSystemic": true
-    },
-    {
-      "target": "feature-worker skill",
-      "suggestion": "For baseline-style feature work, explicitly note that historical final/F5 runs can come from the SQLite `games` table before workers reach for pybaseball team-game-log scraping.",
-      "evidence": "t15-pythagorean-log5 passed, but its reviewer found the worker spent time exploring pybaseball sources before discovering the canonical `games.final_*` and `games.f5_*` columns already satisfied the need.",
-      "isSystemic": false
-    }
-  ],
-  "rejectedObservations": [
-    {
-      "observation": "The repeated Windows services/init observation from t13-park-abs-adjustments duplicated the same startup gap already captured from t9-offensive-features.",
-      "reason": "duplicate"
-    },
-    {
-      "observation": "The repeated feature-worker Windows caveat from t14-weather-engine duplicated the same skill-gap observation already captured from t11-defense-features.",
-      "reason": "duplicate"
-    }
-  ],
-  "previousRound": null
+    ],
+    "reviewCandidates": [
+      "fix-t9-lineup-asof-leakage",
+      "fix-t10-opener-detection-logic",
+      "fix-t11-defense-dated-inputs",
+      "fix-t12-bullpen-ir-column",
+      "fix-t13-abs-neutral-site",
+      "fix-t14-wind-sign-convention"
+    ],
+    "note": "All round-1 blocking feature reviews received completed fix features and fresh scrutiny rerun reviews in round 2."
+  }
 }
