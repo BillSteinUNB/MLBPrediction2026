@@ -24,3 +24,6 @@
 
 - During feature `fix-t6-cache-invalidation`, another repo-local stash was created to isolate unrelated model/training work before validation:
   - `worker-4991f8d1 isolate unrelated model WIP`
+
+- During feature `t9-offensive-features`, another repo-local stash was created to isolate unrelated engine, notifications, notes, and local sandbox WIP before validation/commit:
+  - `worker-1259c3dc isolate unrelated engine and local WIP`
