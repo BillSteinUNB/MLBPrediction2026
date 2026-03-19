@@ -1,0 +1,31 @@
+{
+  "groupId": "cli-odds",
+  "surface": "CLI",
+  "toolsUsed": [
+    "pytest",
+    "python"
+  ],
+  "summary": "Both assigned CLI odds assertions passed via targeted pytest coverage and an isolated mocked-transport Python validation that confirmed odds_api_usage updates and odds snapshots freeze to is_frozen=1.",
+  "assertions": [
+    {
+      "id": "VAL-ODDS-007",
+      "status": "pass",
+      "reason": "The targeted freeze_odds pytest passed, and the isolated SQLite validation showed both persisted odds snapshot rows updated to is_frozen=1 after the freeze step ran.",
+      "evidence": [
+        "foundation/cli-odds/pytest-freeze.txt",
+        "foundation/cli-odds/python-cli-odds.txt"
+      ]
+    },
+    {
+      "id": "VAL-ODDS-008",
+      "status": "pass",
+      "reason": "The targeted fetch_mlb_odds usage-tracking pytest passed, and the isolated SQLite validation showed odds_api_usage recorded api_usage_count=2 after the mocked fetch path executed.",
+      "evidence": [
+        "foundation/cli-odds/pytest-usage.txt",
+        "foundation/cli-odds/python-cli-odds.txt"
+      ]
+    }
+  ],
+  "frictions": [],
+  "blockers": []
+}

@@ -1,0 +1,49 @@
+{
+  "groupId": "cli-data-weather",
+  "surface": "CLI",
+  "toolsUsed": [
+    "pytest",
+    "python"
+  ],
+  "summary": "All 4 assigned CLI assertions passed via targeted pytest coverage and isolated Python evidence for statcast parquet persistence, FanGraphs advanced metrics, wind-factor sign, and dome weather bypass behavior.",
+  "assertions": [
+    {
+      "id": "VAL-DATA-002",
+      "status": "pass",
+      "reason": "Targeted pytest passed, and an isolated statcast ingestion snippet wrote a parquet file containing game_date, game_pk, launch_speed, and release_speed.",
+      "evidence": [
+        "foundation/cli-data-weather/pytest-targeted.txt",
+        "foundation/cli-data-weather/python-evidence.txt"
+      ]
+    },
+    {
+      "id": "VAL-DATA-003",
+      "status": "pass",
+      "reason": "Targeted pytest passed, and isolated FanGraphs batting/pitching fetches showed batting includes wRC+/wOBA and pitching includes xFIP.",
+      "evidence": [
+        "foundation/cli-data-weather/pytest-targeted.txt",
+        "foundation/cli-data-weather/python-evidence.txt"
+      ]
+    },
+    {
+      "id": "VAL-FEAT-011",
+      "status": "pass",
+      "reason": "Targeted pytest passed, and the wind-factor calculation produced a positive value for blowing out, a negative value for blowing in, and zero for crosswind.",
+      "evidence": [
+        "foundation/cli-data-weather/pytest-targeted.txt",
+        "foundation/cli-data-weather/python-evidence.txt"
+      ]
+    },
+    {
+      "id": "VAL-FEAT-012",
+      "status": "pass",
+      "reason": "Targeted pytest passed, and a dome-stadium weather fetch for TB returned neutral defaults with is_dome_default=true and no API call.",
+      "evidence": [
+        "foundation/cli-data-weather/pytest-targeted.txt",
+        "foundation/cli-data-weather/python-evidence.txt"
+      ]
+    }
+  ],
+  "frictions": [],
+  "blockers": []
+}

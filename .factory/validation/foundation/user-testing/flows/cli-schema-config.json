@@ -1,0 +1,37 @@
+{
+  "groupId": "cli-schema-config",
+  "surface": "CLI",
+  "toolsUsed": [
+    "pytest",
+    "python"
+  ],
+  "summary": "Validated the assigned CLI schema/config assertions with targeted pytest coverage and an isolated Python inspection script; all three assertions passed.",
+  "assertions": [
+    {
+      "id": "VAL-DATA-001",
+      "status": "pass",
+      "reason": "Targeted pytest passed for required table creation and features.as_of_timestamp enforcement; an isolated SQLite inspection listed games, features, predictions, odds_snapshots, bets, bankroll_ledger, and schema_version, and PRAGMA table_info(features) showed as_of_timestamp as TEXT with NOT NULL set.",
+      "evidence": [
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\foundation\\cli-schema-config\\command-output.txt"
+      ]
+    },
+    {
+      "id": "VAL-DATA-005",
+      "status": "pass",
+      "reason": "Targeted pytest passed for games.game_pk primary key usage and mocked odds ingestion backfill; the isolated inspection showed PRAGMA table_info(games) with game_pk as the primary key and a created game row storing standard abbreviations NYY/BOS via the CLI-facing odds ingestion path.",
+      "evidence": [
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\foundation\\cli-schema-config\\command-output.txt"
+      ]
+    },
+    {
+      "id": "VAL-FEAT-007",
+      "status": "pass",
+      "reason": "The targeted config pytest passed, and the isolated YAML inspection confirmed stadiums.OAK uses park_name Sutter Health Park with park_factors.runs 1.25 and park_factors.hr 1.30.",
+      "evidence": [
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\foundation\\cli-schema-config\\command-output.txt"
+      ]
+    }
+  ],
+  "frictions": [],
+  "blockers": []
+}

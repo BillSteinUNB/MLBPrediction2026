@@ -14,6 +14,12 @@ This is a batch processing system with no web UI. Validation is performed via:
 1. **pytest suite** - Automated unit and integration tests
 2. **CLI dry-run commands** - Manual verification of pipeline outputs
 
+### Foundation Milestone Setup Notes
+
+- No long-running services are required for user validation.
+- Use the repository virtualenv on Windows: `.\\venv\\Scripts\\python.exe`
+- Prefer isolated temp paths per validator for SQLite and raw-data artifacts.
+
 ### Validation Tools
 
 | Tool | Surface | Usage |
@@ -52,14 +58,24 @@ sqlite3 data/mlb.db "SELECT * FROM predictions WHERE date='2025-09-15'"
 **Rationale:**
 - pytest workers are lightweight (~100-300 MB each)
 - No browser instances needed
-- System has 32 GB RAM, 24 CPUs, ~12 GB free
-- 5 concurrent pytest processes use ~1.5 GB
-- 70% headroom rule: 12 GB × 0.7 = 8.4 GB available
+- Current machine observation for this run: 24 logical CPUs, ~7.8 GB free RAM
+- 3-5 concurrent CLI validators remain safe for targeted pytest and Python checks
+- Foundation assertions primarily use isolated temp SQLite/parquet paths, reducing interference
 
 **Isolation Strategy:**
 - Each validator runs pytest on separate test files
 - No shared state between validators
 - SQLite database is read-only during validation
+
+## Flow Validator Guidance: CLI
+
+- Stay on the CLI surface only; do not use browser automation.
+- Use `.\\venv\\Scripts\\python.exe` for Python and pytest commands.
+- Keep each validator inside its own isolation directory or temp DB path.
+- Do not reuse shared `data\\mlb.db` unless a test explicitly requires it.
+- Prefer deterministic checks with targeted pytest files and small Python snippets.
+- For odds/weather validations, use mock transports or fixtures instead of live third-party requests unless a specific assertion requires a real call.
+- Save concise evidence (stdout snippets, JSON, sqlite query output) into the assigned evidence directory.
 
 ## Resource Cost Classification
 
