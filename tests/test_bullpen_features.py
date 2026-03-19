@@ -16,14 +16,34 @@ def _seed_game(
     game_date: str,
     home_team: str,
     away_team: str,
+    home_starter_id: int | None = None,
+    away_starter_id: int | None = None,
 ) -> None:
     with sqlite3.connect(db_path) as connection:
         connection.execute(
             """
-            INSERT INTO games (game_pk, date, home_team, away_team, venue, status)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO games (
+                game_pk,
+                date,
+                home_team,
+                away_team,
+                home_starter_id,
+                away_starter_id,
+                venue,
+                status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (game_pk, game_date, home_team, away_team, "Test Park", "scheduled"),
+            (
+                game_pk,
+                game_date,
+                home_team,
+                away_team,
+                home_starter_id,
+                away_starter_id,
+                "Test Park",
+                "scheduled",
+            ),
         )
         connection.commit()
 
@@ -312,3 +332,140 @@ def test_compute_bullpen_features_returns_defaults_for_first_three_days(
         ).fetchone()
 
     assert stored == ("2025-04-01T00:00:00+00:00", 3)
+
+
+def test_compute_bullpen_features_parses_flattened_pitching_ir_logs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.features import bullpen
+
+    db_path = tmp_path / "bullpen.db"
+    init_db(db_path)
+    _seed_game(
+        db_path,
+        game_pk=8001,
+        game_date="2025-04-05T19:05:00+00:00",
+        home_team="NYY",
+        away_team="BOS",
+        home_starter_id=501,
+        away_starter_id=701,
+    )
+    _seed_game(
+        db_path,
+        game_pk=8002,
+        game_date="2025-04-07T19:05:00+00:00",
+        home_team="TOR",
+        away_team="NYY",
+        home_starter_id=702,
+        away_starter_id=502,
+    )
+    _seed_game(
+        db_path,
+        game_pk=8003,
+        game_date="2025-04-08T19:05:00+00:00",
+        home_team="NYY",
+        away_team="TB",
+        home_starter_id=503,
+        away_starter_id=703,
+    )
+    _seed_game(
+        db_path,
+        game_pk=9001,
+        game_date="2025-04-10T20:05:00+00:00",
+        home_team="NYY",
+        away_team="BOS",
+        home_starter_id=504,
+        away_starter_id=704,
+    )
+
+    statcast_frame = pd.DataFrame(
+        [
+            {
+                "game_pk": 8001,
+                "game_date": "2025-04-05",
+                "inning_topbot": "top",
+                "pitcher": 501,
+                "at_bat_number": 1,
+                "pitch_number": 1,
+                "events": "field_out",
+            },
+            {
+                "game_pk": 8001,
+                "game_date": "2025-04-05",
+                "inning_topbot": "top",
+                "pitcher": 601,
+                "at_bat_number": 2,
+                "pitch_number": 1,
+                "events": "strikeout",
+            },
+            {
+                "game_pk": 8002,
+                "game_date": "2025-04-07",
+                "inning_topbot": "bot",
+                "pitcher": 502,
+                "at_bat_number": 1,
+                "pitch_number": 1,
+                "events": "field_out",
+            },
+            {
+                "game_pk": 8002,
+                "game_date": "2025-04-07",
+                "inning_topbot": "bot",
+                "pitcher": 602,
+                "at_bat_number": 2,
+                "pitch_number": 1,
+                "events": "strikeout",
+            },
+            {
+                "game_pk": 8003,
+                "game_date": "2025-04-08",
+                "inning_topbot": "top",
+                "pitcher": 503,
+                "at_bat_number": 1,
+                "pitch_number": 1,
+                "events": "field_out",
+            },
+            {
+                "game_pk": 8003,
+                "game_date": "2025-04-08",
+                "inning_topbot": "top",
+                "pitcher": 603,
+                "at_bat_number": 2,
+                "pitch_number": 1,
+                "events": "strikeout",
+            },
+        ]
+    )
+
+    def fake_team_logs_fetcher(
+        season: int,
+        team: str,
+        *,
+        log_type: str = "batting",
+        refresh: bool = False,
+    ) -> pd.DataFrame:
+        assert season == 2025
+        assert log_type == "pitching"
+        assert refresh is False
+        if team != "NYY":
+            return pd.DataFrame()
+        return pd.DataFrame(
+            {
+                "Pitching_Date": ["2025-04-05", "2025-04-07", "2025-04-08"],
+                "Pitching_IR": [2, 1, 3],
+                "Pitching_IS": [1, 0, 1],
+            }
+        )
+
+    monkeypatch.setattr(bullpen, "fetch_statcast_range", lambda *_args, **_kwargs: statcast_frame.copy())
+
+    rows = bullpen.compute_bullpen_features(
+        "2025-04-10",
+        db_path=db_path,
+        team_logs_fetcher=fake_team_logs_fetcher,
+    )
+
+    by_name = {row.feature_name: row.feature_value for row in rows}
+    assert by_name["home_team_bullpen_ir_pct_30g"] == pytest.approx(2 / 6)
+    assert by_name["home_team_bullpen_ir_pct_30g"] > 0.0

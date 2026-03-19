@@ -320,9 +320,8 @@ def _normalize_bullpen_metrics(dataframe: pd.DataFrame) -> pd.DataFrame:
     normalized = dataframe.copy()
     result = pd.DataFrame()
     result["game_pk"] = _to_numeric_series(normalized.get(_first_column(normalized, ("game_pk",))))
-    result["game_date"] = pd.to_datetime(
-        normalized.get(_first_column(normalized, ("game_date", "date", "Date"))),
-        errors="coerce",
+    result["game_date"] = _normalize_date_series(
+        normalized.get(_first_column(normalized, ("game_date", "date", "Date")))
     )
     result["team"] = _string_series(
         normalized.get(_first_column(normalized, ("team", "Team")))
@@ -456,7 +455,7 @@ def _load_season_games(db_path: Path, *, season: int, end_date: date) -> pd.Data
             columns=["game_pk", "game_date", "home_team", "away_team", "home_starter_id", "away_starter_id"]
         )
 
-    games["game_date"] = pd.to_datetime(games["date"], errors="coerce").dt.normalize()
+    games["game_date"] = _normalize_date_series(games["date"])
     games["home_team"] = games["home_team"].astype(str).str.strip().str.upper()
     games["away_team"] = games["away_team"].astype(str).str.strip().str.upper()
     for starter_column in ("home_starter_id", "away_starter_id"):
@@ -476,10 +475,9 @@ def _build_relief_metrics_from_statcast(games: pd.DataFrame, statcast_frame: pd.
 
     pitches["game_pk"] = _to_numeric_series(pitches[game_pk_column]).astype("Int64")
     pitches["pitcher_id"] = _to_numeric_series(pitches[pitcher_column]).astype("Int64")
-    pitches["game_date"] = pd.to_datetime(
-        pitches.get(_first_column(pitches, ("game_date", "date", "Date"))),
-        errors="coerce",
-    ).dt.normalize()
+    pitches["game_date"] = _normalize_date_series(
+        pitches.get(_first_column(pitches, ("game_date", "date", "Date")))
+    )
 
     schedule = games[["game_pk", "game_date", "home_team", "away_team", "home_starter_id", "away_starter_id"]].copy()
     schedule["game_pk"] = pd.to_numeric(schedule["game_pk"], errors="coerce").astype("Int64")
@@ -646,7 +644,16 @@ def _normalize_inherited_runner_logs(raw_logs: pd.DataFrame, team: str) -> pd.Da
     if raw_logs.empty:
         return pd.DataFrame(columns=["team", "game_date", "date_index", "inherited_runners", "inherited_runners_scored"])
 
-    date_column = _first_column(raw_logs, ("Date", "date", "game_date"))
+    date_column = _first_column(
+        raw_logs,
+        (
+            "Date",
+            "date",
+            "game_date",
+            "Pitching_Date",
+            "pitching_date",
+        ),
+    )
     inherited_runners_column = _first_column(
         raw_logs,
         (
@@ -672,9 +679,8 @@ def _normalize_inherited_runner_logs(raw_logs: pd.DataFrame, team: str) -> pd.Da
     if date_column is None or inherited_runners_column is None or inherited_runners_scored_column is None:
         return pd.DataFrame(columns=["team", "game_date", "date_index", "inherited_runners", "inherited_runners_scored"])
 
-    normalized = pd.DataFrame()
+    normalized = pd.DataFrame({"game_date": _normalize_date_series(raw_logs[date_column])})
     normalized["team"] = team
-    normalized["game_date"] = pd.to_datetime(raw_logs[date_column], errors="coerce").dt.normalize()
     normalized["inherited_runners"] = pd.to_numeric(raw_logs[inherited_runners_column], errors="coerce")
     normalized["inherited_runners_scored"] = pd.to_numeric(
         raw_logs[inherited_runners_scored_column],
@@ -850,6 +856,16 @@ def _to_numeric_series(values: Any) -> pd.Series:
     if values is None:
         return pd.Series(dtype=float)
     return pd.to_numeric(values, errors="coerce")
+
+
+def _normalize_date_series(values: Any) -> pd.Series:
+    if values is None:
+        return pd.Series(dtype="datetime64[ns]")
+
+    series = pd.to_datetime(values, errors="coerce")
+    if getattr(series.dt, "tz", None) is not None:
+        series = series.dt.tz_localize(None)
+    return series.dt.normalize()
 
 
 def _string_series(values: Any) -> pd.Series:
