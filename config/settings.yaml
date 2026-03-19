@@ -1,0 +1,537 @@
+teams:
+  ARI:
+    full_name: Arizona Diamondbacks
+    city: Phoenix
+    nickname: Diamondbacks
+    league: NL
+    division: West
+  ATL:
+    full_name: Atlanta Braves
+    city: Atlanta
+    nickname: Braves
+    league: NL
+    division: East
+  BAL:
+    full_name: Baltimore Orioles
+    city: Baltimore
+    nickname: Orioles
+    league: AL
+    division: East
+  BOS:
+    full_name: Boston Red Sox
+    city: Boston
+    nickname: Red Sox
+    league: AL
+    division: East
+  CHC:
+    full_name: Chicago Cubs
+    city: Chicago
+    nickname: Cubs
+    league: NL
+    division: Central
+  CIN:
+    full_name: Cincinnati Reds
+    city: Cincinnati
+    nickname: Reds
+    league: NL
+    division: Central
+  CLE:
+    full_name: Cleveland Guardians
+    city: Cleveland
+    nickname: Guardians
+    league: AL
+    division: Central
+  COL:
+    full_name: Colorado Rockies
+    city: Denver
+    nickname: Rockies
+    league: NL
+    division: West
+  CWS:
+    full_name: Chicago White Sox
+    city: Chicago
+    nickname: White Sox
+    league: AL
+    division: Central
+  DET:
+    full_name: Detroit Tigers
+    city: Detroit
+    nickname: Tigers
+    league: AL
+    division: Central
+  HOU:
+    full_name: Houston Astros
+    city: Houston
+    nickname: Astros
+    league: AL
+    division: West
+  KC:
+    full_name: Kansas City Royals
+    city: Kansas City
+    nickname: Royals
+    league: AL
+    division: Central
+  LAA:
+    full_name: Los Angeles Angels
+    city: Anaheim
+    nickname: Angels
+    league: AL
+    division: West
+  LAD:
+    full_name: Los Angeles Dodgers
+    city: Los Angeles
+    nickname: Dodgers
+    league: NL
+    division: West
+  MIA:
+    full_name: Miami Marlins
+    city: Miami
+    nickname: Marlins
+    league: NL
+    division: East
+  MIL:
+    full_name: Milwaukee Brewers
+    city: Milwaukee
+    nickname: Brewers
+    league: NL
+    division: Central
+  MIN:
+    full_name: Minnesota Twins
+    city: Minneapolis
+    nickname: Twins
+    league: AL
+    division: Central
+  NYM:
+    full_name: New York Mets
+    city: New York
+    nickname: Mets
+    league: NL
+    division: East
+  NYY:
+    full_name: New York Yankees
+    city: Bronx
+    nickname: Yankees
+    league: AL
+    division: East
+  OAK:
+    full_name: Athletics
+    city: West Sacramento
+    nickname: Athletics
+    league: AL
+    division: West
+  PHI:
+    full_name: Philadelphia Phillies
+    city: Philadelphia
+    nickname: Phillies
+    league: NL
+    division: East
+  PIT:
+    full_name: Pittsburgh Pirates
+    city: Pittsburgh
+    nickname: Pirates
+    league: NL
+    division: Central
+  SD:
+    full_name: San Diego Padres
+    city: San Diego
+    nickname: Padres
+    league: NL
+    division: West
+  SEA:
+    full_name: Seattle Mariners
+    city: Seattle
+    nickname: Mariners
+    league: AL
+    division: West
+  SF:
+    full_name: San Francisco Giants
+    city: San Francisco
+    nickname: Giants
+    league: NL
+    division: West
+  STL:
+    full_name: St. Louis Cardinals
+    city: St. Louis
+    nickname: Cardinals
+    league: NL
+    division: Central
+  TB:
+    full_name: Tampa Bay Rays
+    city: St. Petersburg
+    nickname: Rays
+    league: AL
+    division: East
+  TEX:
+    full_name: Texas Rangers
+    city: Arlington
+    nickname: Rangers
+    league: AL
+    division: West
+  TOR:
+    full_name: Toronto Blue Jays
+    city: Toronto
+    nickname: Blue Jays
+    league: AL
+    division: East
+  WSH:
+    full_name: Washington Nationals
+    city: Washington
+    nickname: Nationals
+    league: NL
+    division: East
+
+stadiums:
+  ARI:
+    park_name: Chase Field
+    latitude: 33.4455
+    longitude: -112.0667
+    altitude_ft: 1082
+    is_dome: false
+    roof_type: retractable
+    center_field_orientation_deg: 20
+    park_factors:
+      runs: 1.02
+      hr: 1.08
+  ATL:
+    park_name: Truist Park
+    latitude: 33.8908
+    longitude: -84.4677
+    altitude_ft: 1050
+    is_dome: false
+    roof_type: open
+    center_field_orientation_deg: 50
+    park_factors:
+      runs: 1.01
+      hr: 1.05
+  BAL:
+    park_name: Oriole Park at Camden Yards
+    latitude: 39.2839
+    longitude: -76.6217
+    altitude_ft: 33
+    is_dome: false
+    roof_type: open
+    center_field_orientation_deg: 55
+    park_factors:
+      runs: 1.01
+      hr: 1.02
+  BOS:
+    park_name: Fenway Park
+    latitude: 42.3467
+    longitude: -71.0972
+    altitude_ft: 20
+    is_dome: false
+    roof_type: open
+    center_field_orientation_deg: 50
+    park_factors:
+      runs: 1.05
+      hr: 1.07
+  CHC:
+    park_name: Wrigley Field
+    latitude: 41.9484
+    longitude: -87.6553
+    altitude_ft: 594
+    is_dome: false
+    roof_type: open
+    center_field_orientation_deg: 45
+    park_factors:
+      runs: 1.01
+      hr: 1.06
+  CIN:
+    park_name: Great American Ball Park
+    latitude: 39.0979
+    longitude: -84.5073
+    altitude_ft: 482
+    is_dome: false
+    roof_type: open
+    center_field_orientation_deg: 55
+    park_factors:
+      runs: 1.04
+      hr: 1.09
+  CLE:
+    park_name: Progressive Field
+    latitude: 41.4962
+    longitude: -81.6852
+    altitude_ft: 653
+    is_dome: false
+    roof_type: open
+    center_field_orientation_deg: 60
+    park_factors:
+      runs: 0.97
+      hr: 0.95
+  COL:
+    park_name: Coors Field
+    latitude: 39.7559
+    longitude: -104.9942
+    altitude_ft: 5200
+    is_dome: false
+    roof_type: open
+    center_field_orientation_deg: 45
+    park_factors:
+      runs: 1.27
+      hr: 1.18
+  CWS:
+    park_name: Rate Field
+    latitude: 41.83
+    longitude: -87.6338
+    altitude_ft: 595
+    is_dome: false
+    roof_type: open
+    center_field_orientation_deg: 55
+    park_factors:
+      runs: 0.98
+      hr: 0.99
+  DET:
+    park_name: Comerica Park
+    latitude: 42.339
+    longitude: -83.0485
+    altitude_ft: 585
+    is_dome: false
+    roof_type: open
+    center_field_orientation_deg: 50
+    park_factors:
+      runs: 0.96
+      hr: 0.92
+  HOU:
+    park_name: Daikin Park
+    latitude: 29.7573
+    longitude: -95.3555
+    altitude_ft: 50
+    is_dome: false
+    roof_type: retractable
+    center_field_orientation_deg: 40
+    park_factors:
+      runs: 0.99
+      hr: 0.99
+  KC:
+    park_name: Kauffman Stadium
+    latitude: 39.0517
+    longitude: -94.4803
+    altitude_ft: 910
+    is_dome: false
+    roof_type: open
+    center_field_orientation_deg: 45
+    park_factors:
+      runs: 1.0
+      hr: 0.96
+  LAA:
+    park_name: Angel Stadium
+    latitude: 33.8003
+    longitude: -117.8827
+    altitude_ft: 160
+    is_dome: false
+    roof_type: open
+    center_field_orientation_deg: 35
+    park_factors:
+      runs: 1.0
+      hr: 1.03
+  LAD:
+    park_name: Dodger Stadium
+    latitude: 34.0739
+    longitude: -118.24
+    altitude_ft: 330
+    is_dome: false
+    roof_type: open
+    center_field_orientation_deg: 40
+    park_factors:
+      runs: 0.99
+      hr: 1.01
+  MIA:
+    park_name: loanDepot park
+    latitude: 25.7781
+    longitude: -80.2197
+    altitude_ft: 8
+    is_dome: false
+    roof_type: retractable
+    center_field_orientation_deg: 45
+    park_factors:
+      runs: 0.95
+      hr: 0.92
+  MIL:
+    park_name: American Family Field
+    latitude: 43.028
+    longitude: -87.9712
+    altitude_ft: 635
+    is_dome: false
+    roof_type: retractable
+    center_field_orientation_deg: 45
+    park_factors:
+      runs: 1.02
+      hr: 1.05
+  MIN:
+    park_name: Target Field
+    latitude: 44.9817
+    longitude: -93.2778
+    altitude_ft: 840
+    is_dome: false
+    roof_type: open
+    center_field_orientation_deg: 45
+    park_factors:
+      runs: 1.01
+      hr: 1.03
+  NYM:
+    park_name: Citi Field
+    latitude: 40.7571
+    longitude: -73.8458
+    altitude_ft: 20
+    is_dome: false
+    roof_type: open
+    center_field_orientation_deg: 40
+    park_factors:
+      runs: 0.98
+      hr: 0.97
+  NYY:
+    park_name: Yankee Stadium
+    latitude: 40.8296
+    longitude: -73.9262
+    altitude_ft: 55
+    is_dome: false
+    roof_type: open
+    center_field_orientation_deg: 35
+    park_factors:
+      runs: 1.03
+      hr: 1.15
+  OAK:
+    park_name: Sutter Health Park
+    latitude: 38.6493
+    longitude: -121.517
+    altitude_ft: 21
+    is_dome: false
+    roof_type: open
+    center_field_orientation_deg: 45
+    park_factors:
+      runs: 1.25
+      hr: 1.3
+  PHI:
+    park_name: Citizens Bank Park
+    latitude: 39.9061
+    longitude: -75.1665
+    altitude_ft: 20
+    is_dome: false
+    roof_type: open
+    center_field_orientation_deg: 40
+    park_factors:
+      runs: 1.04
+      hr: 1.12
+  PIT:
+    park_name: PNC Park
+    latitude: 40.4469
+    longitude: -80.0057
+    altitude_ft: 725
+    is_dome: false
+    roof_type: open
+    center_field_orientation_deg: 60
+    park_factors:
+      runs: 0.97
+      hr: 0.93
+  SD:
+    park_name: Petco Park
+    latitude: 32.7073
+    longitude: -117.1573
+    altitude_ft: 60
+    is_dome: false
+    roof_type: open
+    center_field_orientation_deg: 35
+    park_factors:
+      runs: 0.98
+      hr: 0.95
+  SEA:
+    park_name: T-Mobile Park
+    latitude: 47.5914
+    longitude: -122.3326
+    altitude_ft: 10
+    is_dome: false
+    roof_type: retractable
+    center_field_orientation_deg: 35
+    park_factors:
+      runs: 0.94
+      hr: 0.92
+  SF:
+    park_name: Oracle Park
+    latitude: 37.7786
+    longitude: -122.3893
+    altitude_ft: 13
+    is_dome: false
+    roof_type: open
+    center_field_orientation_deg: 30
+    park_factors:
+      runs: 0.96
+      hr: 0.9
+  STL:
+    park_name: Busch Stadium
+    latitude: 38.6226
+    longitude: -90.1928
+    altitude_ft: 466
+    is_dome: false
+    roof_type: open
+    center_field_orientation_deg: 50
+    park_factors:
+      runs: 1.0
+      hr: 0.98
+  TB:
+    park_name: Tropicana Field
+    latitude: 27.7682
+    longitude: -82.6534
+    altitude_ft: 15
+    is_dome: true
+    roof_type: fixed
+    center_field_orientation_deg: 45
+    park_factors:
+      runs: 0.97
+      hr: 0.95
+  TEX:
+    park_name: Globe Life Field
+    latitude: 32.7513
+    longitude: -97.0825
+    altitude_ft: 550
+    is_dome: false
+    roof_type: retractable
+    center_field_orientation_deg: 50
+    park_factors:
+      runs: 1.05
+      hr: 1.08
+  TOR:
+    park_name: Rogers Centre
+    latitude: 43.6414
+    longitude: -79.3894
+    altitude_ft: 250
+    is_dome: false
+    roof_type: retractable
+    center_field_orientation_deg: 35
+    park_factors:
+      runs: 1.02
+      hr: 1.07
+  WSH:
+    park_name: Nationals Park
+    latitude: 38.873
+    longitude: -77.0074
+    altitude_ft: 25
+    is_dome: false
+    roof_type: open
+    center_field_orientation_deg: 45
+    park_factors:
+      runs: 1.0
+      hr: 0.99
+
+abs_exceptions:
+  - Mexico City
+  - Field of Dreams
+  - Little League Classic
+
+thresholds:
+  edge_min: 0.03
+  kelly_fraction: 0.25
+  max_drawdown: 0.3
+  min_games_rolling: 7
+
+rolling_windows:
+  - 7
+  - 14
+  - 30
+  - 60
+
+pythagorean_exponent: 1.83
+abs_retention_factor: 0.75
+
+abs_adjustments:
+  walk_rate_delta: 0.04
+  strikeout_rate_delta: -0.03

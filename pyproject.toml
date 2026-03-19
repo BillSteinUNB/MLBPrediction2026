@@ -15,6 +15,7 @@ dependencies = [
   "xgboost>=2.0",
   "sqlalchemy",
   "pydantic>=2.0",
+  "pydantic-settings>=2.0",
   "pyyaml",
   "python-dotenv",
   "requests",

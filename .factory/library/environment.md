@@ -51,6 +51,11 @@ Copy `.env.example` to `.env` and configure:
 - **Linux/macOS:** Use bash, cron for scheduler
 - **Python version:** 3.11+ required (using 3.13.12 in current environment)
 
+### Windows shell gotcha
+
+- In this repo, `bash .factory/init.sh` under Git Bash did not resolve `pip` after activation on Windows.
+- Prefer invoking the project interpreter directly for installs and validation commands, e.g. `& .venv\Scripts\python.exe -m pip install -e ".[dev]"` and `& .venv\Scripts\python.exe -m pytest tests/ -v --tb=short`.
+
 ## Data Storage
 
 - `data/mlb.db` - SQLite database (embedded, no server)
