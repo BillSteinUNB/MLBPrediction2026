@@ -1,0 +1,21 @@
+{
+  "featureId": "t15-pythagorean-log5",
+  "reviewedAt": "2026-03-19T18:29:00.692536+00:00",
+  "commitId": "25cbeb199bcfe933f0b4b2cae16c1696ac09dae6",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The implementation satisfies the feature contract: src/features/baselines.py computes exponent-1.83 Pythagorean win percentage, separate full-game and F5 30/60-game baselines, team-only Log5 matchup probabilities, and persists anti-leakage-safe feature rows. I did not find blocking or non-blocking code issues in the committed implementation.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The shared worker guidance does not document that baseline features can source historical final/F5 runs directly from the SQLite games table, so the worker had to investigate pybaseball team-game-log sources before implementing the feature.",
+      "evidence": "The transcript skeleton for worker session e43f4fce-5881-49f4-97b9-7dc8238fbbfe shows WebSearch queries for pybaseball team_game_logs columns first five innings plus inspection of C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Lib\\site-packages\\pybaseball\\team_game_logs.py, while .factory\\skills\\feature-worker\\SKILL.md:19-26 only names Pythagorean/Log5 baselines generically. The final implementation instead uses games.final_* and games.f5_* columns directly in src\\features\\baselines.py:181-227."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review passed. The feature meets VAL-FEAT-008/009/010 with correct exponent-1.83 Pythagorean math, separate F5/full-game rolling baselines, team-only complementary Log5 probabilities, and prior-day as_of_timestamp persistence. I only noted a shared-state skill/knowledge gap around documenting the canonical baseline data source."
+}

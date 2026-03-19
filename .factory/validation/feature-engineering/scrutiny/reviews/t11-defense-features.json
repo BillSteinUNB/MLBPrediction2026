@@ -1,0 +1,33 @@
+{
+  "featureId": "t11-defense-features",
+  "reviewedAt": "2026-03-19T18:28:10.694896+00:00",
+  "commitId": "d96d13e4200bf4b47f7349aea1c4d80bf82ebbb1",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The module persists prior-day as_of_timestamp values, ABS-adjusted framing, and defensive-efficiency histories, but it does not satisfy the per-game/rolling DRS-OAA contract with the real inputs: the production fielding and framing fetchers only provide season leaderboards, and the fallback path turns those full-season totals into one synthetic prior-day observation.",
+    "issues": [
+      {
+        "file": "src/features/defense.py",
+        "line": 489,
+        "severity": "blocking",
+        "description": "When the real fetchers are used, `_normalize_fielding_frame()` and `_normalize_framing_frame()` receive season-level leaderboards from `fetch_fielding_stats()` and `fetch_catcher_framing()` (`src/clients/statcast_client.py:176-200` and `236-261`), not per-game rows with dates. `_build_metric_histories()` therefore falls into the no-date branch at lines 489-494, sums the full-season DRS/OAA/framing totals, divides by prior games played, and stamps a single synthetic row on `target_day - 1`. That leaks future season performance into historical dates and makes the 30/60 windows collapse to the same value as the season snapshot, so the implementation does not actually compute team DRS/OAA/framing per game date or real 30/60 rolling windows."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The `feature-worker` skill still lacks the Windows-safe environment and validation guidance that workers on this repo need, even though the shared environment docs and `data-worker` already document it.",
+      "evidence": "`C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\skills\\feature-worker\\SKILL.md:41,50` only lists generic pytest/py_compile commands, while `C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\library\\environment.md:57-61` and `C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\skills\\data-worker\\SKILL.md:19-34` document the Windows `.factory/init.sh` / `pip` PATH failure and the direct `.venv\\Scripts\\python.exe` fallback. The handoff `C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\handoffs\\2026-03-19T17-45-54-243Z__t11-defense-features__0e7f5024-ab7f-4306-a839-b833046b58ba.json` records `skillFeedback.followedProcedure = false` for this exact reason."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The shared library does not document that the current fielding/framing clients expose season snapshots rather than dated game-level defense history, which is crucial for anyone building anti-leakage rolling defense features.",
+      "evidence": "The library only mentions defense metrics at `C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\library\\architecture.md:68,78`, while the actual clients fetch season leaderboards in `src/clients/statcast_client.py:176-200` and `236-261`. This feature then had to invent a snapshot fallback in `src/features/defense.py:489-494`, which is exactly where the rolling-window/leakage problem originates."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed. The feature records ABS-adjusted framing and prior-day `as_of_timestamp`, but with the real season-level fielding/framing sources it cannot produce true per-game DRS/OAA histories: it backfills a single pseudo row from full-season totals, which leaks future data and collapses the 30/60 windows. I also noted a feature-worker skill gap for Windows setup guidance and a missing shared note about the defense data sources' snapshot granularity."
+}

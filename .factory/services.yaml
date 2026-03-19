@@ -4,6 +4,7 @@
 commands:
   install: pip install -e ".[dev]"
   install_windows: '& ".\\.venv\\Scripts\\python.exe" -m pip install -e ".[dev]"'
+  init_windows: 'if (-not (Test-Path ".\\.venv\\Scripts\\python.exe")) { python3 -m venv ".venv" }; & ".\\.venv\\Scripts\\python.exe" -m pip install -e ".[dev]"; New-Item -ItemType Directory -Force -Path ".\\data\\raw\\statcast", ".\\data\\models", ".\\data\\logs", ".\\data\\training" | Out-Null; if (-not (Test-Path ".\\.env")) { Write-Host "WARNING: .env file not found. Copy .env.example to .env" }; & ".\\.venv\\Scripts\\python.exe" -c "from src.db import init_db; init_db(''data/mlb.db'')"'
   typecheck: python -m py_compile src/**/*.py
   typecheck_windows: '$env:PYTHONDONTWRITEBYTECODE=1; & ".\\.venv\\Scripts\\python.exe" -m py_compile (Get-ChildItem -Path ".\\src" -Recurse -Filter "*.py" | ForEach-Object { $_.FullName })'
   build: pip install -e "."

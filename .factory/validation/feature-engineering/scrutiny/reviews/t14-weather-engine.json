@@ -1,0 +1,33 @@
+{
+  "featureId": "t14-weather-engine",
+  "reviewedAt": "2026-03-19T18:28:07.929874Z",
+  "commitId": "16f29988b0856eeb720a8900d5ad3a840047c42b",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature adds the requested weather-adjustment module and focused tests, and dome neutral handling plus the temperature/air-density/humidity/rain calculations all line up with the feature contract. However, the wind-direction logic is not compatible with the existing weather client semantics, so real API-fed open-air games can receive an inverted wind effect and an incorrect weather composite.",
+    "issues": [
+      {
+        "file": "src/features/adjustments/weather.py",
+        "line": 156,
+        "severity": "blocking",
+        "description": "`calculate_wind_factor()` inverts the wind-direction convention already established by the weather client. `WeatherData.wind_direction_deg` is populated from OpenWeather's meteorological source-direction degrees, and `src/clients/weather_client.py:146-157` plus `tests/test_weather_client.py:70-73` treat 180° relative to center field as blowing out (>0) and 0° as blowing in (<0). This module returns the opposite sign at `src/features/adjustments/weather.py:167-168`, and `compute_weather_adjustment()` recomputes that value at `src/features/adjustments/weather.py:239-242` instead of reusing `weather.wind_factor`. As a result, fetched weather for open-air parks will flip the sign of wind impact and distort `weather_composite` in downstream feature usage."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The shared state does not define a canonical wind-direction convention for `WeatherData.wind_direction_deg`, which allowed two adjacent weather components to implement opposite signs for the same field.",
+      "evidence": "`AGENTS.md`, `.factory/library/architecture.md`, and `.factory/library/environment.md` do not document how OpenWeather wind degrees should be interpreted. Meanwhile `src/clients/weather_client.py:146-157` and `tests/test_weather_client.py:70-73` use positive-at-180° meteorological source directions, while `src/features/adjustments/weather.py:156-168` and `tests/test_weather_adjustment.py:89-91` use positive-at-0°."
+    },
+    {
+      "area": "skills",
+      "observation": "`feature-worker` still lacks the Windows-specific startup/validation caveats already captured in shared environment knowledge, so workers keep burning time on `.factory/init.sh` retries and shell-specific command rewrites.",
+      "evidence": "`C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\skills\\feature-worker\\SKILL.md:50` still prescribes `python -m py_compile src/features/*.py` and does not mention the Git Bash / Windows init pitfall. This session's transcript skeleton shows repeated `bash` attempts against `.factory/init.sh`, and handoff `C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\handoffs\\2026-03-19T18-16-32-903Z__t14-weather-engine__6bea10c3-2842-4114-a128-7517cccc8ee7.json` records `skillFeedback.followedProcedure: false` for that reason, while `.factory/library/environment.md:57-60` already documents the Windows workaround."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Fail. I reviewed the feature entry, worker handoff, transcript skeleton, feature-worker skill, shared-state files, commit `16f29988b0856eeb720a8900d5ad3a840047c42b`, and the resulting implementation/tests. The module otherwise matches the requested scope, but its wind-factor sign convention disagrees with the existing weather client, so the feature is not reviewably correct for real fetched weather data."
+}

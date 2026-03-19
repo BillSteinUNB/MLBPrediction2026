@@ -1,0 +1,28 @@
+{
+  "featureId": "t10-pitching-features",
+  "reviewedAt": "2026-03-19T18:30:28.747305Z",
+  "commitId": "b72beab8ea41dcb319df89f39c6cfd398313c016",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature adds the requested rolling starter metrics, Marcel blending, and home/away persistence, but opener handling is still not reliable enough to satisfy VAL-FEAT-004. One blocking path suppresses history-based opener detection whenever a lineup object exists, and a separate missing-data edge case can manufacture opener flags when Statcast rows are absent.",
+    "issues": [
+      {
+        "file": "src/features/pitching.py",
+        "line": 246,
+        "severity": "blocking",
+        "description": "When a lineup record exists, `_build_pitching_context()` uses `lineup.is_opener` instead of combining it with the pitcher-history fallback. Because `Lineup.is_opener` defaults to `False` (`src/models/lineup.py:28`) and `fetch_confirmed_lineups()` can still return a lineup when `starter_avg_innings_pitched` could not be fetched (`src/clients/lineup_client.py:675-687`), real opener/bullpen starters with sub-3.0 recent IP get treated as normal starters. I reproduced this with the committed code: a pitcher with two prior 1.0/1.1 IP starts plus a lineup object carrying `is_opener=False` produced `home_starter_is_opener = 0.0`, `home_starter_uses_team_composite = 0.0`, and starter-only xFIP instead of the required team composite behavior."
+      },
+      {
+        "file": "src/features/pitching.py",
+        "line": 451,
+        "severity": "non_blocking",
+        "description": "The empty-Statcast fallback silently converts missing pitch data into baseline rows that later normalize to `innings_pitched = 0.0` and baseline metrics (`_build_start_metrics_from_statcast()` at lines 451-458 plus `_normalize_start_metrics()` at lines 366-371). Those synthetic zero-IP starts then feed `_is_opener_from_history()` at lines 265-274 and can flip a pitcher into opener status even though the only problem was missing data. I reproduced this locally by normalizing the empty-Statcast branch: the resulting rows had `innings_pitched` 0.0 / `xfip` 4.2 and `_is_opener_from_history()` returned `True`."
+      }
+    ]
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "Fail. I reviewed the mission docs, feature definition, worker handoff/transcript skeleton, skill/shared-state files, and commit `b72beab8ea41dcb319df89f39c6cfd398313c016`. The implementation covers most requested pitching features, but opener handling is not robust enough for the feature contract: a lineup object can suppress legitimate opener detection, and missing Statcast rows can also distort opener classification."
+}

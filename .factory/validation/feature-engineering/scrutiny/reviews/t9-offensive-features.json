@@ -1,0 +1,33 @@
+{
+  "featureId": "t9-offensive-features",
+  "reviewedAt": "2026-03-19T18:28:02.978712Z",
+  "commitId": "56de0940c97158784ae8af8d40e989a5ddea68be",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature correctly persists anti-leakage-safe team rolling offense metrics and Marcel blending, but the lineup-weighted path does not satisfy the contract: it is computed from a season-level batting leaderboard snapshot instead of 7/14/30/60 as-of rolling history, which can leak future performance into historical feature rows.",
+    "issues": [
+      {
+        "file": "src/features/offense.py",
+        "line": 257,
+        "severity": "blocking",
+        "description": "_build_lineup_metric_lookup() builds lineup values from fetch_batting_stats(season, min_pa=0) once per date and reuses that same season-level snapshot for every 7/14/30/60 window (compute_offensive_features() then applies it at lines 140-157). fetch_batting_stats() itself has no as-of date parameter (src/clients/statcast_client.py:155-165), so an April backfill can consume later-season player performance, and once the regression blend turns off the 30g/60g lineup features collapse to the same non-rolling value. That violates the feature contract's rolling-window and anti-leakage requirements for lineup-weighted offense."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "services",
+      "observation": "Windows worker startup guidance is still incomplete. The repo documents Windows-specific install/test commands, but there is no corresponding init command in services.yaml, and this worker again had to deviate from the normal init flow after running bash .factory/init.sh on Windows.",
+      "evidence": "Handoff skillFeedback in C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\handoffs\\2026-03-19T17-27-04-331Z__t9-offensive-features__1259c3dc-1e2f-4994-bc31-f65be4d6d297.json documents the init deviation and suggests adding an init_windows command; compare C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\services.yaml, which has Windows entries for install, test, typecheck, and lint but no init_windows command, and C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\library\\environment.md, which documents the Windows shell gotcha."
+    },
+    {
+      "area": "knowledge",
+      "observation": "Shared state does not currently warn feature workers that fetch_batting_stats() returns season-level FanGraphs leaderboards with no date scoping, making it unsafe for historical anti-leakage lineup feature backfills unless player-level as-of snapshots are persisted elsewhere.",
+      "evidence": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\src\\clients\\statcast_client.py:155-165 exposes only season, min_pa, and refresh for batting stats, while C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\library\\architecture.md and C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\library\\environment.md describe anti-leakage requirements generally but do not capture this ingestion limitation. The worker handoff's discovered issue also calls out the lack of dated player offensive snapshots."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Fail. I reviewed the handoff, transcript skeleton, skill file, shared-state docs, and commit 56de0940c97158784ae8af8d40e989a5ddea68be. Team rolling features and Marcel blending look aligned with the contract, but the lineup-weighted features are sourced from a season-level batting leaderboard snapshot rather than as-of rolling windows, so the feature does not fully satisfy t9-offensive-features or VAL-CROSS-002."
+}
