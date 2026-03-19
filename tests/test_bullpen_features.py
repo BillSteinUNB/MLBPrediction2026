@@ -1,0 +1,314 @@
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+from src.db import init_db
+
+
+def _seed_game(
+    db_path: Path,
+    *,
+    game_pk: int,
+    game_date: str,
+    home_team: str,
+    away_team: str,
+) -> None:
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO games (game_pk, date, home_team, away_team, venue, status)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (game_pk, game_date, home_team, away_team, "Test Park", "scheduled"),
+        )
+        connection.commit()
+
+
+def _bullpen_metrics_by_season() -> dict[int, pd.DataFrame]:
+    return {
+        2025: pd.DataFrame(
+            [
+                {
+                    "game_pk": 5001,
+                    "game_date": "2025-04-03",
+                    "team": "NYY",
+                    "pitcher_id": 15,
+                    "pitch_count": 30,
+                    "innings_pitched": 2.0,
+                    "xfip": 3.8,
+                    "inherited_runners": 2,
+                    "inherited_runners_scored": 1,
+                },
+                {
+                    "game_pk": 5002,
+                    "game_date": "2025-04-05",
+                    "team": "NYY",
+                    "pitcher_id": 11,
+                    "pitch_count": 20,
+                    "innings_pitched": 1.0,
+                    "xfip": 3.0,
+                    "inherited_runners": 1,
+                    "inherited_runners_scored": 0,
+                },
+                {
+                    "game_pk": 5003,
+                    "game_date": "2025-04-06",
+                    "team": "NYY",
+                    "pitcher_id": 12,
+                    "pitch_count": 15,
+                    "innings_pitched": 1.0,
+                    "xfip": 4.0,
+                    "inherited_runners": 2,
+                    "inherited_runners_scored": 1,
+                },
+                {
+                    "game_pk": 5004,
+                    "game_date": "2025-04-07",
+                    "team": "NYY",
+                    "pitcher_id": 13,
+                    "pitch_count": 18,
+                    "innings_pitched": 1.0,
+                    "xfip": 3.5,
+                    "inherited_runners": 0,
+                    "inherited_runners_scored": 0,
+                },
+                {
+                    "game_pk": 5005,
+                    "game_date": "2025-04-08",
+                    "team": "NYY",
+                    "pitcher_id": 11,
+                    "pitch_count": 22,
+                    "innings_pitched": 1.0,
+                    "xfip": 3.2,
+                    "inherited_runners": 1,
+                    "inherited_runners_scored": 1,
+                },
+                {
+                    "game_pk": 5006,
+                    "game_date": "2025-04-09",
+                    "team": "NYY",
+                    "pitcher_id": 14,
+                    "pitch_count": 16,
+                    "innings_pitched": 1.0,
+                    "xfip": 4.5,
+                    "inherited_runners": 3,
+                    "inherited_runners_scored": 1,
+                },
+                {
+                    "game_pk": 6001,
+                    "game_date": "2025-04-06",
+                    "team": "BOS",
+                    "pitcher_id": 21,
+                    "pitch_count": 14,
+                    "innings_pitched": 1.0,
+                    "xfip": 4.2,
+                    "inherited_runners": 1,
+                    "inherited_runners_scored": 1,
+                },
+                {
+                    "game_pk": 6002,
+                    "game_date": "2025-04-08",
+                    "team": "BOS",
+                    "pitcher_id": 22,
+                    "pitch_count": 18,
+                    "innings_pitched": 1.0,
+                    "xfip": 3.9,
+                    "inherited_runners": 0,
+                    "inherited_runners_scored": 0,
+                },
+                {
+                    "game_pk": 6003,
+                    "game_date": "2025-04-09",
+                    "team": "BOS",
+                    "pitcher_id": 23,
+                    "pitch_count": 12,
+                    "innings_pitched": 1.0,
+                    "xfip": 3.7,
+                    "inherited_runners": 2,
+                    "inherited_runners_scored": 0,
+                },
+                {
+                    "game_pk": 7001,
+                    "game_date": "2025-04-10",
+                    "team": "NYY",
+                    "pitcher_id": 99,
+                    "pitch_count": 200,
+                    "innings_pitched": 3.0,
+                    "xfip": 9.5,
+                    "inherited_runners": 10,
+                    "inherited_runners_scored": 10,
+                },
+                {
+                    "game_pk": 7001,
+                    "game_date": "2025-04-10",
+                    "team": "BOS",
+                    "pitcher_id": 88,
+                    "pitch_count": 120,
+                    "innings_pitched": 2.0,
+                    "xfip": 8.0,
+                    "inherited_runners": 8,
+                    "inherited_runners_scored": 8,
+                },
+            ]
+        ),
+        2024: pd.DataFrame(),
+    }
+
+
+def _early_season_metrics() -> dict[int, pd.DataFrame]:
+    return {
+        2025: pd.DataFrame(
+            [
+                {
+                    "game_pk": 4001,
+                    "game_date": "2025-04-01",
+                    "team": "NYY",
+                    "pitcher_id": 11,
+                    "pitch_count": 24,
+                    "innings_pitched": 1.0,
+                    "xfip": 2.8,
+                    "inherited_runners": 2,
+                    "inherited_runners_scored": 1,
+                },
+                {
+                    "game_pk": 4002,
+                    "game_date": "2025-04-01",
+                    "team": "BOS",
+                    "pitcher_id": 21,
+                    "pitch_count": 18,
+                    "innings_pitched": 1.0,
+                    "xfip": 3.6,
+                    "inherited_runners": 1,
+                    "inherited_runners_scored": 0,
+                },
+            ]
+        ),
+        2024: pd.DataFrame(),
+    }
+
+
+def _fake_bullpen_metrics_fetcher(metrics_by_season: dict[int, pd.DataFrame]):
+    def _fetcher(
+        season: int,
+        *,
+        db_path: str | Path,
+        end_date=None,
+        refresh: bool = False,
+    ) -> pd.DataFrame:
+        _ = db_path
+        _ = refresh
+        dataframe = metrics_by_season.get(season, pd.DataFrame()).copy()
+        if dataframe.empty or end_date is None:
+            return dataframe
+        return dataframe.loc[pd.to_datetime(dataframe["game_date"]).dt.date <= end_date].reset_index(
+            drop=True
+        )
+
+    return _fetcher
+
+
+def test_compute_bullpen_features_calculates_fatigue_and_rolling_rates(
+    tmp_path: Path,
+) -> None:
+    from src.features.bullpen import compute_bullpen_features
+
+    db_path = tmp_path / "bullpen.db"
+    init_db(db_path)
+    _seed_game(
+        db_path,
+        game_pk=7001,
+        game_date="2025-04-10T20:05:00+00:00",
+        home_team="NYY",
+        away_team="BOS",
+    )
+
+    rows = compute_bullpen_features(
+        "2025-04-10",
+        db_path=db_path,
+        bullpen_metrics_fetcher=_fake_bullpen_metrics_fetcher(_bullpen_metrics_by_season()),
+    )
+
+    by_name = {row.feature_name: row.feature_value for row in rows}
+    expected_home_xfip = (3.8 * 2 + 3.0 + 4.0 + 3.5 + 3.2 + 4.5) / 7
+    leaked_home_xfip = (expected_home_xfip * 7 + 9.5 * 3) / 10
+
+    assert by_name["home_team_bullpen_pitch_count_3d"] == pytest.approx(56.0)
+    assert by_name["home_team_bullpen_pitch_count_5d"] == pytest.approx(91.0)
+    assert by_name["home_team_bullpen_avg_rest_days_top5"] == pytest.approx(2.4)
+    assert by_name["home_team_bullpen_ir_pct_30g"] == pytest.approx(4 / 9)
+    assert by_name["home_team_bullpen_xfip"] == pytest.approx(expected_home_xfip)
+    assert by_name["home_team_bullpen_high_leverage_available_count"] == pytest.approx(3.0)
+    assert by_name["away_team_bullpen_pitch_count_3d"] == pytest.approx(30.0)
+    assert by_name["home_team_bullpen_xfip"] < leaked_home_xfip
+
+    with sqlite3.connect(db_path) as connection:
+        stored = connection.execute(
+            """
+            SELECT as_of_timestamp, window_size
+            FROM features
+            WHERE game_pk = ? AND feature_name = ?
+            """,
+            (7001, "home_team_bullpen_ir_pct_30g"),
+        ).fetchone()
+
+    assert stored == ("2025-04-09T00:00:00+00:00", 30)
+
+    compute_bullpen_features(
+        "2025-04-10",
+        db_path=db_path,
+        bullpen_metrics_fetcher=_fake_bullpen_metrics_fetcher(_bullpen_metrics_by_season()),
+    )
+
+    with sqlite3.connect(db_path) as connection:
+        feature_count = connection.execute(
+            "SELECT COUNT(*) FROM features WHERE game_pk = ?",
+            (7001,),
+        ).fetchone()[0]
+
+    assert feature_count == len(rows)
+
+
+def test_compute_bullpen_features_returns_defaults_for_first_three_days(
+    tmp_path: Path,
+) -> None:
+    from src.features.bullpen import compute_bullpen_features
+
+    db_path = tmp_path / "bullpen.db"
+    init_db(db_path)
+    _seed_game(
+        db_path,
+        game_pk=7101,
+        game_date="2025-04-02T20:05:00+00:00",
+        home_team="NYY",
+        away_team="BOS",
+    )
+
+    rows = compute_bullpen_features(
+        "2025-04-02",
+        db_path=db_path,
+        bullpen_metrics_fetcher=_fake_bullpen_metrics_fetcher(_early_season_metrics()),
+    )
+
+    by_name = {row.feature_name: row.feature_value for row in rows}
+    assert by_name["home_team_bullpen_pitch_count_3d"] == 0.0
+    assert by_name["home_team_bullpen_pitch_count_5d"] == 0.0
+    assert by_name["home_team_bullpen_avg_rest_days_top5"] == 3.0
+    assert by_name["home_team_bullpen_ir_pct_30g"] == 0.0
+    assert by_name["home_team_bullpen_xfip"] == pytest.approx(4.2)
+    assert by_name["home_team_bullpen_high_leverage_available_count"] == 5.0
+
+    with sqlite3.connect(db_path) as connection:
+        stored = connection.execute(
+            """
+            SELECT as_of_timestamp, window_size
+            FROM features
+            WHERE game_pk = ? AND feature_name = ?
+            """,
+            (7101, "home_team_bullpen_pitch_count_3d"),
+        ).fetchone()
+
+    assert stored == ("2025-04-01T00:00:00+00:00", 3)

@@ -238,7 +238,7 @@ def test_fetch_catcher_framing_and_team_game_logs_persist_parquet(
 ) -> None:
     from src.clients import statcast_client
 
-    requested_teams: list[str] = []
+    requested_calls: list[tuple[str, str]] = []
 
     def fake_catcher_framing(season: int, min_called_p: int | str = "q") -> pd.DataFrame:
         assert season == 2025
@@ -246,7 +246,7 @@ def test_fetch_catcher_framing_and_team_game_logs_persist_parquet(
         return pd.DataFrame({"name": ["Jose Trevino"], "runs_extra_strikes": [6.2]})
 
     def fake_team_game_logs(season: int, team: str, log_type: str = "batting") -> pd.DataFrame:
-        requested_teams.append(team)
+        requested_calls.append((team, log_type))
         return pd.DataFrame(
             [["2025-09-01", 5, True]],
             columns=pd.MultiIndex.from_tuples(
@@ -263,13 +263,21 @@ def test_fetch_catcher_framing_and_team_game_logs_persist_parquet(
 
     framing_df = statcast_client.fetch_catcher_framing(2025, raw_data_root=tmp_path)
     team_logs_df = statcast_client.fetch_team_game_logs(2025, "TB", raw_data_root=tmp_path)
+    pitching_logs_df = statcast_client.fetch_team_game_logs(
+        2025,
+        "TB",
+        log_type="pitching",
+        raw_data_root=tmp_path,
+    )
 
     assert framing_df.loc[0, "runs_extra_strikes"] == 6.2
-    assert requested_teams == ["TBR"]
+    assert requested_calls == [("TBR", "batting"), ("TBR", "pitching")]
     assert all(isinstance(column, str) for column in team_logs_df.columns)
     assert {"Offense_Date", "Offense_R", "Home"}.issubset(team_logs_df.columns)
+    assert pitching_logs_df.equals(team_logs_df)
     assert (tmp_path / "catcher_framing" / "catcher_framing_2025.parquet").exists()
     assert (tmp_path / "team_game_logs" / "TBR_2025.parquet").exists()
+    assert (tmp_path / "team_game_logs" / "TBR_2025_pitching.parquet").exists()
 
 
 def test_fetch_catcher_framing_regenerates_stale_cache_when_metadata_changes(

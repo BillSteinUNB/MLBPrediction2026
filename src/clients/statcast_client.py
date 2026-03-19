@@ -269,6 +269,7 @@ def fetch_team_game_logs(
     season: int,
     team: str,
     *,
+    log_type: str = "batting",
     raw_data_root: str | Path = DEFAULT_RAW_DATA_ROOT,
     refresh: bool = False,
 ) -> pd.DataFrame:
@@ -276,13 +277,18 @@ def fetch_team_game_logs(
 
     raw_root = Path(raw_data_root)
     resolved_team = TEAM_GAME_LOG_CODES.get(team.upper(), team.upper())
-    parquet_path = raw_root / "team_game_logs" / f"{resolved_team}_{season}.parquet"
+    if log_type == "batting":
+        parquet_name = f"{resolved_team}_{season}.parquet"
+    else:
+        parquet_name = f"{resolved_team}_{season}_{log_type}.parquet"
+
+    parquet_path = raw_root / "team_game_logs" / parquet_name
     enable_pybaseball_cache(raw_root / "pybaseball_cache")
 
     if parquet_path.exists() and not refresh:
         return pd.read_parquet(parquet_path)
 
-    dataframe = team_game_logs(season, resolved_team, log_type="batting").copy()
+    dataframe = team_game_logs(season, resolved_team, log_type=log_type).copy()
     dataframe = _stringify_columns(dataframe)
     _write_parquet(dataframe, parquet_path)
     return dataframe
