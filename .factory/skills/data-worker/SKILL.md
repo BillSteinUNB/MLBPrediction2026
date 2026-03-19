@@ -16,6 +16,26 @@ Use this worker for features involving:
 - Pydantic data models
 - External API clients (The Odds API, pybaseball, MLB API, OpenWeatherMap)
 
+## Windows-Specific Setup
+
+On Windows, `.factory/init.sh` may fail in Git Bash due to `pip` not being on PATH after activation. Use direct interpreter invocation instead:
+
+```powershell
+# Install dependencies
+& ".venv\Scripts\python.exe" -m pip install -e ".[dev]"
+
+# Run tests
+& ".venv\Scripts\python.exe" -m pytest tests/ -v --tb=short
+
+# Syntax check (PowerShell)
+$env:PYTHONDONTWRITEBYTECODE=1; & ".venv\Scripts\python.exe" -m py_compile (Get-ChildItem -Path "src" -Recurse -Filter "*.py" | ForEach-Object { $_.FullName })
+
+# Lint
+& ".venv\Scripts\python.exe" -m ruff check src tests
+```
+
+See `.factory/library/environment.md` for additional Windows notes.
+
 ## Work Procedure
 
 1. **Read existing context**: Check `.factory/library/` for established patterns, `config/settings.yaml` for existing configuration, `src/db.py` for schema.
@@ -42,7 +62,7 @@ Use this worker for features involving:
    - For config: verify loading with Python import
 
 6. **Run linters and type checks**:
-   - `python -m py_compile src/**/*.py`
+   - `python -m py_compile src/**/*.py` (use PowerShell variant on Windows)
    - Ensure no syntax errors
 
 ## Example Handoff
