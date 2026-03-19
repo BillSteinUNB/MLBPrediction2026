@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import unicodedata
 from contextlib import nullcontext
 from datetime import datetime, timezone
 from hashlib import blake2b
@@ -204,6 +205,103 @@ def _fallback_game_pk(event_id: str) -> int:
     return -((int.from_bytes(digest, byteorder="big") & ((1 << 63) - 1)) or 1)
 
 
+def _normalize_text(value: str | None) -> str:
+    if value is None:
+        return ""
+
+    normalized = unicodedata.normalize("NFKD", str(value))
+    without_marks = "".join(character for character in normalized if not unicodedata.combining(character))
+    return " ".join(without_marks.casefold().split())
+
+
+def _extract_event_venue(event: Mapping[str, Any] | None) -> str | None:
+    if not isinstance(event, Mapping):
+        return None
+
+    for field_name in ("venue", "stadium", "site"):
+        candidate = event.get(field_name)
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+
+        if isinstance(candidate, Mapping):
+            for nested_field_name in ("name", "full_name", "display_name"):
+                nested_candidate = candidate.get(nested_field_name)
+                if isinstance(nested_candidate, str) and nested_candidate.strip():
+                    return nested_candidate.strip()
+
+    return None
+
+
+def _resolve_is_dome_for_venue(venue: str, *, fallback_stadium: Mapping[str, Any] | None) -> bool:
+    normalized_venue = _normalize_text(venue)
+    if not normalized_venue:
+        return False
+
+    candidate_stadiums: list[Mapping[str, Any]] = []
+    if isinstance(fallback_stadium, Mapping):
+        candidate_stadiums.append(fallback_stadium)
+
+    candidate_stadiums.extend(
+        stadium for stadium in STADIUMS_BY_TEAM_CODE.values() if isinstance(stadium, Mapping)
+    )
+
+    for stadium in candidate_stadiums:
+        park_name = stadium.get("park_name")
+        if isinstance(park_name, str) and _normalize_text(park_name) == normalized_venue:
+            return bool(stadium.get("is_dome"))
+
+    return False
+
+
+def _resolve_backfill_game_context(
+    *,
+    home_team_name: str,
+    home_team_code: str,
+    event_venue: str | None,
+) -> tuple[str, bool, bool]:
+    stadium = STADIUMS_BY_TEAM_CODE.get(home_team_code, {})
+    fallback_venue = stadium.get("park_name") if isinstance(stadium, Mapping) else None
+    fallback_is_dome = bool(stadium.get("is_dome")) if isinstance(stadium, Mapping) else False
+
+    if isinstance(event_venue, str) and event_venue.strip():
+        resolved_venue = event_venue.strip()
+        return (
+            resolved_venue,
+            _resolve_is_dome_for_venue(resolved_venue, fallback_stadium=stadium),
+            is_abs_active(resolved_venue),
+        )
+
+    if isinstance(fallback_venue, str) and fallback_venue:
+        return fallback_venue, fallback_is_dome, False
+
+    return home_team_name, False, False
+
+
+def _refresh_synthetic_game_row(
+    connection: sqlite3.Connection,
+    *,
+    game_pk: int,
+    home_team_name: str,
+    home_team_code: str,
+    event_venue: str | None,
+) -> None:
+    venue, is_dome, abs_active = _resolve_backfill_game_context(
+        home_team_name=home_team_name,
+        home_team_code=home_team_code,
+        event_venue=event_venue,
+    )
+    connection.execute(
+        """
+        UPDATE games
+        SET venue = ?,
+            is_dome = ?,
+            is_abs_active = ?
+        WHERE game_pk = ?
+        """,
+        (venue, int(is_dome), int(abs_active), game_pk),
+    )
+
+
 def _ensure_game_row(
     connection: sqlite3.Connection,
     *,
@@ -211,6 +309,7 @@ def _ensure_game_row(
     home_team_name: str,
     away_team_name: str,
     commence_time: datetime,
+    event_venue: str | None = None,
 ) -> int | None:
     existing_game_pk = _resolve_game_pk(
         connection,
@@ -218,21 +317,27 @@ def _ensure_game_row(
         away_team_name=away_team_name,
         commence_time=commence_time,
     )
-    if existing_game_pk is not None:
-        return existing_game_pk
-
     home_team_code = TEAM_NAME_TO_CODE.get(home_team_name)
     away_team_code = TEAM_NAME_TO_CODE.get(away_team_name)
+    if existing_game_pk is not None:
+        if existing_game_pk < 0 and home_team_code is not None:
+            _refresh_synthetic_game_row(
+                connection,
+                game_pk=existing_game_pk,
+                home_team_name=home_team_name,
+                home_team_code=home_team_code,
+                event_venue=event_venue,
+            )
+        return existing_game_pk
+
     if home_team_code is None or away_team_code is None:
         return None
 
-    stadium = STADIUMS_BY_TEAM_CODE.get(home_team_code, {})
-    venue = stadium.get("park_name") if isinstance(stadium, Mapping) else None
-    if not isinstance(venue, str) or not venue:
-        venue = home_team_name
-
-    is_dome = bool(stadium.get("is_dome")) if isinstance(stadium, Mapping) else False
-    abs_active = is_abs_active(venue)
+    venue, is_dome, abs_active = _resolve_backfill_game_context(
+        home_team_name=home_team_name,
+        home_team_code=home_team_code,
+        event_venue=event_venue,
+    )
     game_pk = _fallback_game_pk(event_id)
 
     existing_row = connection.execute(
@@ -405,6 +510,7 @@ def fetch_mlb_odds(
                     home_team_name=event["home_team"],
                     away_team_name=event["away_team"],
                     commence_time=commence_time,
+                    event_venue=_extract_event_venue(event),
                 )
                 if game_pk is None:
                     continue

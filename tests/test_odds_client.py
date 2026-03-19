@@ -39,8 +39,9 @@ def _build_event(
     commence_time: str,
     home_team: str,
     away_team: str,
+    venue: str | None = None,
 ) -> dict[str, str]:
-    return {
+    payload = {
         "id": event_id,
         "sport_key": "baseball_mlb",
         "sport_title": "MLB",
@@ -48,6 +49,10 @@ def _build_event(
         "home_team": home_team,
         "away_team": away_team,
     }
+    if venue is not None:
+        payload["venue"] = venue
+
+    return payload
 
 
 def _build_event_odds_payload(
@@ -331,7 +336,9 @@ def test_freeze_odds_marks_snapshots_as_frozen(tmp_path: Path) -> None:
     assert frozen_row == (1,)
 
 
-def test_fetch_mlb_odds_creates_missing_game_row_from_event_metadata(tmp_path: Path) -> None:
+def test_fetch_mlb_odds_creates_missing_game_row_and_defers_abs_when_venue_unknown(
+    tmp_path: Path,
+) -> None:
     from src.clients.odds_client import fetch_mlb_odds
 
     db_path = tmp_path / "odds.db"
@@ -378,14 +385,70 @@ def test_fetch_mlb_odds_creates_missing_game_row_from_event_metadata(tmp_path: P
 
     with sqlite3.connect(db_path) as connection:
         game_row = connection.execute(
-            "SELECT game_pk, date, home_team, away_team, venue, status FROM games"
+            "SELECT game_pk, date, home_team, away_team, venue, is_abs_active, status FROM games"
         ).fetchone()
 
     assert len(snapshots) == 2
     assert game_row is not None
     assert game_row[0] == snapshots[0].game_pk
     assert game_row[1] == "2026-04-15T20:05:00+00:00"
-    assert game_row[2:] == ("NYY", "BOS", "Yankee Stadium", "scheduled")
+    assert game_row[2:] == ("NYY", "BOS", "Yankee Stadium", 0, "scheduled")
+
+
+def test_fetch_mlb_odds_uses_event_venue_metadata_for_abs_exception_games(tmp_path: Path) -> None:
+    from src.clients.odds_client import fetch_mlb_odds
+
+    db_path = tmp_path / "odds.db"
+    init_db(db_path)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/events"):
+            return httpx.Response(
+                200,
+                json=[
+                    _build_event(
+                        "evt-mexico-city",
+                        commence_time="2026-04-25T23:05:00Z",
+                        home_team="Houston Astros",
+                        away_team="Colorado Rockies",
+                        venue="Alfredo Harp Helu Stadium - Mexico City Series",
+                    )
+                ],
+            )
+
+        return httpx.Response(
+            200,
+            json=_build_event_odds_payload(
+                "evt-mexico-city",
+                commence_time="2026-04-25T23:05:00Z",
+                home_team="Houston Astros",
+                away_team="Colorado Rockies",
+            ),
+            headers={
+                "x-requests-last": "2",
+                "x-requests-used": "2",
+                "x-requests-remaining": "498",
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="https://api.the-odds-api.com")
+
+    snapshots = fetch_mlb_odds(
+        api_key="test-key",
+        db_path=db_path,
+        client=client,
+        commence_time_from=datetime(2026, 4, 25, 0, 0, tzinfo=UTC),
+        commence_time_to=datetime(2026, 4, 26, 0, 0, tzinfo=UTC),
+    )
+
+    with sqlite3.connect(db_path) as connection:
+        game_row = connection.execute(
+            "SELECT venue, is_abs_active FROM games WHERE game_pk = ?",
+            (snapshots[0].game_pk,),
+        ).fetchone()
+
+    assert len(snapshots) == 2
+    assert game_row == ("Alfredo Harp Helu Stadium - Mexico City Series", 0)
 
 
 def test_fetch_mlb_odds_commits_each_event_before_later_failure(tmp_path: Path) -> None:
