@@ -1,8 +1,8 @@
 {
   "milestone": "foundation",
-  "round": 3,
+  "round": 4,
   "status": "pass",
-  "overrideJustification": "ORCHESTRATOR OVERRIDE: The pybaseball version issue for t1-project-scaffolding is a documented design decision, not a bug. The GitHub version (2.2.7) works correctly and is documented in .factory/library/environment.md as a known contract mismatch. All other foundation features have been reviewed and fixed. Validators (pytest, typecheck, lint) all pass. The milestone is complete.",
+  "overrideJustification": "No new foundation implementation fix features were completed after round 3. This rerun therefore revalidated the current repository state only, while preserving the existing orchestrator-approved t1-project-scaffolding pybaseball version override as an accepted contract mismatch rather than a new blocking defect.",
   "validatorsRun": {
     "test": {
       "passed": true,
@@ -21,35 +21,21 @@
     }
   },
   "reviewsSummary": {
-    "total": 2,
-    "passed": 1,
-    "failed": 1,
-    "failedFeatures": [
-      "t1-project-scaffolding"
-    ]
+    "total": 0,
+    "passed": 0,
+    "failed": 0,
+    "failedFeatures": []
   },
-  "blockingIssues": [
-    {
-      "featureId": "t1-project-scaffolding",
-      "severity": "blocking",
-      "description": "Carried forward from rounds 1-2: `pyproject.toml` still specifies `pybaseball @ git+https://github.com/jldbc/pybaseball.git` instead of the feature's explicit `pybaseball>=2.3` requirement, and the current virtualenv still reports pybaseball 2.2.7. No dedicated fix feature has landed for this mismatch yet."
-    }
-  ],
-  "appliedUpdates": [
-    {
-      "target": "library",
-      "description": "Recorded the missing `worker-4991f8d1 isolate unrelated model WIP` stash note in `.factory/library/workspace-state.md` so future workers know that repo-local model WIP was intentionally isolated during the statcast cache-fix validation.",
-      "sourceFeature": "fix-t6-cache-invalidation"
-    }
-  ],
-  "suggestedGuidanceUpdates": [
-    {
-      "target": "data-worker skill",
-      "suggestion": "Align the skill's Windows initialization/validation guidance with the repo's documented workflow by pointing workers to the direct `.venv\\Scripts\\python.exe` / `*_windows` commands and documenting the fallback when `.factory/init.sh` fails in Bash.",
-      "evidence": "The fix-t6-cache-invalidation review again recorded a justified deviation because the shared skill still prescribes generic pytest/py_compile commands while the Windows-safe workflow already lives in `.factory/library/environment.md` and `.factory/services.yaml`.",
-      "isSystemic": true
-    }
-  ],
+  "blockingIssues": [],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [],
   "rejectedObservations": [],
-  "previousRound": ".factory/validation/foundation/scrutiny/synthesis.round2.json"
+  "previousRound": ".factory/validation/foundation/scrutiny/synthesis.round3.json",
+  "rerunContext": {
+    "priorFailedFeatures": [
+      "t1-project-scaffolding"
+    ],
+    "reviewCandidates": [],
+    "note": "All completed foundation implementation features already had review reports on disk, and no new foundation fix feature landed after round 3 to warrant a fresh scrutiny-feature-reviewer run."
+  }
 }
