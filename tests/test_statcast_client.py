@@ -111,8 +111,9 @@ def test_fetch_fielding_stats_merges_fangraphs_drs_with_statcast_oaa(
 
     positions_requested: list[int] = []
 
-    def fake_fielding_stats(season: int) -> pd.DataFrame:
+    def fake_fielding_stats(season: int, qual: int | None = None) -> pd.DataFrame:
         assert season == 2025
+        assert qual == 0
         return pd.DataFrame(
             {
                 "Name": ["Anthony Volpe", "Alex Verdugo"],
@@ -121,9 +122,16 @@ def test_fetch_fielding_stats_merges_fangraphs_drs_with_statcast_oaa(
             }
         )
 
-    def fake_oaa(year: int, pos: int, min_att: str = "q", view: str = "Fielder") -> pd.DataFrame:
+    def fake_oaa(
+        year: int,
+        pos: int,
+        min_att: int | str = "q",
+        view: str = "Fielder",
+    ) -> pd.DataFrame:
         positions_requested.append(pos)
         assert year == 2025
+        assert min_att == 0
+        assert view == "Fielder"
         return pd.DataFrame(
             {
                 "name": ["Anthony Volpe", "Alex Verdugo"],
@@ -151,8 +159,9 @@ def test_fetch_catcher_framing_and_team_game_logs_persist_parquet(
 
     requested_teams: list[str] = []
 
-    def fake_catcher_framing(season: int) -> pd.DataFrame:
+    def fake_catcher_framing(season: int, min_called_p: int | str = "q") -> pd.DataFrame:
         assert season == 2025
+        assert min_called_p == 0
         return pd.DataFrame({"name": ["Jose Trevino"], "runs_extra_strikes": [6.2]})
 
     def fake_team_game_logs(season: int, team: str, log_type: str = "batting") -> pd.DataFrame:

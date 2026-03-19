@@ -24,6 +24,7 @@ from src.config import _load_settings_yaml
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RAW_DATA_ROOT = REPO_ROOT / "data" / "raw"
 DEFAULT_PYBASEBALL_CACHE_DIR = DEFAULT_RAW_DATA_ROOT / "pybaseball_cache"
+UNQUALIFIED_LEADERBOARD_MINIMUM = 0
 OAA_POSITIONS: tuple[int, ...] = (3, 4, 5, 6, 7, 8, 9)
 TEAM_GAME_LOG_CODES = {
     "ARI": "ARI",
@@ -184,7 +185,9 @@ def fetch_fielding_stats(
     if parquet_path.exists() and not refresh:
         return pd.read_parquet(parquet_path)
 
-    fangraphs_frame = _stringify_columns(fielding_stats(season).copy())
+    fangraphs_frame = _stringify_columns(
+        fielding_stats(season, qual=UNQUALIFIED_LEADERBOARD_MINIMUM).copy()
+    )
     oaa_frame = _load_oaa_totals(season).rename(columns={"OAA": "statcast_oaa"})
 
     merged = fangraphs_frame.copy()
@@ -235,7 +238,12 @@ def fetch_catcher_framing(
     if parquet_path.exists() and not refresh:
         return pd.read_parquet(parquet_path)
 
-    dataframe = _stringify_columns(statcast_catcher_framing(season).copy())
+    dataframe = _stringify_columns(
+        statcast_catcher_framing(
+            season,
+            min_called_p=UNQUALIFIED_LEADERBOARD_MINIMUM,
+        ).copy()
+    )
     _write_parquet(dataframe, parquet_path)
     return dataframe
 
@@ -303,7 +311,11 @@ def _normalize_statcast_day(dataframe: pd.DataFrame, query_date: date) -> pd.Dat
 def _load_oaa_totals(season: int) -> pd.DataFrame:
     frames: list[pd.DataFrame] = []
     for position in OAA_POSITIONS:
-        position_frame = statcast_outs_above_average(season, position)
+        position_frame = statcast_outs_above_average(
+            season,
+            position,
+            min_att=UNQUALIFIED_LEADERBOARD_MINIMUM,
+        )
         extracted = _extract_oaa_frame(position_frame)
         if not extracted.empty:
             frames.append(extracted)
