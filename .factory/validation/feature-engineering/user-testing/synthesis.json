@@ -1,0 +1,43 @@
+{
+  "milestone": "feature-engineering",
+  "round": 1,
+  "status": "fail",
+  "assertionsSummary": {
+    "total": 11,
+    "passed": 10,
+    "failed": 0,
+    "blocked": 1
+  },
+  "passedAssertions": [
+    "VAL-CROSS-002",
+    "VAL-FEAT-001",
+    "VAL-FEAT-002",
+    "VAL-FEAT-003",
+    "VAL-FEAT-004",
+    "VAL-FEAT-005",
+    "VAL-FEAT-006",
+    "VAL-FEAT-008",
+    "VAL-FEAT-009",
+    "VAL-FEAT-010"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [
+    {
+      "id": "VAL-CROSS-004",
+      "blockedBy": "The current repo snapshot does not expose separate src/pipeline/daily.py and src/backtest/run.py CLI entrypoints, so backtest-versus-production feature parity cannot be exercised from the real CLI surface."
+    }
+  ],
+  "appliedUpdates": [
+    {
+      "target": "user-testing.md",
+      "description": "Corrected the Windows virtualenv path to `.\\.venv\\Scripts\\python.exe` and added feature-engineering targeted test-file guidance.",
+      "source": "setup"
+    },
+    {
+      "target": "user-testing.md",
+      "description": "Documented the missing `src/pipeline/daily.py` and `src/backtest/run.py` entrypoints as the current blocker for `VAL-CROSS-004` CLI parity validation.",
+      "source": "flow-report"
+    }
+  ],
+  "previousRound": null
+}

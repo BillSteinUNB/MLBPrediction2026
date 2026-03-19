@@ -17,8 +17,14 @@ This is a batch processing system with no web UI. Validation is performed via:
 ### Foundation Milestone Setup Notes
 
 - No long-running services are required for user validation.
-- Use the repository virtualenv on Windows: `.\\venv\\Scripts\\python.exe`
+- Use the repository virtualenv on Windows: `.\\.venv\\Scripts\\python.exe`
 - Prefer isolated temp paths per validator for SQLite and raw-data artifacts.
+
+### Feature-Engineering Milestone Setup Notes
+
+- Target CLI validation through isolated pytest runs plus small Python evidence snippets.
+- Primary targeted test files for this milestone are `tests/test_offense_features.py`, `tests/test_pitching_features.py`, `tests/test_defense_features.py`, `tests/test_adjustments.py`, and `tests/test_baselines.py`.
+- Current repo snapshot does not include `src/pipeline/daily.py` or `src/backtest/run.py`, so `VAL-CROSS-004` cannot be exercised through a real backtest-vs-production CLI comparison during feature-engineering user testing.
 
 ### Validation Tools
 
@@ -70,7 +76,7 @@ sqlite3 data/mlb.db "SELECT * FROM predictions WHERE date='2025-09-15'"
 ## Flow Validator Guidance: CLI
 
 - Stay on the CLI surface only; do not use browser automation.
-- Use `.\\venv\\Scripts\\python.exe` for Python and pytest commands.
+- Use `.\\.venv\\Scripts\\python.exe` for Python and pytest commands.
 - Keep each validator inside its own isolation directory or temp DB path.
 - Do not reuse shared `data\\mlb.db` unless a test explicitly requires it.
 - Prefer deterministic checks with targeted pytest files and small Python snippets.
