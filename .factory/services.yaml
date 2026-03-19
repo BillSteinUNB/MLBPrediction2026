@@ -25,4 +25,4 @@ pipeline:
   daily: python -m src.pipeline.daily --date today --mode prod
   daily_dryrun: python -m src.pipeline.daily --date today --mode prod --dry-run
   backtest: python -m src.backtest.run --start 2019-03-20 --end 2025-10-31
-  calibrate_eval: python -m src.model.calibrate --eval
+  calibrate_eval: python -m src.model.calibration
