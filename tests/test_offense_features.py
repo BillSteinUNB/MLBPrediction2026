@@ -150,7 +150,7 @@ def _only_prior_game_logs() -> dict[tuple[int, str], pd.DataFrame]:
     }
 
 
-def _batting_stats() -> dict[int, pd.DataFrame]:
+def _season_snapshot_batting_stats() -> dict[int, pd.DataFrame]:
     return {
         2025: pd.DataFrame(
             {
@@ -176,6 +176,33 @@ def _batting_stats() -> dict[int, pd.DataFrame]:
                 "BB%": [11.0, 9.0, 9.0, 8.0],
             }
         ),
+    }
+
+
+def _dated_batting_logs() -> dict[int, pd.DataFrame]:
+    return {
+        2025: pd.DataFrame(
+            {
+                "player_id": [101, 101, 101, 102, 102, 102, 201, 202],
+                "game_date": [
+                    "2025-04-01",
+                    "2025-04-02",
+                    "2025-04-03",
+                    "2025-04-01",
+                    "2025-04-02",
+                    "2025-04-03",
+                    "2025-04-02",
+                    "2025-04-02",
+                ],
+                "PA": [4, 4, 10, 5, 4, 10, 4, 4],
+                "wRC+": [140.0, 110.0, 0.0, 90.0, 95.0, 0.0, 102.0, 98.0],
+                "wOBA": [0.41, 0.36, 0.0, 0.28, 0.30, 0.0, 0.33, 0.31],
+                "ISO": [0.25, 0.21, 0.0, 0.16, 0.17, 0.0, 0.18, 0.15],
+                "BABIP": [0.34, 0.31, 0.0, 0.29, 0.30, 0.0, 0.31, 0.30],
+                "K%": [18.0, 19.0, 45.0, 24.0, 23.0, 40.0, 23.0, 24.0],
+                "BB%": [13.0, 11.0, 0.0, 8.0, 9.0, 0.0, 9.0, 8.0],
+            }
+        )
     }
 
 
@@ -226,7 +253,7 @@ def test_compute_offensive_features_excludes_current_game_and_sets_as_of_timesta
     def fake_batting_fetcher(season: int, min_pa: int = 50, refresh: bool = False) -> pd.DataFrame:
         _ = min_pa
         _ = refresh
-        return _batting_stats()[season].copy()
+        return _season_snapshot_batting_stats()[season].copy()
 
     rows = compute_offensive_features(
         "2025-04-03",
@@ -282,7 +309,7 @@ def test_compute_offensive_features_applies_marcel_blending_early_season(tmp_pat
     def fake_batting_fetcher(season: int, min_pa: int = 50, refresh: bool = False) -> pd.DataFrame:
         _ = min_pa
         _ = refresh
-        return _batting_stats()[season].copy()
+        return _season_snapshot_batting_stats()[season].copy()
 
     rows = compute_offensive_features(
         "2025-04-02",
@@ -301,7 +328,7 @@ def test_compute_offensive_features_applies_marcel_blending_early_season(tmp_pat
     assert home_lineup_row.feature_value == pytest.approx(home_team_row.feature_value)
 
 
-def test_compute_offensive_features_uses_lineup_weighted_metrics_when_available(
+def test_compute_offensive_features_falls_back_to_team_metrics_for_undated_batting_snapshots(
     tmp_path: Path,
 ) -> None:
     from src.features.offense import compute_offensive_features
@@ -317,35 +344,7 @@ def test_compute_offensive_features_uses_lineup_weighted_metrics_when_available(
     )
 
     team_logs = _team_logs_with_current_game()
-    batting_stats = _batting_stats()
-    prior_home = _woba(team_logs[(2024, "NYY")].iloc[0].to_dict())
-    lineup_current_woba = (0.36 * 100 + 0.30 * 300) / 400
-    expected_lineup_woba = (lineup_current_woba * 2 + prior_home * 30) / 32
-
-    current_season_rows = pd.concat(
-        [
-            team_logs[(2025, "NYY")].iloc[:2],
-            team_logs[(2025, "BOS")].iloc[:2],
-        ],
-        axis=1,
-    )
-    _ = current_season_rows
-
-    current_league_woba = (
-        sum(
-            _woba(row.to_dict()) * (row["AB"] + row["BB"] + row["HBP"] + row["SF"])
-            for team in ("NYY", "BOS")
-            for _, row in team_logs[(2025, team)].iloc[:2].iterrows()
-        )
-        / sum(
-            row["AB"] + row["BB"] + row["HBP"] + row["SF"]
-            for team in ("NYY", "BOS")
-            for _, row in team_logs[(2025, team)].iloc[:2].iterrows()
-        )
-    )
-    prior_home_wrc_plus = prior_home / current_league_woba * 100
-    lineup_current_wrc_plus = (120.0 * 100 + 80.0 * 300) / 400
-    expected_lineup_wrc_plus = (lineup_current_wrc_plus * 2 + prior_home_wrc_plus * 30) / 32
+    batting_stats = _season_snapshot_batting_stats()
 
     def fake_team_logs_fetcher(season: int, team: str, refresh: bool = False) -> pd.DataFrame:
         _ = refresh
@@ -367,7 +366,53 @@ def test_compute_offensive_features_uses_lineup_weighted_metrics_when_available(
     )
 
     by_name = {row.feature_name: row.feature_value for row in rows}
-    assert by_name["home_lineup_woba_7g"] != pytest.approx(by_name["home_team_woba_7g"])
-    assert by_name["home_lineup_woba_7g"] == pytest.approx(expected_lineup_woba)
-    assert by_name["home_lineup_wrc_plus_7g"] != pytest.approx(by_name["home_team_wrc_plus_7g"])
-    assert by_name["home_lineup_wrc_plus_7g"] == pytest.approx(expected_lineup_wrc_plus)
+    assert by_name["home_lineup_woba_7g"] == pytest.approx(by_name["home_team_woba_7g"])
+    assert by_name["home_lineup_wrc_plus_7g"] == pytest.approx(by_name["home_team_wrc_plus_7g"])
+
+
+def test_compute_offensive_features_uses_as_of_dated_lineup_metrics_when_available(
+    tmp_path: Path,
+) -> None:
+    from src.features.offense import compute_offensive_features
+
+    db_path = tmp_path / "offense.db"
+    init_db(db_path)
+    _seed_game(
+        db_path,
+        game_pk=558,
+        game_date="2025-04-03T20:05:00+00:00",
+        home_team="NYY",
+        away_team="BOS",
+    )
+
+    team_logs = _team_logs_with_current_game()
+    batting_logs = _dated_batting_logs()
+    prior_home = _woba(team_logs[(2024, "NYY")].iloc[0].to_dict())
+    lineup_current_woba = (0.36 * 4 + 0.30 * 4) / 8
+    leaked_lineup_woba = (0.41 * 4 + 0.36 * 4 + 0.0 * 10 + 0.28 * 5 + 0.30 * 4 + 0.0 * 10) / 37
+    expected_lineup_woba = (lineup_current_woba + prior_home * 2) / 3
+    leaked_lineup_feature = (leaked_lineup_woba + prior_home * 2) / 3
+
+    def fake_team_logs_fetcher(season: int, team: str, refresh: bool = False) -> pd.DataFrame:
+        _ = refresh
+        return team_logs[(season, team)].copy()
+
+    def fake_batting_fetcher(season: int, min_pa: int = 50, refresh: bool = False) -> pd.DataFrame:
+        _ = min_pa
+        _ = refresh
+        return batting_logs[season].copy()
+
+    rows = compute_offensive_features(
+        "2025-04-03",
+        db_path=db_path,
+        windows=(1,),
+        regression_weight=2,
+        lineup_player_ids={(558, "NYY"): [101, 102], (558, "BOS"): [201, 202]},
+        team_logs_fetcher=fake_team_logs_fetcher,
+        batting_stats_fetcher=fake_batting_fetcher,
+    )
+
+    by_name = {row.feature_name: row.feature_value for row in rows}
+    assert by_name["home_lineup_woba_1g"] != pytest.approx(by_name["home_team_woba_1g"])
+    assert by_name["home_lineup_woba_1g"] == pytest.approx(expected_lineup_woba)
+    assert by_name["home_lineup_woba_1g"] > leaked_lineup_feature

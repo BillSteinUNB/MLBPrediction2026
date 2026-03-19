@@ -80,6 +80,9 @@ def compute_offensive_features(
     lineup_metric_lookup = _build_lineup_metric_lookup(
         lineup_player_ids=lineup_player_ids or {},
         season=target_day.year,
+        target_day=target_day,
+        windows=windows,
+        league_woba=league_woba,
         refresh=refresh,
         batting_stats_fetcher=batting_stats_fetcher,
     )
@@ -97,8 +100,6 @@ def compute_offensive_features(
             team = str(game[team_key])
             team_frame = team_metrics.get(team, pd.DataFrame())
             team_priors = prior_team_baselines.get(team, {})
-            lineup_metrics = lineup_metric_lookup.get((game_pk, team))
-
             for window in windows:
                 current_window_metrics = _rolling_metrics_as_of(
                     team_frame=team_frame,
@@ -138,6 +139,7 @@ def compute_offensive_features(
                     )
 
                 lineup_feature_values = team_feature_values.copy()
+                lineup_metrics = lineup_metric_lookup.get((game_pk, team, window))
                 if lineup_metrics is not None:
                     for metric in METRICS:
                         lineup_feature_values[metric] = _apply_metric_blend(
@@ -248,51 +250,108 @@ def _build_lineup_metric_lookup(
     *,
     lineup_player_ids: Mapping[tuple[int, str], Sequence[int]],
     season: int,
+    target_day: date,
+    windows: Sequence[int],
+    league_woba: float,
     refresh: bool,
     batting_stats_fetcher: _BattingStatsFetcher,
-) -> dict[tuple[int, str], dict[str, float]]:
+) -> dict[tuple[int, str, int], dict[str, float]]:
     if not lineup_player_ids:
         return {}
 
     batting_stats = _normalize_batting_stats(
         batting_stats_fetcher(season, min_pa=0, refresh=refresh)
     )
+    if batting_stats.empty or "game_date" not in batting_stats.columns:
+        return {}
+
+    batting_stats = batting_stats.dropna(subset=["game_date"]).copy()
+    batting_stats = batting_stats.loc[batting_stats["game_date"].dt.date < target_day].copy()
     if batting_stats.empty:
         return {}
 
-    lookup: dict[tuple[int, str], dict[str, float]] = {}
+    lookup: dict[tuple[int, str, int], dict[str, float]] = {}
     for key, player_ids in lineup_player_ids.items():
         if not player_ids:
             continue
 
+        normalized_player_ids = [int(player_id) for player_id in player_ids]
         lineup_frame = batting_stats.loc[
-            batting_stats["player_id"].isin([int(player_id) for player_id in player_ids])
+            batting_stats["player_id"].isin(normalized_player_ids)
         ].copy()
         if lineup_frame.empty:
             continue
 
-        weights = lineup_frame["pa"].where(lineup_frame["pa"] > 0, 1.0)
-        weight_sum = float(weights.sum())
-        if weight_sum <= 0:
-            continue
-
-        lookup[key] = {
-            metric: float((lineup_frame[metric] * weights).sum() / weight_sum)
-            for metric in METRICS
-        }
+        for window in windows:
+            lineup_metrics = _aggregate_lineup_window_metrics(
+                lineup_frame,
+                player_ids=normalized_player_ids,
+                window=window,
+                league_woba=league_woba,
+            )
+            if lineup_metrics is not None:
+                lookup[(key[0], key[1], window)] = lineup_metrics
 
     return lookup
 
 
+def _aggregate_lineup_window_metrics(
+    lineup_frame: pd.DataFrame,
+    *,
+    player_ids: Sequence[int],
+    window: int,
+    league_woba: float,
+) -> dict[str, float] | None:
+    sampled_frames: list[pd.DataFrame] = []
+    for player_id in player_ids:
+        player_frame = lineup_frame.loc[lineup_frame["player_id"] == int(player_id)].copy()
+        if player_frame.empty:
+            continue
+        player_frame = player_frame.sort_values("game_date").tail(window)
+        if not player_frame.empty:
+            sampled_frames.append(player_frame)
+
+    if not sampled_frames:
+        return None
+
+    sampled = pd.concat(sampled_frames, ignore_index=True)
+    weights = sampled["pa"].where(sampled["pa"] > 0, 1.0).astype(float)
+    if float(weights.sum()) <= 0:
+        return None
+
+    metrics = {
+        metric: _weighted_metric_mean(
+            sampled[metric],
+            weights=weights,
+            default=_default_metric_baseline(metric),
+        )
+        for metric in ("woba", "iso", "babip", "k_pct", "bb_pct")
+    }
+
+    derived_wrc_plus = _team_wrc_plus(metrics["woba"], league_woba)
+    metrics["wrc_plus"] = _weighted_metric_mean(
+        sampled["wrc_plus"],
+        weights=weights,
+        default=derived_wrc_plus,
+    )
+    return metrics
+
+
 def _normalize_batting_stats(dataframe: pd.DataFrame) -> pd.DataFrame:
     if dataframe.empty:
-        return pd.DataFrame(columns=["player_id", "pa", *METRICS])
+        return pd.DataFrame(columns=["player_id", "game_date", "pa", *METRICS])
 
     normalized = dataframe.copy()
+    derived_metrics = _derive_offensive_metrics(normalized)
     player_id_column = _first_column(normalized, ("player_id", "playerid", "key_mlbam", "mlb_id", "id"))
     pa_column = _first_column(normalized, ("PA", "pa", "plate appearances", "_PA"))
-    if player_id_column is None or pa_column is None:
-        return pd.DataFrame(columns=["player_id", "pa", *METRICS])
+    if player_id_column is None:
+        return pd.DataFrame(columns=["player_id", "game_date", "pa", *METRICS])
+
+    date_column = _first_column(
+        normalized,
+        ("game_date", "date", "Date", "as_of_timestamp", "as_of_date"),
+    )
 
     column_map = {
         "player_id": player_id_column,
@@ -306,16 +365,73 @@ def _normalize_batting_stats(dataframe: pd.DataFrame) -> pd.DataFrame:
     }
 
     result = pd.DataFrame()
+    if date_column is not None:
+        result["game_date"] = pd.to_datetime(normalized[date_column], errors="coerce")
+
     for output_column, source_column in column_map.items():
         if source_column is None:
-            result[output_column] = pd.Series(dtype=float)
+            if output_column == "pa":
+                result[output_column] = derived_metrics["pa"]
+            elif output_column == "wrc_plus":
+                result[output_column] = pd.Series(float("nan"), index=normalized.index, dtype=float)
+            else:
+                result[output_column] = derived_metrics[output_column]
             continue
         result[output_column] = _to_numeric(normalized[source_column])
 
     result = result.dropna(subset=["player_id"]).copy()
     result["player_id"] = result["player_id"].astype(int)
-    result = result.fillna({metric: _default_metric_baseline(metric) for metric in METRICS})
+    result = result.fillna(
+        {
+            "pa": 0.0,
+            "woba": _default_metric_baseline("woba"),
+            "iso": _default_metric_baseline("iso"),
+            "babip": _default_metric_baseline("babip"),
+            "k_pct": _default_metric_baseline("k_pct"),
+            "bb_pct": _default_metric_baseline("bb_pct"),
+        }
+    )
     return result.reset_index(drop=True)
+
+
+def _derive_offensive_metrics(dataframe: pd.DataFrame) -> pd.DataFrame:
+    ab = _extract_numeric(dataframe, "AB", "Offense_AB")
+    hits = _extract_numeric(dataframe, "H", "Offense_H")
+    doubles = _extract_numeric(dataframe, "2B", "Offense_2B")
+    triples = _extract_numeric(dataframe, "3B", "Offense_3B")
+    home_runs = _extract_numeric(dataframe, "HR", "Offense_HR")
+    walks = _extract_numeric(dataframe, "BB", "Offense_BB")
+    strikeouts = _extract_numeric(dataframe, "SO", "K", "Offense_SO", "Offense_K")
+    hit_by_pitch = _extract_numeric(dataframe, "HBP", "Offense_HBP")
+    sacrifice_flies = _extract_numeric(dataframe, "SF", "Offense_SF")
+    sacrifice_hits = _extract_numeric(dataframe, "SH", "Offense_SH")
+
+    singles = (hits - doubles - triples - home_runs).clip(lower=0)
+    woba_numerator = (
+        walks * WOBA_WEIGHTS["bb"]
+        + hit_by_pitch * WOBA_WEIGHTS["hbp"]
+        + singles * WOBA_WEIGHTS["single"]
+        + doubles * WOBA_WEIGHTS["double"]
+        + triples * WOBA_WEIGHTS["triple"]
+        + home_runs * WOBA_WEIGHTS["hr"]
+    )
+    woba_denominator = ab + walks + hit_by_pitch + sacrifice_flies
+    plate_appearances = ab + walks + hit_by_pitch + sacrifice_flies + sacrifice_hits
+    total_bases = singles + doubles * 2 + triples * 3 + home_runs * 4
+
+    return pd.DataFrame(
+        {
+            "pa": plate_appearances.astype(float),
+            "woba": _series_from_value(woba_numerator / woba_denominator.replace(0, pd.NA)),
+            "iso": _series_from_value((total_bases - hits) / ab.replace(0, pd.NA)),
+            "babip": _series_from_value(
+                (hits - home_runs)
+                / (ab - strikeouts - home_runs + sacrifice_flies).replace(0, pd.NA)
+            ),
+            "k_pct": _series_from_value((strikeouts / plate_appearances.replace(0, pd.NA)) * 100),
+            "bb_pct": _series_from_value((walks / plate_appearances.replace(0, pd.NA)) * 100),
+        }
+    )
 
 
 def _compute_game_level_metrics(raw_logs: pd.DataFrame) -> pd.DataFrame:
@@ -495,7 +611,7 @@ def _to_numeric(values: Any) -> pd.Series:
 
 
 def _series_from_value(values: pd.Series) -> pd.Series:
-    return values.astype(float)
+    return pd.to_numeric(values, errors="coerce")
 
 
 def _series_mean(values: pd.Series) -> float:
@@ -503,6 +619,20 @@ def _series_mean(values: pd.Series) -> float:
     if numeric.dropna().empty:
         return float("nan")
     return float(numeric.mean())
+
+
+def _weighted_metric_mean(values: pd.Series, *, weights: pd.Series, default: float) -> float:
+    numeric = _to_numeric(values)
+    valid = numeric.notna() & weights.notna()
+    if not valid.any():
+        return float(default)
+
+    valid_values = numeric.loc[valid].astype(float)
+    valid_weights = weights.loc[valid].astype(float)
+    weight_sum = float(valid_weights.sum())
+    if weight_sum <= 0:
+        return float(default)
+    return float((valid_values * valid_weights).sum() / weight_sum)
 
 
 def _team_wrc_plus(team_woba: float, league_woba: float) -> float:
