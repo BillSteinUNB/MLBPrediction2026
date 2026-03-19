@@ -11,6 +11,7 @@ from pybaseball import (
     cache as pybaseball_cache,
     fielding_stats,
     pitching_stats,
+    playerid_lookup as _pybaseball_playerid_lookup,
     statcast,
     statcast_catcher_framing,
     statcast_outs_above_average,
@@ -189,7 +190,9 @@ def fetch_fielding_stats(
     merged = fangraphs_frame.copy()
     if "Name" in merged.columns:
         merged["_player_name_key"] = merged["Name"].map(_normalize_name)
-        existing_oaa = merged["OAA"] if "OAA" in merged.columns else pd.Series(0.0, index=merged.index)
+        existing_oaa = (
+            merged["OAA"] if "OAA" in merged.columns else pd.Series(0.0, index=merged.index)
+        )
         if "Team" in merged.columns and "team" in oaa_frame.columns:
             merged["_team_key"] = merged["Team"].astype(str).str.strip().str.upper()
             merged = merged.merge(
@@ -309,10 +312,7 @@ def _load_oaa_totals(season: int) -> pd.DataFrame:
         return pd.DataFrame(columns=["player_name_key", "team", "OAA"])
 
     combined = pd.concat(frames, ignore_index=True)
-    return (
-        combined.groupby(["player_name_key", "team"], as_index=False, dropna=False)["OAA"]
-        .sum()
-    )
+    return combined.groupby(["player_name_key", "team"], as_index=False, dropna=False)["OAA"].sum()
 
 
 def _extract_oaa_frame(dataframe: pd.DataFrame) -> pd.DataFrame:
@@ -357,7 +357,11 @@ def _combine_frames(frames: Sequence[pd.DataFrame]) -> pd.DataFrame:
         return frames[0].copy()
 
     combined = pd.concat(frames, ignore_index=True, sort=False)
-    sort_columns = [column for column in ("game_date", "game_pk", "at_bat_number", "pitch_number") if column in combined.columns]
+    sort_columns = [
+        column
+        for column in ("game_date", "game_pk", "at_bat_number", "pitch_number")
+        if column in combined.columns
+    ]
     if sort_columns:
         combined = combined.sort_values(sort_columns).reset_index(drop=True)
     return combined
@@ -422,3 +426,25 @@ def _first_matching_column(columns: Iterable[str], candidates: Sequence[str]) ->
         if candidate.lower() in normalized_map:
             return normalized_map[candidate.lower()]
     return None
+
+
+def lookup_player_ids(
+    last_name: str,
+    first_name: str | None = None,
+) -> pd.DataFrame:
+    """Cross-reference player IDs across MLB, FanGraphs, and Baseball Reference.
+
+    Wraps pybaseball's ``playerid_lookup`` and returns a DataFrame containing
+    ``key_mlbam`` (MLB ID), ``key_fangraphs``, ``key_bbref``, ``key_retro``,
+    along with name and career date-range columns.
+
+    Args:
+        last_name: Player's last name.
+        first_name: Player's first name (optional; narrows results).
+
+    Returns:
+        DataFrame with cross-referenced player IDs.
+    """
+    if first_name:
+        return _pybaseball_playerid_lookup(last_name, first_name)
+    return _pybaseball_playerid_lookup(last_name)
