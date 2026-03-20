@@ -385,6 +385,24 @@ def run_daily_pipeline(
                 )
             )
 
+    _apply_pick_side_effects(
+        database_path,
+        mode=mode,
+        dry_run=dry_run,
+        results=results,
+        schedule_lookup=schedule_lookup,
+        starting_bankroll=starting_bankroll,
+    )
+
+    _persist_game_results(
+        database_path,
+        run_id=run_id,
+        pipeline_date=pipeline_day.isoformat(),
+        mode=mode,
+        dry_run=dry_run,
+        results=results,
+    )
+
     notification_type, notification_payload = _send_daily_notification(
         notifier=notifier,
         pipeline_date=pipeline_day.isoformat(),
@@ -402,38 +420,16 @@ def run_daily_pipeline(
 
     if notification_type == "picks" and not dry_run:
         for result in results:
-            if result.status != "pick" or result.selected_decision is None:
-                continue
-
-            update_bankroll(
-                action="place",
-                decision=result.selected_decision,
-                db_path=database_path,
-                starting_bankroll=starting_bankroll,
-                timestamp=datetime.now(UTC),
+            if result.status == "pick" and result.selected_decision is not None:
+                result.notified = True
+        try:
+            _mark_pick_results_notified(
+                database_path,
+                run_id=run_id,
+                results=results,
             )
-            freeze_odds(
-                result.game_pk,
-                db_path=database_path,
-                market_type=result.selected_decision.market_type,
-            )
-            _maybe_settle_backtest_pick(
-                result.game_pk,
-                schedule_lookup[result.game_pk],
-                mode=mode,
-                db_path=database_path,
-                starting_bankroll=starting_bankroll,
-            )
-            result.notified = True
-
-    _persist_game_results(
-        database_path,
-        run_id=run_id,
-        pipeline_date=pipeline_day.isoformat(),
-        mode=mode,
-        dry_run=dry_run,
-        results=results,
-    )
+        except sqlite3.Error:
+            logger.warning("Failed to update daily pipeline notified flags", exc_info=True)
 
     return DailyPipelineResult(
         run_id=run_id,
@@ -993,6 +989,51 @@ def _weather_summary(row: pd.Series) -> str:
     )
 
 
+def _apply_pick_side_effects(
+    db_path: str | Path,
+    *,
+    mode: Mode,
+    dry_run: bool,
+    results: Sequence[GameProcessingResult],
+    schedule_lookup: dict[int, dict[str, Any]],
+    starting_bankroll: float,
+) -> None:
+    if dry_run:
+        return
+
+    for result in results:
+        if result.status != "pick" or result.selected_decision is None:
+            continue
+
+        try:
+            update_bankroll(
+                action="place",
+                decision=result.selected_decision,
+                db_path=db_path,
+                starting_bankroll=starting_bankroll,
+                timestamp=datetime.now(UTC),
+            )
+            freeze_odds(
+                result.game_pk,
+                db_path=db_path,
+                market_type=result.selected_decision.market_type,
+            )
+            _maybe_settle_backtest_pick(
+                result.game_pk,
+                schedule_lookup[result.game_pk],
+                mode=mode,
+                db_path=db_path,
+                starting_bankroll=starting_bankroll,
+            )
+        except Exception as exc:
+            logger.warning("Game %s failed during pick finalization", result.game_pk, exc_info=True)
+            result.status = "error"
+            result.selected_decision = None
+            result.no_pick_reason = None
+            result.error_message = str(exc)
+            result.notified = False
+
+
 def _maybe_settle_backtest_pick(
     game_pk: int,
     game: dict[str, Any],
@@ -1081,6 +1122,28 @@ def _persist_game_results(
                 )
                 for result in results
             ],
+        )
+        connection.commit()
+
+
+def _mark_pick_results_notified(
+    db_path: str | Path,
+    *,
+    run_id: str,
+    results: Sequence[GameProcessingResult],
+) -> None:
+    notified_rows = [
+        (run_id, result.game_pk)
+        for result in results
+        if result.status == "pick" and result.selected_decision is not None
+    ]
+    if not notified_rows:
+        return
+
+    with sqlite3.connect(db_path) as connection:
+        connection.executemany(
+            "UPDATE daily_pipeline_results SET notified = 1 WHERE run_id = ? AND game_pk = ?",
+            notified_rows,
         )
         connection.commit()
 

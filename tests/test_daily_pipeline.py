@@ -386,6 +386,53 @@ def test_run_daily_pipeline_non_dry_run_backtest_freezes_odds_and_settles_bets(t
     assert ledger_rows >= 2
 
 
+def test_run_daily_pipeline_sends_only_failure_alert_when_pick_side_effect_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "post_send_failure.db"
+    schedule = _schedule_frame(game_pks=[1001])
+    notifier = _RecordingNotifier()
+    prediction_engine = _RecordingPredictionEngine({1001: _prediction(1001, ml_home=0.64, rl_home=0.58)})
+    dependencies = _dependencies(
+        schedule=schedule,
+        notifier=notifier,
+        prediction_engine=prediction_engine,
+        odds=[_odds_snapshot(1001, market_type="f5_ml", home_odds=-110, away_odds=100)],
+    )
+
+    def _raise_update_bankroll(**_kwargs: object) -> None:
+        raise RuntimeError("bankroll unavailable")
+
+    monkeypatch.setattr("src.pipeline.daily.update_bankroll", _raise_update_bankroll)
+
+    result = run_daily_pipeline(
+        target_date="2025-09-15",
+        mode="backtest",
+        dry_run=False,
+        db_path=db_path,
+        dependencies=dependencies,
+    )
+
+    assert result.pick_count == 0
+    assert result.error_count == 1
+    assert result.notification_type == "failure_alert"
+    assert [call[0] for call in notifier.calls] == ["failure_alert"]
+
+    with sqlite3.connect(db_path) as connection:
+        stored_row = connection.execute(
+            "SELECT status, error_message, notified FROM daily_pipeline_results"
+        ).fetchone()
+        bet_count = connection.execute("SELECT COUNT(*) FROM bets").fetchone()[0]
+        frozen_count = connection.execute(
+            "SELECT COUNT(*) FROM odds_snapshots WHERE is_frozen = 1"
+        ).fetchone()[0]
+
+    assert stored_row == ("error", "bankroll unavailable", 0)
+    assert bet_count == 0
+    assert frozen_count == 0
+
+
 def test_run_daily_pipeline_sends_drawdown_alert_when_kill_switch_is_active(tmp_path: Path) -> None:
     db_path = tmp_path / "killswitch.db"
     init_db(db_path)
