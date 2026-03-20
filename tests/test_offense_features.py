@@ -390,8 +390,8 @@ def test_compute_offensive_features_uses_as_of_dated_lineup_metrics_when_availab
     prior_home = _woba(team_logs[(2024, "NYY")].iloc[0].to_dict())
     lineup_current_woba = (0.36 * 4 + 0.30 * 4) / 8
     leaked_lineup_woba = (0.41 * 4 + 0.36 * 4 + 0.0 * 10 + 0.28 * 5 + 0.30 * 4 + 0.0 * 10) / 37
-    expected_lineup_woba = (lineup_current_woba + prior_home * 2) / 3
-    leaked_lineup_feature = (leaked_lineup_woba + prior_home * 2) / 3
+    expected_lineup_woba = (lineup_current_woba * 2 + prior_home * 2) / 4
+    leaked_lineup_feature = (leaked_lineup_woba * 2 + prior_home * 2) / 4
 
     def fake_team_logs_fetcher(season: int, team: str, refresh: bool = False) -> pd.DataFrame:
         _ = refresh

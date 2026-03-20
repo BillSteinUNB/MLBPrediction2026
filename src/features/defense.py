@@ -20,10 +20,12 @@ from src.features.adjustments.abs_adjustment import (
     DEFAULT_ABS_RETENTION_FACTOR,
     adjust_framing_for_abs,
 )
+from src.features.marcel_blend import blend_value, get_regression_weight
 from src.models.features import GameFeatures
 
 
 DEFAULT_WINDOWS: tuple[int, ...] = (30, 60)
+DEFAULT_REGRESSION_WEIGHT = int(get_regression_weight("defense"))
 DEFAULT_DEFENSIVE_EFFICIENCY = 0.700
 DEFAULT_SNAPSHOT_GAMES_PLAYED = 162
 POSITION_IMPORTANCE_WEIGHTS: dict[str, float] = {
@@ -62,8 +64,10 @@ def compute_defense_features(
     *,
     db_path: str | Path = DEFAULT_DB_PATH,
     windows: Sequence[int] = DEFAULT_WINDOWS,
+    regression_weight: int = DEFAULT_REGRESSION_WEIGHT,
     abs_retention_factor: float = DEFAULT_ABS_RETENTION_FACTOR,
     refresh: bool = False,
+    roster_turnover_by_team: Mapping[str, float] | None = None,
     fielding_fetcher: _FieldingFetcher = fetch_fielding_stats,
     framing_fetcher: _FramingFetcher = fetch_catcher_framing,
     team_logs_fetcher: _TeamLogsFetcher = fetch_team_game_logs,
@@ -217,16 +221,29 @@ def compute_defense_features(
                 team,
                 {"defensive_efficiency": defensive_efficiency_baseline},
             )["defensive_efficiency"]
+            season_games_played = _resolve_games_played(
+                games_played_lookup.get(team, 0),
+                fielding_history,
+                framing_history,
+                defensive_efficiency_history,
+            )
+            roster_turnover_pct = None if roster_turnover_by_team is None else roster_turnover_by_team.get(team)
 
             season_values = _build_feature_values(
                 fielding_history=fielding_history,
                 framing_history=framing_history,
                 defensive_efficiency_history=defensive_efficiency_history,
                 fielding_baseline=fielding_baseline,
+                fielding_defaults=fielding_defaults,
                 framing_baseline=framing_baseline,
+                framing_defaults=framing_defaults,
                 abs_retention_factor=abs_retention_factor,
                 abs_active=abs_active,
                 defensive_efficiency_baseline=defensive_efficiency_team_baseline,
+                defensive_efficiency_league_average=defensive_efficiency_baseline,
+                games_played=season_games_played,
+                regression_weight=regression_weight,
+                roster_turnover_pct=roster_turnover_pct,
                 window=None,
             )
             features.extend(
@@ -246,10 +263,16 @@ def compute_defense_features(
                     framing_history=framing_history,
                     defensive_efficiency_history=defensive_efficiency_history,
                     fielding_baseline=fielding_baseline,
+                    fielding_defaults=fielding_defaults,
                     framing_baseline=framing_baseline,
+                    framing_defaults=framing_defaults,
                     abs_retention_factor=abs_retention_factor,
                     abs_active=abs_active,
                     defensive_efficiency_baseline=defensive_efficiency_team_baseline,
+                    defensive_efficiency_league_average=defensive_efficiency_baseline,
+                    games_played=season_games_played,
+                    regression_weight=regression_weight,
+                    roster_turnover_pct=roster_turnover_pct,
                     window=window,
                 )
                 features.extend(
@@ -622,39 +645,78 @@ def _build_feature_values(
     framing_history: pd.DataFrame,
     defensive_efficiency_history: pd.DataFrame,
     fielding_baseline: Mapping[str, float],
+    fielding_defaults: Mapping[str, float],
     framing_baseline: Mapping[str, float],
+    framing_defaults: Mapping[str, float],
     abs_retention_factor: float,
     abs_active: bool,
     defensive_efficiency_baseline: float,
+    defensive_efficiency_league_average: float,
+    games_played: int,
+    regression_weight: int,
+    roster_turnover_pct: float | None,
     window: int | None,
 ) -> dict[str, float]:
-    raw_framing = _history_mean(
+    current_raw_framing = _history_mean(
         framing_history,
         "raw_framing",
         window=window,
         default=float(framing_baseline.get("raw_framing", 0.0)),
     )
+    blended_raw_framing = blend_value(
+        current_raw_framing,
+        games_played=games_played,
+        metric_type="defense",
+        prior_value=float(framing_baseline.get("raw_framing", 0.0)),
+        league_average=float(framing_defaults.get("raw_framing", 0.0)),
+        regression_weight=regression_weight,
+        roster_turnover_pct=roster_turnover_pct,
+    )
     return {
-        "drs": _history_mean(
-            fielding_history,
-            "drs",
-            window=window,
-            default=float(fielding_baseline.get("drs", 0.0)),
+        "drs": blend_value(
+            _history_mean(
+                fielding_history,
+                "drs",
+                window=window,
+                default=float(fielding_baseline.get("drs", 0.0)),
+            ),
+            games_played=games_played,
+            metric_type="defense",
+            prior_value=float(fielding_baseline.get("drs", 0.0)),
+            league_average=float(fielding_defaults.get("drs", 0.0)),
+            regression_weight=regression_weight,
+            roster_turnover_pct=roster_turnover_pct,
         ),
-        "oaa": _history_mean(
-            fielding_history,
-            "oaa",
-            window=window,
-            default=float(fielding_baseline.get("oaa", 0.0)),
+        "oaa": blend_value(
+            _history_mean(
+                fielding_history,
+                "oaa",
+                window=window,
+                default=float(fielding_baseline.get("oaa", 0.0)),
+            ),
+            games_played=games_played,
+            metric_type="defense",
+            prior_value=float(fielding_baseline.get("oaa", 0.0)),
+            league_average=float(fielding_defaults.get("oaa", 0.0)),
+            regression_weight=regression_weight,
+            roster_turnover_pct=roster_turnover_pct,
         ),
-        "defensive_efficiency": _history_mean(
-            defensive_efficiency_history,
-            "defensive_efficiency",
-            window=window,
-            default=defensive_efficiency_baseline,
+        "defensive_efficiency": blend_value(
+            _history_mean(
+                defensive_efficiency_history,
+                "defensive_efficiency",
+                window=window,
+                default=defensive_efficiency_baseline,
+            ),
+            games_played=games_played,
+            metric_type="defense",
+            prior_value=defensive_efficiency_baseline,
+            league_average=defensive_efficiency_league_average,
+            regression_weight=regression_weight,
+            roster_turnover_pct=roster_turnover_pct,
         ),
         "adjusted_framing": adjust_framing_runs(
-            raw_framing,
+            blended_raw_framing,
             retention_factor=abs_retention_factor,
             abs_active=abs_active,
         ),
@@ -737,6 +799,11 @@ def _history_mean(
     if window is not None:
         values = values.tail(window)
     return float(values.mean())
+
+
+def _resolve_games_played(base_games_played: int, *histories: pd.DataFrame) -> int:
+    history_lengths = [len(history) for history in histories if not history.empty]
+    return int(max([base_games_played, *history_lengths], default=0))
 
 
 def _empty_metric_history(extra_columns: Sequence[str]) -> pd.DataFrame:

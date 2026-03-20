@@ -11,11 +11,12 @@ import pandas as pd
 
 from src.clients.statcast_client import fetch_batting_stats, fetch_team_game_logs
 from src.db import DEFAULT_DB_PATH, init_db
+from src.features.marcel_blend import blend_value, get_regression_weight
 from src.models.features import GameFeatures
 
 
 DEFAULT_WINDOWS: tuple[int, ...] = (7, 14, 30, 60)
-DEFAULT_REGRESSION_WEIGHT = 30
+DEFAULT_REGRESSION_WEIGHT = int(get_regression_weight("offense"))
 DEFAULT_MIN_PERIODS = 1
 METRICS: tuple[str, ...] = ("wrc_plus", "woba", "iso", "babip", "k_pct", "bb_pct")
 WOBA_WEIGHTS = {
@@ -49,6 +50,7 @@ def compute_offensive_features(
     min_periods: int = DEFAULT_MIN_PERIODS,
     refresh: bool = False,
     lineup_player_ids: Mapping[tuple[int, str], Sequence[int]] | None = None,
+    roster_turnover_by_team: Mapping[str, float] | None = None,
     team_logs_fetcher: _TeamLogsFetcher = fetch_team_game_logs,
     batting_stats_fetcher: _BattingStatsFetcher = fetch_batting_stats,
 ) -> list[GameFeatures]:
@@ -100,6 +102,8 @@ def compute_offensive_features(
             team = str(game[team_key])
             team_frame = team_metrics.get(team, pd.DataFrame())
             team_priors = prior_team_baselines.get(team, {})
+            season_games_played = len(team_frame)
+            roster_turnover_pct = None if roster_turnover_by_team is None else roster_turnover_by_team.get(team)
             for window in windows:
                 current_window_metrics = _rolling_metrics_as_of(
                     team_frame=team_frame,
@@ -108,7 +112,6 @@ def compute_offensive_features(
                     min_periods=min_periods,
                 )
 
-                current_games_played = next(iter(current_window_metrics.values())).games_played
                 current_team_values = {
                     metric: current_window_metrics[metric].value
                     for metric in ("woba", "iso", "babip", "k_pct", "bb_pct")
@@ -124,8 +127,9 @@ def compute_offensive_features(
                         metric=metric,
                         current_value=current_team_values[metric],
                         prior_value=team_priors.get(metric, _default_metric_baseline(metric)),
-                        games_played=current_games_played,
+                        games_played=season_games_played,
                         regression_weight=regression_weight,
+                        roster_turnover_pct=roster_turnover_pct,
                     )
                     team_feature_values[metric] = blended_value
                     features.append(
@@ -146,8 +150,9 @@ def compute_offensive_features(
                             metric=metric,
                             current_value=lineup_metrics.get(metric, team_feature_values[metric]),
                             prior_value=team_priors.get(metric, _default_metric_baseline(metric)),
-                            games_played=current_games_played,
+                            games_played=season_games_played,
                             regression_weight=regression_weight,
+                            roster_turnover_pct=roster_turnover_pct,
                         )
 
                 for metric in METRICS:
@@ -535,33 +540,17 @@ def _apply_metric_blend(
     prior_value: float,
     games_played: int,
     regression_weight: int,
+    roster_turnover_pct: float | None,
 ) -> float:
-    resolved_current = current_value
-    if pd.isna(resolved_current):
-        resolved_current = _default_metric_baseline(metric)
-
-    if games_played < regression_weight:
-        return _apply_marcel_blend(
-            current_value=resolved_current,
-            prior_value=prior_value,
-            games_played=games_played,
-            regression_weight=regression_weight,
-        )
-
-    return float(resolved_current)
-
-
-def _apply_marcel_blend(
-    *,
-    current_value: float,
-    prior_value: float,
-    games_played: int,
-    regression_weight: int,
-) -> float:
-    denominator = games_played + regression_weight
-    if denominator <= 0:
-        return float(current_value)
-    return float((current_value * games_played + prior_value * regression_weight) / denominator)
+    return blend_value(
+        current_value,
+        games_played=games_played,
+        metric_type="offense",
+        prior_value=prior_value,
+        league_average=_default_metric_baseline(metric),
+        regression_weight=regression_weight,
+        roster_turnover_pct=roster_turnover_pct,
+    )
 
 
 def _persist_features(db_path: Path, features: Sequence[GameFeatures]) -> None:

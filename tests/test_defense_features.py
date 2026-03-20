@@ -131,10 +131,14 @@ def test_compute_defense_features_excludes_current_game_applies_weights_and_adju
     )
 
     by_name = {row.feature_name: row.feature_value for row in rows}
-    expected_home_drs = ((2.0 * C_WEIGHT + 1.0 * SS_WEIGHT) + (4.0 * C_WEIGHT + 2.0 * LF_WEIGHT)) / 2
-    expected_home_oaa = ((1.0 * C_WEIGHT + 2.0 * SS_WEIGHT) + (3.0 * C_WEIGHT + 1.0 * LF_WEIGHT)) / 2
-    expected_home_framing = ((2.0 * ABS_RETENTION) + (4.0 * ABS_RETENTION)) / 2
-    expected_home_def_efficiency = ((17.0 / 24.0) + (16.0 / 23.0)) / 2
+    current_home_drs = ((2.0 * C_WEIGHT + 1.0 * SS_WEIGHT) + (4.0 * C_WEIGHT + 2.0 * LF_WEIGHT)) / 2
+    current_home_oaa = ((1.0 * C_WEIGHT + 2.0 * SS_WEIGHT) + (3.0 * C_WEIGHT + 1.0 * LF_WEIGHT)) / 2
+    current_home_framing = ((2.0 * ABS_RETENTION) + (4.0 * ABS_RETENTION)) / 2
+    current_home_def_efficiency = ((17.0 / 24.0) + (16.0 / 23.0)) / 2
+    expected_home_drs = (current_home_drs * 2) / 52
+    expected_home_oaa = (current_home_oaa * 2) / 52
+    expected_home_framing = (current_home_framing * 2) / 52
+    expected_home_def_efficiency = (current_home_def_efficiency * 2 + 0.700 * 50) / 52
     leaked_home_drs = (
         (2.0 * C_WEIGHT + 1.0 * SS_WEIGHT)
         + (4.0 * C_WEIGHT + 2.0 * LF_WEIGHT)
@@ -265,11 +269,14 @@ def test_compute_defense_features_builds_season_thirty_and_sixty_game_windows(
     )
 
     by_name = {row.feature_name: row.feature_value for row in rows}
-    expected_season_drs = pd.Series(range(1, 66), dtype=float).mean() * SS_WEIGHT
-    expected_30g_drs = pd.Series(range(36, 66), dtype=float).mean() * SS_WEIGHT
-    expected_60g_drs = pd.Series(range(6, 66), dtype=float).mean() * SS_WEIGHT
-    expected_season_oaa = pd.Series([value * 2 for value in range(1, 66)], dtype=float).mean() * SS_WEIGHT
-    expected_30g_framing = pd.Series(range(36, 66), dtype=float).mean() * ABS_RETENTION
+    blend_factor = 65 / (65 + 50)
+    expected_season_drs = pd.Series(range(1, 66), dtype=float).mean() * SS_WEIGHT * blend_factor
+    expected_30g_drs = pd.Series(range(36, 66), dtype=float).mean() * SS_WEIGHT * blend_factor
+    expected_60g_drs = pd.Series(range(6, 66), dtype=float).mean() * SS_WEIGHT * blend_factor
+    expected_season_oaa = (
+        pd.Series([value * 2 for value in range(1, 66)], dtype=float).mean() * SS_WEIGHT * blend_factor
+    )
+    expected_30g_framing = pd.Series(range(36, 66), dtype=float).mean() * ABS_RETENTION * blend_factor
 
     assert by_name["home_team_drs_season"] == pytest.approx(expected_season_drs)
     assert by_name["home_team_drs_30g"] == pytest.approx(expected_30g_drs)

@@ -13,12 +13,13 @@ import pandas as pd
 from src.clients.lineup_client import fetch_confirmed_lineups
 from src.clients.statcast_client import fetch_statcast_range
 from src.db import DEFAULT_DB_PATH, init_db
+from src.features.marcel_blend import blend_value, get_regression_weight
 from src.models.features import GameFeatures
 from src.models.lineup import Lineup
 
 
 DEFAULT_WINDOWS: tuple[int, ...] = (7, 14, 30, 60)
-DEFAULT_REGRESSION_WEIGHT = 15
+DEFAULT_REGRESSION_WEIGHT = int(get_regression_weight("pitching"))
 DEFAULT_MIN_PERIODS = 1
 OPENER_IP_THRESHOLD = 3.0
 RECENT_START_WINDOW = 5
@@ -77,6 +78,7 @@ def compute_pitching_features(
     regression_weight: int = DEFAULT_REGRESSION_WEIGHT,
     min_periods: int = DEFAULT_MIN_PERIODS,
     refresh: bool = False,
+    roster_turnover_by_team: Mapping[str, float] | None = None,
     lineup_fetcher: _LineupFetcher = fetch_confirmed_lineups,
     start_metrics_fetcher: _StartMetricsFetcher | None = None,
 ) -> list[GameFeatures]:
@@ -134,6 +136,7 @@ def compute_pitching_features(
         ):
             team = str(game[team_key])
             starter_id = _coerce_int(game.get(starter_key))
+            roster_turnover_pct = None if roster_turnover_by_team is None else roster_turnover_by_team.get(team)
             lineup = lineups.get((game_pk, team))
             if lineup is not None:
                 starter_id = lineup.starting_pitcher_id or lineup.projected_starting_pitcher_id or starter_id
@@ -171,14 +174,16 @@ def compute_pitching_features(
             for window in windows:
                 sample = context.current_history.tail(window)
                 starts_count = len(sample)
+                season_starts_count = len(context.current_history)
                 for metric in METRICS:
                     current_value = _series_mean(sample[metric]) if starts_count >= min_periods else float("nan")
                     feature_value = _apply_metric_blend(
                         metric=metric,
                         current_value=current_value,
                         prior_value=context.prior_baseline.get(metric, fallback_baseline[metric]),
-                        starts_count=starts_count,
+                        starts_count=season_starts_count,
                         regression_weight=regression_weight,
+                        roster_turnover_pct=roster_turnover_pct,
                     )
                     features.append(
                         GameFeatures(
@@ -317,19 +322,17 @@ def _apply_metric_blend(
     prior_value: float,
     starts_count: int,
     regression_weight: int,
+    roster_turnover_pct: float | None,
 ) -> float:
-    resolved_current = current_value
-    if pd.isna(resolved_current):
-        resolved_current = prior_value if not pd.isna(prior_value) else DEFAULT_METRIC_BASELINES[metric]
-
-    if regression_weight <= 0 or starts_count >= regression_weight:
-        return float(resolved_current)
-
-    denominator = starts_count + regression_weight
-    if denominator <= 0:
-        return float(resolved_current)
-
-    return float((resolved_current * starts_count + prior_value * regression_weight) / denominator)
+    return blend_value(
+        current_value,
+        games_played=starts_count,
+        metric_type="pitching",
+        prior_value=prior_value,
+        league_average=DEFAULT_METRIC_BASELINES[metric],
+        regression_weight=regression_weight,
+        roster_turnover_pct=roster_turnover_pct,
+    )
 
 
 def _normalize_start_metrics(dataframe: pd.DataFrame) -> pd.DataFrame:
