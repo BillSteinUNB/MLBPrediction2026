@@ -43,9 +43,21 @@ from src.notifications.discord import (
     send_no_picks,
     send_picks,
 )
+from src.ops.error_handler import (
+    CircuitBreaker,
+    call_with_graceful_degradation,
+    notify_fatal_error,
+    retry,
+)
+from src.ops.logging_config import configure_logging
 
 
 logger = logging.getLogger(__name__)
+
+_SCHEDULE_CIRCUIT = CircuitBreaker(name="schedule")
+_HISTORY_CIRCUIT = CircuitBreaker(name="history")
+_LINEUPS_CIRCUIT = CircuitBreaker(name="lineups")
+_ODDS_CIRCUIT = CircuitBreaker(name="odds")
 
 Mode = Literal["prod", "backtest"]
 SCHEDULE_URL = "https://statsapi.mlb.com/api/v1/schedule"
@@ -246,7 +258,7 @@ def run_daily_pipeline(
 
     schedule_fetcher = resolved_dependencies.schedule_fetcher or _default_schedule_fetcher
     history_fetcher = resolved_dependencies.history_fetcher or _default_history_fetcher
-    lineups_fetcher = resolved_dependencies.lineups_fetcher or fetch_confirmed_lineups
+    lineups_fetcher = resolved_dependencies.lineups_fetcher or _default_lineups_fetcher
     odds_fetcher = resolved_dependencies.odds_fetcher or _default_odds_fetcher
     feature_frame_builder = (
         resolved_dependencies.feature_frame_builder or _default_feature_frame_builder
@@ -458,8 +470,8 @@ def run_daily_pipeline(
     )
 
 
-def _default_schedule_fetcher(target_date: date, mode: Mode) -> pd.DataFrame:
-    del mode
+@retry(logger_=logger)
+def _fetch_schedule_payload(target_date: date) -> dict[str, Any]:
     with httpx.Client(timeout=60.0) as client:
         response = client.get(
             SCHEDULE_URL,
@@ -471,7 +483,36 @@ def _default_schedule_fetcher(target_date: date, mode: Mode) -> pd.DataFrame:
         )
         response.raise_for_status()
 
-    payload = response.json()
+    return response.json()
+
+
+@retry(logger_=logger)
+def _fetch_historical_schedule(season: int) -> pd.DataFrame:
+    return _prepare_schedule_frame(_fetch_regular_season_schedule(season))
+
+
+@retry(logger_=logger)
+def _fetch_lineups_with_retry(target_date: str) -> list[Lineup]:
+    return fetch_confirmed_lineups(target_date)
+
+
+@retry(logger_=logger)
+def _fetch_live_odds_with_retry(
+    *,
+    db_path: str | Path,
+    commence_time_from: datetime,
+    commence_time_to: datetime,
+) -> list[OddsSnapshot]:
+    return fetch_mlb_odds(
+        db_path=db_path,
+        commence_time_from=commence_time_from,
+        commence_time_to=commence_time_to,
+    )
+
+
+def _default_schedule_fetcher(target_date: date, mode: Mode) -> pd.DataFrame:
+    del mode
+    payload = _SCHEDULE_CIRCUIT.call(_fetch_schedule_payload, target_date)
     rows: list[dict[str, Any]] = []
     for date_entry in payload.get("dates", []):
         for game in date_entry.get("games", []):
@@ -483,7 +524,12 @@ def _default_schedule_fetcher(target_date: date, mode: Mode) -> pd.DataFrame:
 
 
 def _default_history_fetcher(season: int, before_date: date) -> pd.DataFrame:
-    schedule = _prepare_schedule_frame(_fetch_regular_season_schedule(season))
+    schedule = call_with_graceful_degradation(
+        lambda: _HISTORY_CIRCUIT.call(_fetch_historical_schedule, season),
+        operation_name=f"historical schedule fetch for {season}",
+        fallback=pd.DataFrame(),
+        logger_=logger,
+    )
     if schedule.empty:
         return schedule
     return schedule.loc[
@@ -491,18 +537,30 @@ def _default_history_fetcher(season: int, before_date: date) -> pd.DataFrame:
     ].reset_index(drop=True)
 
 
+def _default_lineups_fetcher(target_date: str) -> list[Lineup]:
+    return call_with_graceful_degradation(
+        lambda: _LINEUPS_CIRCUIT.call(_fetch_lineups_with_retry, target_date),
+        operation_name=f"lineup fetch for {target_date}",
+        fallback=[],
+        logger_=logger,
+    )
+
+
 def _default_odds_fetcher(target_date: date, mode: Mode, db_path: str | Path) -> list[OddsSnapshot]:
     if mode == "prod":
         start = datetime.combine(target_date, time.min, tzinfo=UTC)
         end = start + timedelta(days=1)
-        try:
-            return fetch_mlb_odds(
+        return call_with_graceful_degradation(
+            lambda: _ODDS_CIRCUIT.call(
+                _fetch_live_odds_with_retry,
                 db_path=db_path,
                 commence_time_from=start,
                 commence_time_to=end,
-            )
-        except Exception:
-            logger.warning("Live odds fetch failed; falling back to stored snapshots", exc_info=True)
+            ),
+            operation_name=f"live odds fetch for {target_date.isoformat()}",
+            fallback=lambda _exc: _load_odds_from_db_for_date(db_path, target_date),
+            logger_=logger,
+        )
 
     return _load_odds_from_db_for_date(db_path, target_date)
 
@@ -1260,7 +1318,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--starting-bankroll", type=float, default=1000.0)
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    configure_logging(log_dir=Path(args.db_path).resolve().parent / "logs", log_name="pipeline")
 
     try:
         result = run_daily_pipeline(
@@ -1271,10 +1329,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             starting_bankroll=args.starting_bankroll,
         )
     except Exception as exc:
-        payload = send_failure_alert(
+        payload = notify_fatal_error(
             pipeline_date=_coerce_date(args.date).isoformat(),
-            error_message=str(exc),
+            error=exc,
             dry_run=args.dry_run,
+            logger_=logger,
         )
         print(
             json.dumps(
