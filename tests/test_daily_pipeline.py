@@ -433,6 +433,55 @@ def test_run_daily_pipeline_sends_only_failure_alert_when_pick_side_effect_fails
     assert frozen_count == 0
 
 
+def test_run_daily_pipeline_rolls_back_pick_side_effects_when_settlement_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "post_place_failure.db"
+    schedule = _schedule_frame(game_pks=[1001], final_scores={1001: (3, 1)})
+    notifier = _RecordingNotifier()
+    prediction_engine = _RecordingPredictionEngine({1001: _prediction(1001, ml_home=0.64, rl_home=0.58)})
+    dependencies = _dependencies(
+        schedule=schedule,
+        notifier=notifier,
+        prediction_engine=prediction_engine,
+        odds=[_odds_snapshot(1001, market_type="f5_ml", home_odds=-110, away_odds=100)],
+    )
+
+    def _raise_settlement_failure(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("settlement unavailable")
+
+    monkeypatch.setattr("src.pipeline.daily.settle_game_bets", _raise_settlement_failure)
+
+    result = run_daily_pipeline(
+        target_date="2025-09-15",
+        mode="backtest",
+        dry_run=False,
+        db_path=db_path,
+        dependencies=dependencies,
+    )
+
+    assert result.pick_count == 0
+    assert result.error_count == 1
+    assert result.notification_type == "failure_alert"
+    assert [call[0] for call in notifier.calls] == ["failure_alert"]
+
+    with sqlite3.connect(db_path) as connection:
+        stored_row = connection.execute(
+            "SELECT status, error_message, notified FROM daily_pipeline_results"
+        ).fetchone()
+        bet_count = connection.execute("SELECT COUNT(*) FROM bets").fetchone()[0]
+        frozen_count = connection.execute(
+            "SELECT COUNT(*) FROM odds_snapshots WHERE is_frozen = 1"
+        ).fetchone()[0]
+        ledger_count = connection.execute("SELECT COUNT(*) FROM bankroll_ledger").fetchone()[0]
+
+    assert stored_row == ("error", "settlement unavailable", 0)
+    assert bet_count == 0
+    assert frozen_count == 0
+    assert ledger_count == 0
+
+
 def test_run_daily_pipeline_sends_drawdown_alert_when_kill_switch_is_active(tmp_path: Path) -> None:
     db_path = tmp_path / "killswitch.db"
     init_db(db_path)

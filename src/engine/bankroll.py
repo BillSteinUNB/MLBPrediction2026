@@ -478,38 +478,43 @@ def update_bankroll(
     action: Literal["place", "settle"],
     decision: BetDecision,
     db_path: str | Path = DEFAULT_DB_PATH,
+    connection: sqlite3.Connection | None = None,
     starting_bankroll: float = 1000.0,
     timestamp: datetime | None = None,
     notes: str | None = None,
     max_drawdown: float = DEFAULT_MAX_DRAWDOWN,
+    commit: bool = True,
 ) -> BankrollSummary:
     """Persist a bet placement or settlement and return updated bankroll metrics."""
 
     validated_starting_bankroll = _NON_NEGATIVE_ADAPTER.validate_python(starting_bankroll)
     resolved_max_drawdown = _validate_fraction("max_drawdown", max_drawdown)
     normalized_timestamp = _normalize_timestamp(timestamp)
-    database_path = init_db(db_path)
+    database_path = init_db(db_path) if connection is None else Path(db_path)
 
-    with sqlite3.connect(database_path) as connection:
-        connection.execute("PRAGMA foreign_keys = ON")
+    owns_connection = connection is None
+    resolved_connection = connection or sqlite3.connect(database_path)
+
+    try:
+        resolved_connection.execute("PRAGMA foreign_keys = ON")
 
         if action == "place" and _is_kill_switch_active(
-            connection,
+            resolved_connection,
             starting_bankroll=validated_starting_bankroll,
             max_drawdown=resolved_max_drawdown,
         ):
             raise ValueError("Kill-switch is active; no new bets may be placed")
 
-        current_bankroll = _get_current_balance(connection, validated_starting_bankroll)
+        current_bankroll = _get_current_balance(resolved_connection, validated_starting_bankroll)
 
         if action == "place":
             if decision.kelly_stake <= 0:
                 raise ValueError("Placed bets must have a positive kelly_stake")
 
-            _store_pending_bet(connection, decision)
+            _store_pending_bet(resolved_connection, decision)
             updated_balance = max(0.0, current_bankroll - decision.kelly_stake)
             _insert_ledger_event(
-                connection,
+                resolved_connection,
                 event_type="bet_placed",
                 amount=-decision.kelly_stake,
                 running_balance=updated_balance,
@@ -518,10 +523,10 @@ def update_bankroll(
             )
         else:
             settlement_amount, profit_loss = _settlement_delta(decision)
-            _upsert_settled_bet(connection, decision=decision, profit_loss=profit_loss)
+            _upsert_settled_bet(resolved_connection, decision=decision, profit_loss=profit_loss)
             updated_balance = current_bankroll + settlement_amount
             _insert_ledger_event(
-                connection,
+                resolved_connection,
                 event_type="bet_settled",
                 amount=settlement_amount,
                 running_balance=updated_balance,
@@ -530,18 +535,26 @@ def update_bankroll(
             )
 
         _maybe_log_kill_switch(
-            connection,
+            resolved_connection,
             starting_bankroll=validated_starting_bankroll,
             max_drawdown=resolved_max_drawdown,
             timestamp=normalized_timestamp,
         )
-        connection.commit()
+        if commit:
+            resolved_connection.commit()
 
         return _summarize_bankroll(
-            connection,
+            resolved_connection,
             starting_bankroll=validated_starting_bankroll,
             max_drawdown=resolved_max_drawdown,
         )
+    except Exception:
+        if owns_connection:
+            resolved_connection.rollback()
+        raise
+    finally:
+        if owns_connection:
+            resolved_connection.close()
 
 
 def get_bankroll_summary(

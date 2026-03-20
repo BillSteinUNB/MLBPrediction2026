@@ -40,19 +40,16 @@ def _profit_loss_for_result(decision: BetDecision, result: BetResult) -> float:
     return 0.0
 
 
-def _load_pending_bets(db_path: str | Path, game_pk: int) -> list[BetDecision]:
-    database_path = init_db(db_path)
-
-    with sqlite3.connect(database_path) as connection:
-        rows = connection.execute(
-            """
-            SELECT game_pk, market_type, side, edge_pct, kelly_stake, odds_at_bet, result
-            FROM bets
-            WHERE game_pk = ? AND result = ?
-            ORDER BY id DESC
-            """,
-            (game_pk, BetResult.PENDING.value),
-        ).fetchall()
+def _load_pending_bets(connection: sqlite3.Connection, game_pk: int) -> list[BetDecision]:
+    rows = connection.execute(
+        """
+        SELECT game_pk, market_type, side, edge_pct, kelly_stake, odds_at_bet, result
+        FROM bets
+        WHERE game_pk = ? AND result = ?
+        ORDER BY id DESC
+        """,
+        (game_pk, BetResult.PENDING.value),
+    ).fetchall()
 
     return [
         BetDecision(
@@ -114,44 +111,64 @@ def settle_game_bets(
     innings_completed: float,
     starter_scratched: bool = False,
     db_path: str | Path = DEFAULT_DB_PATH,
+    connection: sqlite3.Connection | None = None,
     starting_bankroll: float = 1000.0,
     settled_at: datetime | None = None,
     notes: str | None = None,
+    commit: bool = True,
 ) -> list[BetDecision]:
     """Settle all pending bets for one game_pk and persist bankroll effects."""
 
     normalized_timestamp = _normalize_timestamp(settled_at)
-    database_path = init_db(db_path)
-    pending_bets = _load_pending_bets(database_path, game_pk)
-    settled_bets: list[BetDecision] = []
+    database_path = init_db(db_path) if connection is None else Path(db_path)
 
-    for pending_bet in pending_bets:
-        result = settle_bet(
-            pending_bet,
-            home_score=home_score,
-            away_score=away_score,
-            innings_completed=innings_completed,
-            starter_scratched=starter_scratched,
-        )
-        profit_loss = _profit_loss_for_result(pending_bet, result)
-        settled_bet = pending_bet.model_copy(
-            update={
-                "result": result,
-                "settled_at": normalized_timestamp,
-                "profit_loss": profit_loss,
-            }
-        )
-        update_bankroll(
-            action="settle",
-            decision=settled_bet,
-            db_path=database_path,
-            starting_bankroll=starting_bankroll,
-            timestamp=normalized_timestamp,
-            notes=notes,
-        )
-        settled_bets.append(settled_bet)
+    owns_connection = connection is None
+    resolved_connection = connection or sqlite3.connect(database_path)
 
-    return settled_bets
+    try:
+        resolved_connection.execute("PRAGMA foreign_keys = ON")
+        pending_bets = _load_pending_bets(resolved_connection, game_pk)
+        settled_bets: list[BetDecision] = []
+
+        for pending_bet in pending_bets:
+            result = settle_bet(
+                pending_bet,
+                home_score=home_score,
+                away_score=away_score,
+                innings_completed=innings_completed,
+                starter_scratched=starter_scratched,
+            )
+            profit_loss = _profit_loss_for_result(pending_bet, result)
+            settled_bet = pending_bet.model_copy(
+                update={
+                    "result": result,
+                    "settled_at": normalized_timestamp,
+                    "profit_loss": profit_loss,
+                }
+            )
+            update_bankroll(
+                action="settle",
+                decision=settled_bet,
+                db_path=database_path,
+                connection=resolved_connection,
+                starting_bankroll=starting_bankroll,
+                timestamp=normalized_timestamp,
+                notes=notes,
+                commit=False,
+            )
+            settled_bets.append(settled_bet)
+
+        if commit:
+            resolved_connection.commit()
+
+        return settled_bets
+    except Exception:
+        if owns_connection:
+            resolved_connection.rollback()
+        raise
+    finally:
+        if owns_connection:
+            resolved_connection.close()
 
 
 __all__ = ["settle_bet", "settle_game_bets"]

@@ -604,22 +604,35 @@ def freeze_odds(
     game_pk: int,
     *,
     db_path: str | Path = DEFAULT_DB_PATH,
+    connection: sqlite3.Connection | None = None,
     market_type: str | None = None,
+    commit: bool = True,
 ) -> int:
     """Mark persisted odds snapshots as frozen after notification."""
 
-    init_db(db_path)
-    with sqlite3.connect(db_path) as connection:
-        connection.execute("PRAGMA foreign_keys = ON")
+    database_path = init_db(db_path) if connection is None else Path(db_path)
+    owns_connection = connection is None
+    resolved_connection = connection or sqlite3.connect(database_path)
+
+    try:
+        resolved_connection.execute("PRAGMA foreign_keys = ON")
         if market_type is None:
-            cursor = connection.execute(
+            cursor = resolved_connection.execute(
                 "UPDATE odds_snapshots SET is_frozen = 1 WHERE game_pk = ?",
                 (game_pk,),
             )
         else:
-            cursor = connection.execute(
+            cursor = resolved_connection.execute(
                 "UPDATE odds_snapshots SET is_frozen = 1 WHERE game_pk = ? AND market_type = ?",
                 (game_pk, market_type),
             )
-        connection.commit()
+        if commit:
+            resolved_connection.commit()
         return int(cursor.rowcount)
+    except Exception:
+        if owns_connection:
+            resolved_connection.rollback()
+        raise
+    finally:
+        if owns_connection:
+            resolved_connection.close()

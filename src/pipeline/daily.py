@@ -1006,25 +1006,33 @@ def _apply_pick_side_effects(
             continue
 
         try:
-            update_bankroll(
-                action="place",
-                decision=result.selected_decision,
-                db_path=db_path,
-                starting_bankroll=starting_bankroll,
-                timestamp=datetime.now(UTC),
-            )
-            freeze_odds(
-                result.game_pk,
-                db_path=db_path,
-                market_type=result.selected_decision.market_type,
-            )
-            _maybe_settle_backtest_pick(
-                result.game_pk,
-                schedule_lookup[result.game_pk],
-                mode=mode,
-                db_path=db_path,
-                starting_bankroll=starting_bankroll,
-            )
+            with sqlite3.connect(db_path) as connection:
+                connection.execute("PRAGMA foreign_keys = ON")
+                update_bankroll(
+                    action="place",
+                    decision=result.selected_decision,
+                    db_path=db_path,
+                    connection=connection,
+                    starting_bankroll=starting_bankroll,
+                    timestamp=datetime.now(UTC),
+                    commit=False,
+                )
+                freeze_odds(
+                    result.game_pk,
+                    db_path=db_path,
+                    connection=connection,
+                    market_type=result.selected_decision.market_type,
+                    commit=False,
+                )
+                _maybe_settle_backtest_pick(
+                    result.game_pk,
+                    schedule_lookup[result.game_pk],
+                    mode=mode,
+                    db_path=db_path,
+                    connection=connection,
+                    starting_bankroll=starting_bankroll,
+                    commit=False,
+                )
         except Exception as exc:
             logger.warning("Game %s failed during pick finalization", result.game_pk, exc_info=True)
             result.status = "error"
@@ -1040,7 +1048,9 @@ def _maybe_settle_backtest_pick(
     *,
     mode: Mode,
     db_path: str | Path,
+    connection: sqlite3.Connection | None = None,
     starting_bankroll: float,
+    commit: bool = True,
 ) -> None:
     if mode != "backtest":
         return
@@ -1053,7 +1063,9 @@ def _maybe_settle_backtest_pick(
         away_score=_optional_int(game.get("f5_away_score")),
         innings_completed=5.0,
         db_path=db_path,
+        connection=connection,
         starting_bankroll=starting_bankroll,
+        commit=commit,
     )
 
 
