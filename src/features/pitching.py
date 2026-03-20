@@ -66,6 +66,7 @@ class _PitchingContext:
     starter_id: int | None
     is_opener: bool
     uses_team_composite: bool
+    is_first_year: bool
     current_history: pd.DataFrame
     prior_baseline: dict[str, float]
 
@@ -184,6 +185,7 @@ def compute_pitching_features(
                         starts_count=season_starts_count,
                         regression_weight=regression_weight,
                         roster_turnover_pct=roster_turnover_pct,
+                        is_first_year=context.is_first_year,
                     )
                     features.append(
                         GameFeatures(
@@ -251,18 +253,21 @@ def _build_pitching_context(
     lineup_indicates_opener = lineup is not None and lineup.is_opener
     is_opener = lineup_indicates_opener or inferred_opener
     uses_team_composite = starter_id is None or is_opener
+    is_first_year = False
 
     if uses_team_composite:
         current_history = team_history
         prior_baseline = dict(prior_team_baselines.get(team, fallback_baseline))
     else:
         current_history = pitcher_history
+        is_first_year = starter_id not in prior_pitcher_baselines
         prior_baseline = dict(prior_pitcher_baselines.get(starter_id, fallback_baseline))
 
     return _PitchingContext(
         starter_id=starter_id,
         is_opener=is_opener,
         uses_team_composite=uses_team_composite,
+        is_first_year=is_first_year,
         current_history=current_history,
         prior_baseline=prior_baseline,
     )
@@ -323,6 +328,7 @@ def _apply_metric_blend(
     starts_count: int,
     regression_weight: int,
     roster_turnover_pct: float | None,
+    is_first_year: bool = False,
 ) -> float:
     return blend_value(
         current_value,
@@ -332,6 +338,7 @@ def _apply_metric_blend(
         league_average=DEFAULT_METRIC_BASELINES[metric],
         regression_weight=regression_weight,
         roster_turnover_pct=roster_turnover_pct,
+        is_first_year=is_first_year,
     )
 
 

@@ -731,12 +731,24 @@ def _compute_feature_modules(
     )
 
     for game_date in sorted(schedule["game_date"].astype(str).unique().tolist()):
+        day_lineups = list(cached_lineup_fetcher(game_date))
+        roster_turnover_by_team = _build_roster_turnover_by_team(
+            game_date=game_date,
+            schedule=schedule,
+            lineups=day_lineups,
+            lineup_player_ids=normalized_lineup_player_ids.get(game_date, {}),
+            batting_stats_fetcher=cached_batting_stats_fetcher,
+            start_metrics_fetcher=cached_start_metrics_fetcher,
+            database_path=database_path,
+            refresh=refresh,
+        )
         compute_offensive_features(
             game_date,
             db_path=database_path,
             windows=DEFAULT_WINDOWS,
             refresh=refresh,
             lineup_player_ids=normalized_lineup_player_ids.get(game_date),
+            roster_turnover_by_team=roster_turnover_by_team or None,
             team_logs_fetcher=cached_team_logs_fetcher,
             batting_stats_fetcher=cached_batting_stats_fetcher,
         )
@@ -745,6 +757,7 @@ def _compute_feature_modules(
             db_path=database_path,
             windows=DEFAULT_WINDOWS,
             refresh=refresh,
+            roster_turnover_by_team=roster_turnover_by_team or None,
             lineup_fetcher=cached_lineup_fetcher,
             start_metrics_fetcher=cached_start_metrics_fetcher,
         )
@@ -752,6 +765,7 @@ def _compute_feature_modules(
             game_date,
             db_path=database_path,
             refresh=refresh,
+            roster_turnover_by_team=roster_turnover_by_team or None,
             fielding_fetcher=cached_fielding_stats_fetcher,
             framing_fetcher=cached_framing_stats_fetcher,
             team_logs_fetcher=cached_team_logs_fetcher,
@@ -768,6 +782,133 @@ def _compute_feature_modules(
             db_path=database_path,
             windows=DEFAULT_PYTHAGOREAN_WINDOWS,
         )
+
+
+def _build_roster_turnover_by_team(
+    *,
+    game_date: str,
+    schedule: pd.DataFrame,
+    lineups: Sequence[Lineup],
+    lineup_player_ids: Mapping[tuple[int, str], Sequence[int]],
+    batting_stats_fetcher: SeasonStatsFetcher,
+    start_metrics_fetcher: StartMetricsFetcher,
+    database_path: Path,
+    refresh: bool,
+) -> dict[str, float]:
+    target_day = _coerce_date(game_date)
+    day_schedule = schedule.loc[schedule["game_date"].astype(str) == target_day.isoformat()].copy()
+    if day_schedule.empty:
+        return {}
+
+    current_rosters: dict[str, set[int]] = {}
+    for game in day_schedule.to_dict(orient="records"):
+        for team_key in ("home_team", "away_team"):
+            current_rosters.setdefault(str(game[team_key]), set())
+
+    for (game_pk, team), player_ids in lineup_player_ids.items():
+        _ = game_pk
+        if team not in current_rosters:
+            continue
+        current_rosters[team].update(
+            player_id
+            for player_id in (_coerce_int(player_id) for player_id in player_ids)
+            if player_id is not None
+        )
+
+    lineup_lookup = {
+        (int(lineup.game_pk), str(lineup.team)): lineup
+        for lineup in lineups
+    }
+    for game in day_schedule.to_dict(orient="records"):
+        game_pk = int(game["game_pk"])
+        for team_key, starter_key in (("home_team", "home_starter_id"), ("away_team", "away_starter_id")):
+            team = str(game[team_key])
+            lineup = lineup_lookup.get((game_pk, team))
+            starter_id = None
+            if lineup is not None:
+                current_rosters.setdefault(team, set()).update(
+                    player.player_id for player in lineup.players
+                )
+                starter_id = lineup.starting_pitcher_id or lineup.projected_starting_pitcher_id
+
+            if starter_id is None:
+                starter_id = _coerce_int(game.get(starter_key))
+            if starter_id is not None:
+                current_rosters.setdefault(team, set()).add(int(starter_id))
+
+    prior_rosters = _extract_batting_rosters_by_team(
+        batting_stats_fetcher(target_day.year - 1, min_pa=0, refresh=refresh)
+    )
+    prior_pitcher_rosters = _extract_pitcher_rosters_by_team(
+        start_metrics_fetcher(
+            target_day.year - 1,
+            db_path=database_path,
+            end_date=None,
+            refresh=refresh,
+        )
+    )
+    for team, pitcher_ids in prior_pitcher_rosters.items():
+        prior_rosters.setdefault(team, set()).update(pitcher_ids)
+
+    turnover_by_team: dict[str, float] = {}
+    for team, current_ids in current_rosters.items():
+        if not current_ids:
+            continue
+
+        prior_ids = prior_rosters.get(team)
+        if not prior_ids:
+            continue
+
+        retained_count = len(current_ids.intersection(prior_ids))
+        turnover_by_team[team] = max(0.0, 1.0 - (retained_count / len(current_ids)))
+
+    return turnover_by_team
+
+
+def _extract_batting_rosters_by_team(dataframe: pd.DataFrame) -> dict[str, set[int]]:
+    if dataframe.empty:
+        return {}
+
+    team_column = _first_existing_column(dataframe, ("Team", "team", "Tm"))
+    player_id_column = _first_existing_column(
+        dataframe,
+        ("player_id", "playerid", "key_mlbam", "mlb_id", "ID", "id"),
+    )
+    if team_column is None or player_id_column is None:
+        return {}
+
+    rosters: dict[str, set[int]] = {}
+    for team_value, player_id_value in dataframe[[team_column, player_id_column]].itertuples(index=False):
+        team = _normalize_team_code(team_value)
+        player_id = _coerce_int(player_id_value)
+        if team is None or player_id is None:
+            continue
+        rosters.setdefault(team, set()).add(player_id)
+
+    return rosters
+
+
+def _extract_pitcher_rosters_by_team(dataframe: pd.DataFrame) -> dict[str, set[int]]:
+    if dataframe.empty:
+        return {}
+
+    team_column = _first_existing_column(dataframe, ("team", "Team"))
+    pitcher_id_column = _first_existing_column(
+        dataframe,
+        ("pitcher_id", "pitcher", "player_id", "ID", "id"),
+    )
+    if team_column is None or pitcher_id_column is None:
+        return {}
+
+    rosters: dict[str, set[int]] = {}
+    for team_value, pitcher_id_value in dataframe[[team_column, pitcher_id_column]].itertuples(index=False):
+        team = _normalize_team_code(team_value)
+        pitcher_id = _coerce_int(pitcher_id_value)
+        if team is None or pitcher_id is None:
+            continue
+        rosters.setdefault(team, set()).add(pitcher_id)
+
+    return rosters
 
 
 def _seed_games_table(database_path: Path, schedule: pd.DataFrame) -> None:
@@ -1128,6 +1269,13 @@ def _normalize_lookup_date(value: str | date | datetime) -> str:
     if isinstance(value, date):
         return value.isoformat()
     return str(value)
+
+
+def _first_existing_column(dataframe: pd.DataFrame, candidates: Sequence[str]) -> str | None:
+    for candidate in candidates:
+        if candidate in dataframe.columns:
+            return candidate
+    return None
 
 
 def _coerce_date(value: str | date | datetime) -> date:

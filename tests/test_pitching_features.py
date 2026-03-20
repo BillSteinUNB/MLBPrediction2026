@@ -551,4 +551,108 @@ def test_compute_pitching_features_still_uses_history_based_opener_when_lineup_f
     assert by_name["home_starter_is_opener"] == 1.0
     assert by_name["home_starter_uses_team_composite"] == 1.0
     assert by_name["home_starter_xfip_2s"] == pytest.approx((3.0 + 3.5) / 2)
-    assert by_name["home_starter_xfip_2s"] != pytest.approx((8.0 + 9.0) / 2)
+
+
+def test_compute_pitching_features_uses_league_average_prior_for_first_year_starter(
+    tmp_path: Path,
+) -> None:
+    from src.features.pitching import DEFAULT_METRIC_BASELINES, compute_pitching_features
+
+    db_path = tmp_path / "pitching.db"
+    init_db(db_path)
+    _seed_game(
+        db_path,
+        game_pk=1004,
+        game_date="2025-04-11T20:05:00+00:00",
+        home_team="TOR",
+        away_team="BOS",
+        home_starter_id=960,
+        away_starter_id=400,
+    )
+
+    metrics = {
+        2025: pd.DataFrame(
+            [
+                {
+                    "game_pk": 9401,
+                    "game_date": "2025-04-10",
+                    "team": "TOR",
+                    "pitcher_id": 960,
+                    "xFIP": 4.4,
+                    "xERA": 4.1,
+                    "K%": 22.0,
+                    "BB%": 7.0,
+                    "GB%": 44.0,
+                    "HR/FB": 11.0,
+                    "avg_fastball_velocity": 94.4,
+                    "pitch_mix_entropy": 1.57,
+                    "innings_pitched": 5.2,
+                },
+                {
+                    "game_pk": 9102,
+                    "game_date": "2025-04-07",
+                    "team": "BOS",
+                    "pitcher_id": 400,
+                    "xFIP": 3.7,
+                    "xERA": 3.6,
+                    "K%": 24.0,
+                    "BB%": 6.0,
+                    "GB%": 46.0,
+                    "HR/FB": 9.0,
+                    "avg_fastball_velocity": 95.0,
+                    "pitch_mix_entropy": 1.58,
+                    "innings_pitched": 6.0,
+                },
+            ]
+        ),
+        2024: pd.DataFrame(
+            [
+                {
+                    "game_pk": 8002,
+                    "game_date": "2024-08-02",
+                    "team": "BOS",
+                    "pitcher_id": 400,
+                    "xFIP": 3.1,
+                    "xERA": 3.0,
+                    "K%": 26.0,
+                    "BB%": 6.0,
+                    "GB%": 45.0,
+                    "HR/FB": 8.0,
+                    "avg_fastball_velocity": 95.4,
+                    "pitch_mix_entropy": 1.62,
+                    "innings_pitched": 6.0,
+                }
+            ]
+        ),
+    }
+
+    def fake_start_metrics_fetcher(
+        season: int,
+        *,
+        db_path: Path,
+        end_date,
+        refresh: bool = False,
+    ) -> pd.DataFrame:
+        _ = db_path
+        _ = refresh
+        dataframe = metrics.get(season, pd.DataFrame()).copy()
+        if dataframe.empty or end_date is None:
+            return dataframe
+        return dataframe.loc[pd.to_datetime(dataframe["game_date"]).dt.date <= end_date].reset_index(
+            drop=True
+        )
+
+    rows = compute_pitching_features(
+        "2025-04-11",
+        db_path=db_path,
+        windows=(1,),
+        regression_weight=2,
+        lineup_fetcher=lambda *_args, **_kwargs: [],
+        start_metrics_fetcher=fake_start_metrics_fetcher,
+    )
+
+    by_name = {row.feature_name: row.feature_value for row in rows}
+    expected_home_xfip = (4.4 * 1 + DEFAULT_METRIC_BASELINES["xfip"] * 2) / 3
+
+    assert by_name["home_starter_xfip_1s"] == pytest.approx(expected_home_xfip)
+    assert by_name["home_starter_uses_team_composite"] == 0.0

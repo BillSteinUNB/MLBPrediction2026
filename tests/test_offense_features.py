@@ -416,3 +416,133 @@ def test_compute_offensive_features_uses_as_of_dated_lineup_metrics_when_availab
     assert by_name["home_lineup_woba_1g"] != pytest.approx(by_name["home_team_woba_1g"])
     assert by_name["home_lineup_woba_1g"] == pytest.approx(expected_lineup_woba)
     assert by_name["home_lineup_woba_1g"] > leaked_lineup_feature
+
+
+def test_compute_offensive_features_uses_league_average_prior_for_first_year_lineup_players(
+    tmp_path: Path,
+) -> None:
+    from src.features.offense import compute_offensive_features
+
+    db_path = tmp_path / "offense.db"
+    init_db(db_path)
+    _seed_game(
+        db_path,
+        game_pk=559,
+        game_date="2025-04-02T20:05:00+00:00",
+        home_team="NYY",
+        away_team="BOS",
+    )
+
+    team_logs = {
+        (2025, "NYY"): pd.DataFrame(
+            {
+                "Date": ["2025-04-01"],
+                "AB": [30],
+                "H": [8],
+                "2B": [1],
+                "3B": [0],
+                "HR": [1],
+                "BB": [3],
+                "SO": [8],
+                "HBP": [0],
+                "SF": [1],
+            }
+        ),
+        (2025, "BOS"): pd.DataFrame(
+            {
+                "Date": ["2025-04-01"],
+                "AB": [31],
+                "H": [7],
+                "2B": [1],
+                "3B": [0],
+                "HR": [1],
+                "BB": [2],
+                "SO": [9],
+                "HBP": [0],
+                "SF": [1],
+            }
+        ),
+        (2024, "NYY"): pd.DataFrame(
+            {
+                "Date": ["2024-08-01"],
+                "AB": [30],
+                "H": [12],
+                "2B": [3],
+                "3B": [0],
+                "HR": [4],
+                "BB": [4],
+                "SO": [6],
+                "HBP": [0],
+                "SF": [1],
+            }
+        ),
+        (2024, "BOS"): pd.DataFrame(
+            {
+                "Date": ["2024-08-01"],
+                "AB": [31],
+                "H": [10],
+                "2B": [2],
+                "3B": [0],
+                "HR": [2],
+                "BB": [3],
+                "SO": [7],
+                "HBP": [0],
+                "SF": [1],
+            }
+        ),
+    }
+    batting_by_season = {
+        2025: pd.DataFrame(
+            {
+                "player_id": [101, 103],
+                "game_date": ["2025-04-01", "2025-04-01"],
+                "PA": [4, 4],
+                "wRC+": [110.0, 130.0],
+                "wOBA": [0.36, 0.42],
+                "ISO": [0.18, 0.24],
+                "BABIP": [0.31, 0.34],
+                "K%": [19.0, 21.0],
+                "BB%": [11.0, 10.0],
+            }
+        ),
+        2024: pd.DataFrame(
+            {
+                "player_id": [101],
+                "PA": [500],
+                "wRC+": [108.0],
+                "wOBA": [0.34],
+                "ISO": [0.19],
+                "BABIP": [0.30],
+                "K%": [20.0],
+                "BB%": [10.0],
+            }
+        ),
+    }
+    lineup_current_woba = (0.36 * 4 + 0.42 * 4) / 8
+    rookie_prior_woba = (0.34 + 0.320) / 2
+    expected_lineup_woba = (lineup_current_woba * 1 + rookie_prior_woba * 2) / 3
+    team_prior_woba = _woba(team_logs[(2024, "NYY")].iloc[0].to_dict())
+    team_prior_blend = (lineup_current_woba * 1 + team_prior_woba * 2) / 3
+
+    def fake_team_logs_fetcher(season: int, team: str, refresh: bool = False) -> pd.DataFrame:
+        _ = refresh
+        return team_logs[(season, team)].copy()
+
+    def fake_batting_fetcher(season: int, min_pa: int = 50, refresh: bool = False) -> pd.DataFrame:
+        _ = min_pa
+        _ = refresh
+        return batting_by_season[season].copy()
+
+    rows = compute_offensive_features(
+        "2025-04-02",
+        db_path=db_path,
+        windows=(1,),
+        regression_weight=2,
+        lineup_player_ids={(559, "NYY"): [101, 103]},
+        team_logs_fetcher=fake_team_logs_fetcher,
+        batting_stats_fetcher=fake_batting_fetcher,
+    )
+
+    by_name = {row.feature_name: row.feature_value for row in rows}
+    assert by_name["home_lineup_woba_1g"] == pytest.approx(expected_lineup_woba)
+    assert by_name["home_lineup_woba_1g"] != pytest.approx(team_prior_blend)

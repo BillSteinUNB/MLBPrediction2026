@@ -88,6 +88,12 @@ def compute_offensive_features(
         refresh=refresh,
         batting_stats_fetcher=batting_stats_fetcher,
     )
+    lineup_prior_lookup, lineup_all_first_year_lookup = _build_lineup_prior_metric_lookup(
+        lineup_player_ids=lineup_player_ids or {},
+        prior_season=target_day.year - 1,
+        refresh=refresh,
+        batting_stats_fetcher=batting_stats_fetcher,
+    )
 
     as_of_timestamp = datetime.combine(
         target_day - timedelta(days=1),
@@ -145,14 +151,21 @@ def compute_offensive_features(
                 lineup_feature_values = team_feature_values.copy()
                 lineup_metrics = lineup_metric_lookup.get((game_pk, team, window))
                 if lineup_metrics is not None:
+                    lineup_prior_metrics = lineup_prior_lookup.get((game_pk, team))
+                    lineup_is_first_year = lineup_all_first_year_lookup.get((game_pk, team), False)
                     for metric in METRICS:
                         lineup_feature_values[metric] = _apply_metric_blend(
                             metric=metric,
                             current_value=lineup_metrics.get(metric, team_feature_values[metric]),
-                            prior_value=team_priors.get(metric, _default_metric_baseline(metric)),
+                            prior_value=(
+                                lineup_prior_metrics.get(metric, _default_metric_baseline(metric))
+                                if lineup_prior_metrics is not None
+                                else team_priors.get(metric, _default_metric_baseline(metric))
+                            ),
                             games_played=season_games_played,
                             regression_weight=regression_weight,
                             roster_turnover_pct=roster_turnover_pct,
+                            is_first_year=lineup_is_first_year,
                         )
 
                 for metric in METRICS:
@@ -300,6 +313,44 @@ def _build_lineup_metric_lookup(
     return lookup
 
 
+def _build_lineup_prior_metric_lookup(
+    *,
+    lineup_player_ids: Mapping[tuple[int, str], Sequence[int]],
+    prior_season: int,
+    refresh: bool,
+    batting_stats_fetcher: _BattingStatsFetcher,
+) -> tuple[dict[tuple[int, str], dict[str, float]], dict[tuple[int, str], bool]]:
+    if not lineup_player_ids:
+        return {}, {}
+
+    try:
+        prior_batting_stats = _normalize_batting_stats(
+            batting_stats_fetcher(prior_season, min_pa=0, refresh=refresh)
+        )
+    except Exception:
+        return {}, {}
+    if prior_batting_stats.empty:
+        return {}, {}
+
+    lookup: dict[tuple[int, str], dict[str, float]] = {}
+    all_first_year_lookup: dict[tuple[int, str], bool] = {}
+    for key, player_ids in lineup_player_ids.items():
+        if not player_ids:
+            continue
+
+        lineup_metrics, all_first_year = _aggregate_prior_lineup_metrics(
+            prior_batting_stats,
+            player_ids=player_ids,
+        )
+        if lineup_metrics is None:
+            continue
+
+        lookup[key] = lineup_metrics
+        all_first_year_lookup[key] = all_first_year
+
+    return lookup, all_first_year_lookup
+
+
 def _aggregate_lineup_window_metrics(
     lineup_frame: pd.DataFrame,
     *,
@@ -340,6 +391,45 @@ def _aggregate_lineup_window_metrics(
         default=derived_wrc_plus,
     )
     return metrics
+
+
+def _aggregate_prior_lineup_metrics(
+    prior_lineup_frame: pd.DataFrame,
+    *,
+    player_ids: Sequence[int],
+) -> tuple[dict[str, float] | None, bool]:
+    rows: list[dict[str, float]] = []
+    first_year_count = 0
+
+    for player_id in player_ids:
+        player_frame = prior_lineup_frame.loc[prior_lineup_frame["player_id"] == int(player_id)].copy()
+        if player_frame.empty:
+            first_year_count += 1
+            rows.append({metric: _default_metric_baseline(metric) for metric in METRICS})
+            continue
+
+        player_row = player_frame.iloc[-1]
+        rows.append(
+            {
+                metric: float(player_row.get(metric, _default_metric_baseline(metric)))
+                for metric in METRICS
+            }
+        )
+
+    if not rows:
+        return None, False
+
+    prior_metrics = pd.DataFrame(rows)
+    weights = pd.Series(1.0, index=prior_metrics.index, dtype=float)
+    aggregated = {
+        metric: _weighted_metric_mean(
+            prior_metrics[metric],
+            weights=weights,
+            default=_default_metric_baseline(metric),
+        )
+        for metric in METRICS
+    }
+    return aggregated, first_year_count == len(rows)
 
 
 def _normalize_batting_stats(dataframe: pd.DataFrame) -> pd.DataFrame:
@@ -541,6 +631,7 @@ def _apply_metric_blend(
     games_played: int,
     regression_weight: int,
     roster_turnover_pct: float | None,
+    is_first_year: bool = False,
 ) -> float:
     return blend_value(
         current_value,
@@ -550,6 +641,7 @@ def _apply_metric_blend(
         league_average=_default_metric_baseline(metric),
         regression_weight=regression_weight,
         roster_turnover_pct=roster_turnover_pct,
+        is_first_year=is_first_year,
     )
 
 
