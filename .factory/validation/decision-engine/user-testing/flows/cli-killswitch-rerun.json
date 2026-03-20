@@ -1,0 +1,57 @@
+{
+  "groupId": "cli-killswitch-rerun",
+  "testedAt": "2026-03-20T07:05:30+00:00",
+  "isolation": {
+    "surface": "CLI",
+    "pythonInterpreter": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe",
+    "workDirectory": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\decision-engine\\user-testing\\work\\kill-switch-rerun",
+    "evidenceDirectory": "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\decision-engine\\kill-switch-rerun",
+    "tempDbPath": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\decision-engine\\user-testing\\work\\kill-switch-rerun\\kill_switch_rerun.db"
+  },
+  "toolsUsed": [
+    "pytest",
+    "Python CLI"
+  ],
+  "commandsRun": [
+    "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe -m pytest C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\tests\\test_daily_pipeline.py::test_run_daily_pipeline_sends_drawdown_alert_when_kill_switch_is_active C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\tests\\test_discord_notifications.py::test_send_drawdown_alert_uses_red_embed_and_formats_drawdown_pct -v --tb=short",
+    "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\decision-engine\\user-testing\\work\\pipeline\\pipeline_cli_probe.py kill_switch --db-path C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\decision-engine\\user-testing\\work\\kill-switch-rerun\\kill_switch_rerun.db --summary-json C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\decision-engine\\kill-switch-rerun\\VAL-CROSS-006-probe-summary.json"
+  ],
+  "assertions": [
+    {
+      "id": "VAL-CROSS-006",
+      "title": "Kill-switch stops notifications",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run targeted pytest for the kill-switch pipeline and notification payload formatting",
+          "expected": "The rerun fix is covered by passing pipeline and drawdown-notification tests",
+          "observed": "tests/test_daily_pipeline.py::test_run_daily_pipeline_sends_drawdown_alert_when_kill_switch_is_active PASSED and tests/test_discord_notifications.py::test_send_drawdown_alert_uses_red_embed_and_formats_drawdown_pct PASSED"
+        },
+        {
+          "action": "Run the isolated kill_switch CLI probe against the dedicated rerun database",
+          "expected": "The pipeline emits a drawdown alert payload with a visible zero-stake recommendation instead of placing a live bet",
+          "observed": "The probe exited 0 with notification_type=drawdown_alert, content=':warning: Kill-switch active for 2025-09-15', and a recommendation card for BOS @ NYY showing Market='f5_ml home' and Kelly Stake='$0.00'"
+        },
+        {
+          "action": "Inspect the persisted pipeline rows captured by the probe summary JSON",
+          "expected": "No bet row is inserted while kill-switch is active, and the pipeline stores the zero-stake no-pick state",
+          "observed": "db.daily_pipeline_results contains one row with status='no_pick', selected_market_type='f5_ml', selected_side='home', kelly_stake=0.0, and no_pick_reason='kill-switch active'; db.bets is empty; notifier.networkRequests=0"
+        }
+      ],
+      "evidence": {
+        "terminalSnapshots": [
+          "decision-engine/kill-switch-rerun/VAL-CROSS-006-pytest-utf8.txt",
+          "decision-engine/kill-switch-rerun/VAL-CROSS-006-probe-terminal-utf8.txt"
+        ],
+        "database": [
+          "decision-engine/kill-switch-rerun/VAL-CROSS-006-probe-summary.json"
+        ],
+        "network": "Probe notifier recorded 1 dry-run drawdown_alert payload and 0 outbound network requests."
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Retested 1 assertion: VAL-CROSS-006 passed. The kill-switch rerun now emits a drawdown alert with a visible zero-stake recommendation, places no bet row, and persists a no-pick row with kelly_stake=0.0."
+}
