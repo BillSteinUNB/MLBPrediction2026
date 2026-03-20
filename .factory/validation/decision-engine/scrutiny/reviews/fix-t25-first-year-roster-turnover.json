@@ -1,0 +1,28 @@
+{
+  "featureId": "fix-t25-first-year-roster-turnover",
+  "reviewedAt": "2026-03-20T06:10:42.757532+00:00",
+  "commitId": "4d958e903dcaa121e65151085357223ac2effb4f",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "Reviewed the prior failed review, the original and fix handoffs, the fix transcript skeleton, both relevant commit diffs, and the current implementation. The fix does resolve the original live-path blockers: offense now builds lineup prior lookups and threads `is_first_year` into Marcel blending (`src/features/offense.py:91-97`, `src/features/offense.py:153-168`, `src/features/offense.py:316-430`), pitching now marks first-year starters before blending (`src/features/pitching.py:238-271`), and the shared feature-assembly path now computes and passes `roster_turnover_by_team` into offense/pitching/defense (`src/model/data_builder.py:735-767`, `tests/test_data_builder.py:763-859`). However, the same shared data-builder change also regresses historical rebuilds: normal training/backtest callers still rebuild through `build_training_dataset()` without lineups (`src/model/data_builder.py:250`, `src/model/data_builder.py:1428-1429`, `src/model/xgboost_trainer.py:172-177`, `src/model/stacking.py:314-319`, `src/model/calibration.py:431-436`, `src/backtest/walk_forward.py:784-791`), so `_build_roster_turnover_by_team()` falls back to starter-only current rosters and can apply the >40% turnover reduction to offense/defense based on starter continuity rather than actual roster turnover. Because that is a real regression in another production caller of the touched shared path, this re-review remains a fail.",
+    "issues": [
+      {
+        "file": "src/model/data_builder.py",
+        "line": 735,
+        "severity": "blocking",
+        "description": "`_compute_feature_modules()` now always builds and threads `roster_turnover_by_team`, but historical rebuilds still default to `_empty_lineups_fetcher()` with no `lineup_player_ids_by_date` (`src/model/data_builder.py:250`, `src/model/data_builder.py:1428-1429`). In that case `_build_roster_turnover_by_team()` populates `current_rosters` from scheduled starters alone (`src/model/data_builder.py:824-837`) before applying the map to offense/pitching/defense (`src/model/data_builder.py:745-767`). Normal rebuild callers in `src/model/xgboost_trainer.py:172-177`, `src/model/stacking.py:314-319`, `src/model/calibration.py:431-436`, and `src/backtest/walk_forward.py:784-791` therefore can halve prior weights for offense/defense based only on whether the current starter appeared on the prior-season roster, which is not the intended >40% roster-turnover behavior and materially changes rebuilt training/backtest features."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "`feature-worker` covers Marcel math and per-module feature verification, but it does not call out that `src/model/data_builder.py::_compute_feature_modules()` is shared by both live inference and historical rebuilds. This fix added live-path coverage yet missed the training/backtest rebuild path where lineup data is absent by default.",
+      "evidence": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\skills\\feature-worker\\SKILL.md:22-49; C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\tests\\test_data_builder.py:763-859; C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\src\\model\\data_builder.py:250, 735-767, 1428-1429"
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/decision-engine/scrutiny/reviews/t25-marcel-blend.json",
+  "summary": "Fail. The fix successfully makes rookie league-average fallbacks and roster-turnover wiring reachable in the live offense/pitching/defense callers, but it also changes the shared training-data rebuild path so turnover can be inferred from scheduled starters alone when lineups are absent. That regression means the original blockers are not yet resolved without collateral damage."
+}

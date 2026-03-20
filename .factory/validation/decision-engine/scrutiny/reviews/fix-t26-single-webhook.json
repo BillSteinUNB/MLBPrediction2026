@@ -1,0 +1,22 @@
+{
+  "featureId": "fix-t26-single-webhook",
+  "reviewedAt": "2026-03-20T06:09:15.043743+00:00",
+  "commitId": "6849bce3b895fbef6e6f6b99398040e865f0ffe0",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "Reviewed the prior failed review, the original and fix handoffs, both transcript skeletons, both commit diffs, and the current implementation. The original double-webhook path is addressed: `run_daily_pipeline()` now applies pick side effects and persists results before `_send_daily_notification()`, and the new regression test covers an `update_bankroll()` failure before any webhook send. However, the fix is still not safe in later side-effect failure paths because pick finalization is not atomic.",
+    "issues": [
+      {
+        "file": "src/pipeline/daily.py",
+        "line": 1009,
+        "severity": "blocking",
+        "description": "`_apply_pick_side_effects()` commits `update_bankroll()` first, then calls `freeze_odds()` and `_maybe_settle_backtest_pick()` inside one broad try/except. Because `update_bankroll()` persists the pending bet and bankroll ledger immediately (`src/engine/bankroll.py:509-536`), any later exception leaves those side effects committed while the except block downgrades the game to `status=\"error\"`, clears `selected_decision`, and suppresses the pick from notifications/persisted pipeline output. A freeze/settlement failure would therefore create a hidden placed bet / bankroll debit that is missing from `daily_pipeline_results` and the webhook, so the side-effect failure path is still inconsistent."
+      }
+    ]
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": ".factory/validation/decision-engine/scrutiny/reviews/t26-discord-webhook.json",
+  "summary": "Fail. The fix closes the original picks-then-failure double-webhook path, but it introduces an unhandled partial-finalization case: if a later side effect fails after `update_bankroll()` commits, the run suppresses that pick as an error while leaving the bet/ledger mutation behind. No new shared-state gaps were identified from this review."
+}

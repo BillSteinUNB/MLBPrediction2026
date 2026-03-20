@@ -1,0 +1,15 @@
+{
+  "featureId": "fix-t21-edge-threshold-only",
+  "reviewedAt": "2026-03-20T06:07:48.166563+00:00",
+  "commitId": "6e32e9e37b53ba2e9bdde9d988a2593f7f367027",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Reviewed the prior failed review, the original and fix handoffs, both transcript skeletons, both commit diffs, and the current implementation. The fix changes `src/engine/edge_calculator.py:216` so recommendation status now depends only on `edge_pct >= edge_threshold`, keeps `ev` as a separate informational field, updates `tests/test_edge_calculator.py:57-82` to cover the negative-EV contract example, and remains aligned with downstream filtering in `src/pipeline/daily.py:838`. The original blocking issue is fully resolved within the reviewed scope and I found no regressions in the touched behavior.",
+    "issues": []
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": ".factory/validation/decision-engine/scrutiny/reviews/t21-edge-calculator.json",
+  "summary": "Pass. The fix resolves the original blocking issue by making recommendation gating depend on the 3% edge threshold alone while still reporting EV separately, and the updated regression test now covers the contract example where EV is negative but edge qualifies. No additional blocking or non-blocking issues were found in the reviewed scope."
+}

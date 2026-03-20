@@ -1,98 +1,66 @@
 {
   "milestone": "decision-engine",
-  "round": 1,
+  "round": 2,
   "status": "fail",
   "validatorsRun": {
     "test": {
       "passed": true,
-      "command": "$env:PYTHONDONTWRITEBYTECODE=1; & \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe\" -m pytest \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\tests\" -v --tb=short",
+      "command": "python -m pytest tests/ -v --tb=short",
       "exitCode": 0
     },
     "typecheck": {
       "passed": true,
-      "command": "$env:PYTHONDONTWRITEBYTECODE=1; & \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe\" -m py_compile (Get-ChildItem -Path \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\src\" -Recurse -Filter \"*.py\" | ForEach-Object { $_.FullName })",
+      "command": "python -c \"import pathlib, py_compile; [py_compile.compile(str(path), doraise=True) for path in pathlib.Path('src').rglob('*.py')]; print('py_compile ok')\"",
       "exitCode": 0
     },
     "lint": {
       "passed": true,
-      "command": "& \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe\" -m ruff check \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\src\" \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\tests\"",
+      "command": "powershell -NoProfile -Command \"& '.\\.venv\\Scripts\\python.exe' -m ruff check '.\\src' '.\\tests'\"",
       "exitCode": 0
     }
   },
   "reviewsSummary": {
-    "total": 6,
+    "total": 4,
     "passed": 2,
-    "failed": 4,
+    "failed": 2,
     "failedFeatures": [
-      "t21-edge-calculator",
-      "t24-daily-orchestrator",
-      "t25-marcel-blend",
-      "t26-discord-webhook"
+      "fix-t25-first-year-roster-turnover",
+      "fix-t26-single-webhook"
     ]
   },
   "blockingIssues": [
     {
-      "featureId": "t21-edge-calculator",
+      "featureId": "fix-t25-first-year-roster-turnover",
       "severity": "blocking",
-      "description": "`src/engine/edge_calculator.py:216` requires `EV > 0` in addition to the documented `edge >= 0.03` threshold, so downstream pipeline filtering can reject bets that meet the feature contract's recommendation rule."
+      "description": "The fix makes rookie fallback and roster-turnover wiring reachable for live offense/pitching/defense callers, but `src/model/data_builder.py:735` now threads `roster_turnover_by_team` through historical rebuilds that still default to `_empty_lineups_fetcher()`. When lineups are absent, `_build_roster_turnover_by_team()` falls back to starter-only current rosters (`src/model/data_builder.py:824-837`), so training, calibration, stacking, and walk-forward rebuilds can halve prior weights for offense/defense based on starter continuity rather than actual >40% roster turnover."
     },
     {
-      "featureId": "t24-daily-orchestrator",
+      "featureId": "fix-t26-single-webhook",
       "severity": "blocking",
-      "description": "`src/pipeline/daily.py:517` does not orchestrate the full same-day offense/pitching/defense/bullpen/weather feature stack; it reuses persisted rows plus fill defaults, so normal daily inference can run on stale/defaulted inputs instead of freshly computed features."
-    },
-    {
-      "featureId": "t25-marcel-blend",
-      "severity": "blocking",
-      "description": "`src/features/offense.py:149` and `src/features/pitching.py:180-186` never make the helper's `is_first_year=True` rookie path reachable in production, so first-year players do not actually fall back to league-average priors end-to-end."
-    },
-    {
-      "featureId": "t25-marcel-blend",
-      "severity": "blocking",
-      "description": "`src/model/data_builder.py:649-670` invokes production feature generation without `roster_turnover_by_team`, so the promised >40% roster-turnover prior-weight reduction never runs outside isolated helper tests."
-    },
-    {
-      "featureId": "t26-discord-webhook",
-      "severity": "blocking",
-      "description": "`src/pipeline/daily.py:392` sends the picks webhook before post-send persistence/freezing/settlement side effects; if one of those later steps fails, `main()` can emit a second failure-alert webhook in the same run, violating the max-one-webhook-per-run requirement."
+      "description": "The fix removes the original picks-then-failure double-webhook path, but `_apply_pick_side_effects()` in `src/pipeline/daily.py:1009` still commits `update_bankroll()` before `freeze_odds()` / settlement. If a later side effect fails, the run downgrades the game to an error and suppresses the pick while leaving the bet and bankroll ledger mutation committed, creating a hidden placed bet / bankroll debit that is missing from the pipeline results and webhook output."
     }
   ],
-  "appliedUpdates": [],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Updated `.factory/library/workspace-state.md` to reflect that `fix-t24-live-features` restored fresh same-day feature assembly via `build_live_feature_frame()` and no longer uses the old persisted-row fast path for live runs.",
+      "sourceFeature": "fix-t24-live-features"
+    }
+  ],
   "suggestedGuidanceUpdates": [
     {
-      "target": "mission-worker-base / engine-worker skills",
-      "suggestion": "Document the Windows-safe startup and validation workflow explicitly: use `.factory/services.yaml` `*_windows` commands or direct `.venv\\Scripts\\python.exe` invocations for init, pytest, typecheck, and lint instead of `bash .factory/init.sh` or POSIX glob commands.",
-      "evidence": "Review `t23-settlement-rules` found the worker had to abandon failed `bash .factory/init.sh` attempts before using manifest-driven PowerShell init steps, and review `t26-discord-webhook` found justified deviations from POSIX-style validator commands even though `.factory/services.yaml` and `.factory/library/environment.md` already document the working Windows path.",
+      "target": ".factory/services.yaml",
+      "suggestion": "Fix or replace the shared `init_windows` command with a tested Windows-safe init command; the current inline `init_db(''data/mlb.db'')` quoting is unreliable in PowerShell and continues to force worker startup deviations.",
+      "evidence": "Review `fix-t24-live-features` flagged `.factory/services.yaml:7`, and this scrutiny run independently had to bypass the manifest command after reproducing quote-related failures while initializing the repo on Windows.",
       "isSystemic": true
     },
     {
-      "target": "pipeline-worker skill",
-      "suggestion": "Describe the repo's current narrowed fast-inference path for `t24` so workers do not assume the live CLI recomputes the full offense/pitching/defense/bullpen/weather stack while the pybaseball/pandas limitation remains unresolved.",
-      "evidence": "Review `t24-daily-orchestrator` found the skill still describes a full ingest→feature→predict pipeline, while `.factory/library/workspace-state.md` documents that the committed pipeline currently reuses persisted feature rows and skips full live recomputation due to the current pybaseball/pandas compatibility problem.",
-      "isSystemic": false
-    },
-    {
-      "target": "AGENTS.md",
-      "suggestion": "Expand the shared Marcel guidance to include the per-metric regression weights (offense 30 games, pitching 15 starts, defense 50 games), the league-average fallback for first-year players, and the >40% roster-turnover prior-weight reduction.",
-      "evidence": "Review `t25-marcel-blend` found that mission guidance still shows only a simplified single-weight formula, which no longer matches the intended repo contract for rookie and turnover handling.",
-      "isSystemic": false
-    },
-    {
-      "target": "engine-worker skill",
-      "suggestion": "Add Marcel-specific implementation and verification guidance—or move Marcel work out of the engine-worker scope—so workers validate rookie fallback and roster-turnover behavior end-to-end instead of only helper-level unit tests.",
-      "evidence": "Review `t25-marcel-blend` found the helper itself is well factored, but the worker procedure and checklist remain centered on edge/Kelly/settlement behavior and did not prompt end-to-end verification of the promised Marcel-specific rookie and turnover behaviors.",
+      "target": "feature-worker skill",
+      "suggestion": "Call out that `src/model/data_builder.py::_compute_feature_modules()` is shared by both live inference and historical rebuilds, and require verification of both paths when feature-module wiring changes land there.",
+      "evidence": "Review `fix-t25-first-year-roster-turnover` showed the live-path blocker was fixed, but the same shared data-builder change regressed training/backtest rebuilds because the worker only validated the live path with lineups present.",
       "isSystemic": false
     }
   ],
-  "rejectedObservations": [
-    {
-      "observation": "`t21-edge-calculator` noted that the feature defines a persistent SQLite table inside `src/engine/edge_calculator.py` instead of `src/db.py`.",
-      "reason": "already-documented; current AGENTS/library guidance already identifies `src/db.py` as the central schema entrypoint, so no additional shared-state update is needed"
-    },
-    {
-      "observation": "`t26-discord-webhook` noted that engine-worker still prescribes POSIX-style validator commands on Windows.",
-      "reason": "deduplicated into the broader systemic Windows-safe worker-skill guidance recommendation"
-    }
-  ],
-  "previousRound": null
+  "rejectedObservations": [],
+  "previousRound": ".factory/validation/decision-engine/scrutiny/synthesis.round1.json"
 }
