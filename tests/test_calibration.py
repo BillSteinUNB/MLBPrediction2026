@@ -8,7 +8,10 @@ from datetime import UTC, datetime, timedelta
 import joblib
 import numpy as np
 import pandas as pd
+import pytest
 
+from src.clients.weather_client import fetch_game_weather
+import src.model.calibration as calibration_module
 from src.model.calibration import (
     build_reliability_diagram,
     compute_expected_calibration_error,
@@ -264,3 +267,31 @@ def test_cli_training_produces_loadable_calibrated_bundle(tmp_path) -> None:
 
     assert probabilities.shape == (len(holdout_frame),)
     assert ((probabilities >= 0.0) & (probabilities <= 1.0)).all()
+
+
+def test_main_rebuilds_training_data_with_live_weather_fetcher(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _StopBuild(Exception):
+        pass
+
+    def _fake_build_training_dataset(**kwargs):
+        captured.update(kwargs)
+        raise _StopBuild
+
+    monkeypatch.setattr(calibration_module, "build_training_dataset", _fake_build_training_dataset)
+
+    with pytest.raises(_StopBuild):
+        calibration_module.main(
+            [
+                "--training-data",
+                str(tmp_path / "missing_training_data.parquet"),
+                "--output-dir",
+                str(tmp_path / "models"),
+            ]
+        )
+
+    assert captured["weather_fetcher"] is fetch_game_weather

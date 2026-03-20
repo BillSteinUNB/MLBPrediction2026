@@ -5,8 +5,11 @@ from datetime import UTC, datetime, timedelta
 
 import joblib
 import pandas as pd
+import pytest
 from sklearn.model_selection import TimeSeriesSplit
 
+from src.clients.weather_client import fetch_game_weather
+import src.model.xgboost_trainer as xgboost_trainer_module
 from src.model.xgboost_trainer import create_time_series_split, train_f5_models
 
 
@@ -122,3 +125,31 @@ def test_train_f5_models_records_best_params_feature_importance_and_filters_ml_t
     assert metadata["feature_importance_rankings"]
     assert metadata["feature_importance_rankings"][0]["importance"] >= 0.0
     assert ml_artifact.feature_importance_rankings == metadata["feature_importance_rankings"]
+
+
+def test_main_rebuilds_training_data_with_live_weather_fetcher(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _StopBuild(Exception):
+        pass
+
+    def _fake_build_training_dataset(**kwargs):
+        captured.update(kwargs)
+        raise _StopBuild
+
+    monkeypatch.setattr(xgboost_trainer_module, "build_training_dataset", _fake_build_training_dataset)
+
+    with pytest.raises(_StopBuild):
+        xgboost_trainer_module.main(
+            [
+                "--training-data",
+                str(tmp_path / "missing_training_data.parquet"),
+                "--output-dir",
+                str(tmp_path / "models"),
+            ]
+        )
+
+    assert captured["weather_fetcher"] is fetch_game_weather

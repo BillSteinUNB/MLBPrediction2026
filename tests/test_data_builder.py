@@ -8,14 +8,30 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from src.features.adjustments.abs_adjustment import (
+    DEFAULT_STRIKEOUT_RATE_DELTA,
+    DEFAULT_WALK_RATE_DELTA,
+)
+from src.features.adjustments.weather import (
+    NEUTRAL_WEATHER_FACTOR,
+    compute_weather_adjustment,
+)
+from src.features.bullpen import (
+    DEFAULT_AVG_REST_DAYS,
+    DEFAULT_TOP_RELIEVER_COUNT,
+    DEFAULT_XFIP,
+)
+from src.features.defense import DEFAULT_DEFENSIVE_EFFICIENCY
+from src.features.offense import LEAGUE_WOBA_BASELINE, LEAGUE_WRC_PLUS_BASELINE
+from src.features.pitching import DEFAULT_METRIC_BASELINES
 from src.db import init_db
-from src.features.adjustments.weather import compute_weather_adjustment
 from src.features.baselines import compute_baseline_features
 from src.features.bullpen import compute_bullpen_features
 from src.features.defense import compute_defense_features
 from src.features.offense import compute_offensive_features
 from src.features.pitching import compute_pitching_features
 from src.model.data_builder import (
+    _fill_missing_feature_values,
     assert_training_data_is_leakage_free,
     build_training_dataset,
     resolve_training_years,
@@ -528,6 +544,189 @@ def test_build_training_dataset_keeps_same_day_doubleheaders_on_prior_day_featur
         earlier_game["home_team_bullpen_xfip"]
     )
     assert later_game["home_team_log5_30g"] == pytest.approx(earlier_game["home_team_log5_30g"])
+
+
+def test_build_training_dataset_uses_live_weather_fetcher_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    schedule = pd.DataFrame(
+        [
+            _schedule_row(
+                4002,
+                "2025-04-10T23:05:00Z",
+                "NYY",
+                "BOS",
+                "Yankee Stadium",
+                f5_home_score=3,
+                f5_away_score=1,
+                final_home_score=4,
+                final_away_score=2,
+            )
+        ]
+    )
+    team_logs = _team_logs_by_season()
+    start_metrics = _start_metrics_by_season()
+    fielding = _fielding_by_season()
+    framing = _framing_by_season()
+    bullpen_metrics = _bullpen_metrics_by_season()
+
+    monkeypatch.setattr("src.model.data_builder.fetch_game_weather", _fake_weather_fetcher)
+
+    dataset = build_training_dataset(
+        start_year=2025,
+        end_year=2025,
+        output_path=tmp_path / "default_weather_sample.parquet",
+        full_regular_seasons_target=1,
+        shortened_season_game_threshold=0,
+        schedule_fetcher=lambda year: schedule.copy(),
+        batting_stats_fetcher=lambda *_args, **_kwargs: pd.DataFrame(),
+        team_logs_fetcher=_fake_team_logs_fetcher(team_logs),
+        fielding_stats_fetcher=_fake_fielding_fetcher(fielding),
+        framing_stats_fetcher=_fake_framing_fetcher(framing),
+        start_metrics_fetcher=_fake_start_metrics_fetcher(start_metrics),
+        bullpen_metrics_fetcher=_fake_bullpen_metrics_fetcher(bullpen_metrics),
+        lineup_fetcher=lambda *_args, **_kwargs: [],
+    ).dataframe
+
+    target_row = dataset.iloc[0]
+    expected_weather = compute_weather_adjustment(
+        _fake_weather_fetcher("NYY", "2025-04-10T23:05:00Z"),
+        team_code="NYY",
+        venue="Yankee Stadium",
+        is_dome=False,
+    )
+
+    assert target_row["weather_temp_factor"] == pytest.approx(expected_weather.temp_factor)
+    assert target_row["weather_air_density_factor"] == pytest.approx(
+        expected_weather.air_density_factor
+    )
+    assert target_row["weather_humidity_factor"] == pytest.approx(expected_weather.humidity_factor)
+    assert target_row["weather_wind_factor"] == pytest.approx(expected_weather.wind_factor)
+    assert target_row["weather_rain_risk"] == pytest.approx(expected_weather.rain_risk)
+    assert target_row["weather_composite"] == pytest.approx(expected_weather.weather_composite)
+    assert target_row["weather_data_missing"] == 0.0
+
+
+def test_fill_missing_feature_values_uses_module_defaults_instead_of_dataset_means() -> None:
+    raw = pd.DataFrame(
+        [
+            {
+                "game_pk": 1,
+                "season": 2025,
+                "game_date": "2025-04-10",
+                "scheduled_start": "2025-04-10T23:05:00+00:00",
+                "as_of_timestamp": "2025-04-09T00:00:00+00:00",
+                "home_team": "NYY",
+                "away_team": "BOS",
+                "venue": "Yankee Stadium",
+                "game_type": "R",
+                "status": "final",
+                "f5_home_score": 3,
+                "f5_away_score": 1,
+                "final_home_score": 4,
+                "final_away_score": 2,
+                "f5_margin": 2.0,
+                "final_margin": 2.0,
+                "f5_tied_after_5": 0,
+                "f5_ml_result": 1,
+                "f5_rl_result": 1,
+                "home_lineup_wrc_plus_7g": pd.NA,
+                "home_team_woba_7g": pd.NA,
+                "away_starter_is_opener": pd.NA,
+                "away_starter_xfip_7s": pd.NA,
+                "home_team_drs_season": pd.NA,
+                "away_team_defensive_efficiency_season": pd.NA,
+                "home_team_bullpen_avg_rest_days_top5": pd.NA,
+                "away_team_bullpen_high_leverage_available_count": pd.NA,
+                "home_team_bullpen_xfip": pd.NA,
+                "home_team_pythagorean_wp_30g": pd.NA,
+                "away_team_log5_30g": pd.NA,
+                "park_runs_factor": pd.NA,
+                "park_hr_factor": pd.NA,
+                "abs_active": pd.NA,
+                "abs_walk_rate_delta": pd.NA,
+                "abs_strikeout_rate_delta": pd.NA,
+                "weather_composite": pd.NA,
+                "weather_wind_factor": pd.NA,
+                "weather_data_missing": pd.NA,
+            },
+            {
+                "game_pk": 2,
+                "season": 2025,
+                "game_date": "2025-09-10",
+                "scheduled_start": "2025-09-10T23:05:00+00:00",
+                "as_of_timestamp": "2025-09-09T00:00:00+00:00",
+                "home_team": "NYY",
+                "away_team": "BOS",
+                "venue": "Yankee Stadium",
+                "game_type": "R",
+                "status": "final",
+                "f5_home_score": 5,
+                "f5_away_score": 0,
+                "final_home_score": 6,
+                "final_away_score": 1,
+                "f5_margin": 5.0,
+                "final_margin": 5.0,
+                "f5_tied_after_5": 0,
+                "f5_ml_result": 1,
+                "f5_rl_result": 1,
+                "home_lineup_wrc_plus_7g": 152.0,
+                "home_team_woba_7g": 0.401,
+                "away_starter_is_opener": 1.0,
+                "away_starter_xfip_7s": 2.35,
+                "home_team_drs_season": 9.0,
+                "away_team_defensive_efficiency_season": 0.742,
+                "home_team_bullpen_avg_rest_days_top5": 6.0,
+                "away_team_bullpen_high_leverage_available_count": 1.0,
+                "home_team_bullpen_xfip": 3.1,
+                "home_team_pythagorean_wp_30g": 0.74,
+                "away_team_log5_30g": 0.22,
+                "park_runs_factor": 1.17,
+                "park_hr_factor": 1.11,
+                "abs_active": 0.0,
+                "abs_walk_rate_delta": 0.0,
+                "abs_strikeout_rate_delta": 0.0,
+                "weather_composite": 1.08,
+                "weather_wind_factor": 7.5,
+                "weather_data_missing": 0.0,
+            },
+        ]
+    )
+
+    filled = _fill_missing_feature_values(raw)
+    first_row = filled.iloc[0]
+    second_row = filled.iloc[1]
+
+    assert first_row["home_lineup_wrc_plus_7g"] == pytest.approx(LEAGUE_WRC_PLUS_BASELINE)
+    assert first_row["home_team_woba_7g"] == pytest.approx(LEAGUE_WOBA_BASELINE)
+    assert first_row["away_starter_is_opener"] == 0.0
+    assert first_row["away_starter_xfip_7s"] == pytest.approx(DEFAULT_METRIC_BASELINES["xfip"])
+    assert first_row["home_team_drs_season"] == 0.0
+    assert first_row["away_team_defensive_efficiency_season"] == pytest.approx(
+        DEFAULT_DEFENSIVE_EFFICIENCY
+    )
+    assert first_row["home_team_bullpen_avg_rest_days_top5"] == pytest.approx(
+        DEFAULT_AVG_REST_DAYS
+    )
+    assert first_row["away_team_bullpen_high_leverage_available_count"] == pytest.approx(
+        float(DEFAULT_TOP_RELIEVER_COUNT)
+    )
+    assert first_row["home_team_bullpen_xfip"] == pytest.approx(DEFAULT_XFIP)
+    assert first_row["home_team_pythagorean_wp_30g"] == pytest.approx(0.5)
+    assert first_row["away_team_log5_30g"] == pytest.approx(0.5)
+    assert first_row["park_runs_factor"] == pytest.approx(1.0)
+    assert first_row["park_hr_factor"] == pytest.approx(1.0)
+    assert first_row["abs_active"] == pytest.approx(1.0)
+    assert first_row["abs_walk_rate_delta"] == pytest.approx(DEFAULT_WALK_RATE_DELTA)
+    assert first_row["abs_strikeout_rate_delta"] == pytest.approx(DEFAULT_STRIKEOUT_RATE_DELTA)
+    assert first_row["weather_composite"] == pytest.approx(NEUTRAL_WEATHER_FACTOR)
+    assert first_row["weather_wind_factor"] == pytest.approx(0.0)
+    assert first_row["weather_data_missing"] == pytest.approx(1.0)
+
+    assert second_row["home_team_woba_7g"] == pytest.approx(0.401)
+    assert second_row["away_starter_xfip_7s"] == pytest.approx(2.35)
+    assert second_row["weather_composite"] == pytest.approx(1.08)
 
 
 def test_resolve_training_years_backfills_shortened_season_with_previous_full_year() -> None:

@@ -22,20 +22,36 @@ from src.clients.statcast_client import (
     fetch_pitcher_stats,
     fetch_team_game_logs,
 )
-from src.clients.weather_client import _get_default_weather
+from src.clients.weather_client import _get_default_weather, fetch_game_weather
 from src.config import _load_settings_yaml
 from src.db import init_db
 from src.features.adjustments.abs_adjustment import (
+    DEFAULT_STRIKEOUT_RATE_DELTA,
+    DEFAULT_WALK_RATE_DELTA,
     apply_abs_adjustments,
     is_abs_active,
 )
 from src.features.adjustments.park_factors import get_park_factors
-from src.features.adjustments.weather import compute_weather_adjustment
+from src.features.adjustments.weather import NEUTRAL_WEATHER_FACTOR, compute_weather_adjustment
 from src.features.baselines import compute_baseline_features
-from src.features.bullpen import compute_bullpen_features, _fetch_season_bullpen_metrics
-from src.features.defense import compute_defense_features
-from src.features.offense import compute_offensive_features
-from src.features.pitching import compute_pitching_features, _fetch_season_start_metrics
+from src.features.bullpen import (
+    DEFAULT_AVG_REST_DAYS,
+    DEFAULT_TOP_RELIEVER_COUNT,
+    DEFAULT_XFIP,
+    compute_bullpen_features,
+    _fetch_season_bullpen_metrics,
+)
+from src.features.defense import DEFAULT_DEFENSIVE_EFFICIENCY, compute_defense_features
+from src.features.offense import (
+    LEAGUE_WOBA_BASELINE,
+    LEAGUE_WRC_PLUS_BASELINE,
+    compute_offensive_features,
+)
+from src.features.pitching import (
+    DEFAULT_METRIC_BASELINES as DEFAULT_PITCHING_METRIC_BASELINES,
+    compute_pitching_features,
+    _fetch_season_start_metrics,
+)
 from src.models.lineup import Lineup
 from src.models.weather import WeatherData
 
@@ -63,6 +79,48 @@ _TEAM_CODE_ALIASES.update(
     }
 )
 _FINAL_GAME_STATES = {"final", "game over", "completed early"}
+_OFFENSE_FEATURE_DEFAULTS = {
+    "wrc_plus": LEAGUE_WRC_PLUS_BASELINE,
+    "woba": LEAGUE_WOBA_BASELINE,
+    "iso": 0.0,
+    "babip": 0.0,
+    "k_pct": 0.0,
+    "bb_pct": 0.0,
+}
+_PITCHING_FEATURE_DEFAULTS = {
+    **DEFAULT_PITCHING_METRIC_BASELINES,
+    "is_opener": 0.0,
+    "uses_team_composite": 0.0,
+}
+_DEFENSE_FEATURE_DEFAULTS = {
+    "drs": 0.0,
+    "oaa": 0.0,
+    "defensive_efficiency": DEFAULT_DEFENSIVE_EFFICIENCY,
+    "adjusted_framing": 0.0,
+}
+_BULLPEN_FEATURE_DEFAULTS = {
+    "pitch_count": 0.0,
+    "avg_rest_days_top5": DEFAULT_AVG_REST_DAYS,
+    "ir_pct": 0.0,
+    "xfip": DEFAULT_XFIP,
+    "high_leverage_available_count": float(DEFAULT_TOP_RELIEVER_COUNT),
+}
+_WEATHER_FEATURE_DEFAULTS = {
+    "weather_temp_factor": NEUTRAL_WEATHER_FACTOR,
+    "weather_air_density_factor": NEUTRAL_WEATHER_FACTOR,
+    "weather_humidity_factor": NEUTRAL_WEATHER_FACTOR,
+    "weather_wind_factor": 0.0,
+    "weather_rain_risk": NEUTRAL_WEATHER_FACTOR,
+    "weather_composite": NEUTRAL_WEATHER_FACTOR,
+    "weather_data_missing": 1.0,
+}
+_SCHEDULE_FEATURE_DEFAULTS = {
+    "park_runs_factor": 1.0,
+    "park_hr_factor": 1.0,
+    "abs_active": 1.0,
+    "abs_walk_rate_delta": DEFAULT_WALK_RATE_DELTA,
+    "abs_strikeout_rate_delta": DEFAULT_STRIKEOUT_RATE_DELTA,
+}
 
 
 ScheduleFetcher = Callable[[int], pd.DataFrame]
@@ -179,6 +237,7 @@ def build_training_dataset(
 
     build_timestamp = datetime.now(UTC)
     resolved_lineup_fetcher = lineup_fetcher or _empty_lineups_fetcher
+    resolved_weather_fetcher = weather_fetcher or fetch_game_weather
 
     temp_fd, temp_db_name = tempfile.mkstemp(prefix="training_builder_", suffix=".db")
     os.close(temp_fd)
@@ -204,7 +263,7 @@ def build_training_dataset(
             schedule,
             feature_frame=feature_frame,
             database_path=working_db_path,
-            weather_fetcher=weather_fetcher,
+            weather_fetcher=resolved_weather_fetcher,
         )
     finally:
         try:
@@ -761,11 +820,39 @@ def _fill_missing_feature_values(dataframe: pd.DataFrame) -> pd.DataFrame:
             dataset[column] = numeric_values
             continue
 
-        non_null_values = numeric_values.dropna()
-        fill_value = float(non_null_values.mean()) if not non_null_values.empty else 0.0
+        fill_value = _default_feature_fill_value(column)
         dataset[column] = numeric_values.fillna(fill_value)
 
     return dataset
+
+
+def _default_feature_fill_value(column: str) -> float:
+    if column in _SCHEDULE_FEATURE_DEFAULTS:
+        return float(_SCHEDULE_FEATURE_DEFAULTS[column])
+    if column in _WEATHER_FEATURE_DEFAULTS:
+        return float(_WEATHER_FEATURE_DEFAULTS[column])
+    if "_starter_" in column:
+        return _resolve_pattern_default(column, _PITCHING_FEATURE_DEFAULTS)
+    if "_team_bullpen_" in column:
+        return _resolve_pattern_default(column, _BULLPEN_FEATURE_DEFAULTS)
+    if "_pythagorean_wp_" in column or "_log5_" in column:
+        return 0.5
+    if _matches_feature_pattern(column, _DEFENSE_FEATURE_DEFAULTS):
+        return _resolve_pattern_default(column, _DEFENSE_FEATURE_DEFAULTS)
+    if "_lineup_" in column or _matches_feature_pattern(column, _OFFENSE_FEATURE_DEFAULTS):
+        return _resolve_pattern_default(column, _OFFENSE_FEATURE_DEFAULTS)
+    return 0.0
+
+
+def _matches_feature_pattern(column: str, defaults: Mapping[str, float]) -> bool:
+    return any(f"_{metric}" in column for metric in defaults)
+
+
+def _resolve_pattern_default(column: str, defaults: Mapping[str, float]) -> float:
+    for metric, default_value in defaults.items():
+        if f"_{metric}" in column:
+            return float(default_value)
+    return 0.0
 
 
 def _normalize_lineup_player_ids_by_date(

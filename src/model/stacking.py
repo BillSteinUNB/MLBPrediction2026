@@ -18,6 +18,7 @@ from sklearn.metrics import accuracy_score, brier_score_loss, log_loss, roc_auc_
 from sklearn.model_selection import cross_val_predict
 from xgboost import XGBClassifier
 
+from src.clients.weather_client import fetch_game_weather
 from src.model.data_builder import DEFAULT_OUTPUT_PATH, build_training_dataset
 from src.model.xgboost_trainer import (
     DEFAULT_MODEL_OUTPUT_DIR,
@@ -315,6 +316,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             end_year=args.end_year,
             output_path=training_path,
             refresh=args.refresh_training_data,
+            weather_fetcher=fetch_game_weather,
         )
 
     result = train_stacking_models(

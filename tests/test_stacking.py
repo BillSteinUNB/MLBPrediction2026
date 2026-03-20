@@ -7,7 +7,10 @@ from datetime import UTC, datetime, timedelta
 
 import joblib
 import pandas as pd
+import pytest
 
+from src.clients.weather_client import fetch_game_weather
+import src.model.stacking as stacking_module
 from src.model.stacking import train_stacking_models
 
 
@@ -236,3 +239,31 @@ def test_stacking_bundle_created_from_main_module_reloads_in_fresh_interpreter(t
 
     assert loader.returncode == 0, loader.stderr
     assert loader.stdout.strip() == "src.model.stacking"
+
+
+def test_main_rebuilds_training_data_with_live_weather_fetcher(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _StopBuild(Exception):
+        pass
+
+    def _fake_build_training_dataset(**kwargs):
+        captured.update(kwargs)
+        raise _StopBuild
+
+    monkeypatch.setattr(stacking_module, "build_training_dataset", _fake_build_training_dataset)
+
+    with pytest.raises(_StopBuild):
+        stacking_module.main(
+            [
+                "--training-data",
+                str(tmp_path / "missing_training_data.parquet"),
+                "--output-dir",
+                str(tmp_path / "models"),
+            ]
+        )
+
+    assert captured["weather_fetcher"] is fetch_game_weather

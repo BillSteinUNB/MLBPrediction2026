@@ -15,6 +15,7 @@ from sklearn.metrics import accuracy_score, log_loss, roc_auc_score
 from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
 from xgboost import XGBClassifier
 
+from src.clients.weather_client import fetch_game_weather
 from src.model.data_builder import (
     DEFAULT_OUTPUT_PATH,
     _compute_data_version_hash,
@@ -173,6 +174,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             end_year=args.end_year,
             output_path=training_path,
             refresh=args.refresh_training_data,
+            weather_fetcher=fetch_game_weather,
         )
 
     result = train_f5_models(

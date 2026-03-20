@@ -17,6 +17,7 @@ from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, brier_score_loss, log_loss, roc_auc_score
 
+from src.clients.weather_client import fetch_game_weather
 from src.model.data_builder import DEFAULT_OUTPUT_PATH, build_training_dataset
 from src.model.stacking import (
     DEFAULT_META_LEARNER_MAX_ITER,
@@ -432,6 +433,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             end_year=args.end_year,
             output_path=training_path,
             refresh=args.refresh_training_data,
+            weather_fetcher=fetch_game_weather,
         )
 
     result = train_calibrated_models(

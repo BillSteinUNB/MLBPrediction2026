@@ -17,6 +17,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import brier_score_loss
 from xgboost import XGBClassifier
 
+from src.clients.weather_client import fetch_game_weather
 from src.model.calibration import (
     CalibratedStackingModel,
     DEFAULT_CALIBRATION_METHOD,
@@ -24,6 +25,7 @@ from src.model.calibration import (
     _fit_probability_calibrator,
 )
 from src.model.data_builder import (
+    WeatherFetcher,
     _compute_data_version_hash,
     assert_training_data_is_leakage_free,
     build_training_dataset,
@@ -184,6 +186,7 @@ def run_walk_forward_backtest(
     raw_meta_feature_columns: Sequence[str] = DEFAULT_RAW_META_FEATURE_COLUMNS,
     estimator_kwargs: Mapping[str, Any] | None = None,
     meta_learner_max_iter: int = DEFAULT_META_LEARNER_MAX_ITER,
+    weather_fetcher: WeatherFetcher = fetch_game_weather,
 ) -> WalkForwardBacktestResult:
     """Run a deterministic walk-forward backtest and persist predictions plus window metrics."""
 
@@ -261,6 +264,7 @@ def run_walk_forward_backtest(
                 window=window,
                 cache_dir=cache_dir,
                 refresh_data=refresh_data,
+                weather_fetcher=weather_fetcher,
             )
             if build.train_row_count == 0 or build.test_row_count == 0:
                 logger.info(
@@ -768,6 +772,7 @@ def _resolve_window_training_data(
     window: WalkForwardWindow,
     cache_dir: str | Path,
     refresh_data: bool,
+    weather_fetcher: WeatherFetcher,
 ) -> tuple[pd.DataFrame, WalkForwardWindowBuild]:
     cache_path = Path(cache_dir) / (
         f"walk_forward_cache_{window.train_start.strftime('%Y%m%d')}_{window.test_end.strftime('%Y%m%d')}.parquet"
@@ -783,6 +788,7 @@ def _resolve_window_training_data(
             full_regular_seasons_target=(window.test_end.year - window.train_start.year + 1),
             scheduled_start_before=cutoff_timestamp.isoformat(),
             refresh=refresh_data,
+            weather_fetcher=weather_fetcher,
         )
 
     dataframe = _load_backtest_dataframe(cache_path)

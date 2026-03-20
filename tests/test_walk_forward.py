@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
+from src.clients.weather_client import fetch_game_weather
 from src.backtest.walk_forward import create_walk_forward_windows, run_walk_forward_backtest
 from src.model.calibration import DEFAULT_CALIBRATION_METHOD
 
@@ -146,6 +147,7 @@ def test_run_walk_forward_backtest_rebuilds_window_data_and_records_build_log(
             {
                 "cutoff": cutoff.isoformat(),
                 "output_path": str(output_path),
+                "weather_fetcher": kwargs.get("weather_fetcher"),
             }
         )
         return SimpleNamespace(
@@ -184,6 +186,11 @@ def test_run_walk_forward_backtest_rebuilds_window_data_and_records_build_log(
         "2022-04-01T00:00:00+00:00",
     ]
     assert result.window_metrics["feature_data_action"].tolist() == ["rebuilt", "rebuilt", "rebuilt"]
+    assert [call["weather_fetcher"] for call in build_calls] == [
+        fetch_game_weather,
+        fetch_game_weather,
+        fetch_game_weather,
+    ]
 
     summary_payload = json.loads(result.summary_path.read_text(encoding="utf-8"))
     assert [entry["scheduled_start_before"] for entry in summary_payload["window_builds"]] == [
