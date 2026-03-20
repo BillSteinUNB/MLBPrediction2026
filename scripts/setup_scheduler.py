@@ -92,10 +92,11 @@ def build_cron_entry(
     runner_path = shlex.quote(str(repo_root / "scripts" / "run_daily.sh"))
     working_directory = shlex.quote(str(repo_root))
     log_path = shlex.quote(str(repo_root / "data" / "logs" / "run_daily.log"))
-    return (
-        f"CRON_TZ={timezone_name} {int(minute)} {int(hour)} * * * "
-        f"cd {working_directory} && {runner_path} >> {log_path} 2>&1 {CRON_MARKER}"
+    schedule_line = (
+        f"{int(minute)} {int(hour)} * * * "
+        f"cd {working_directory} && /usr/bin/env bash {runner_path} >> {log_path} 2>&1"
     )
+    return "\n".join((CRON_MARKER, f"CRON_TZ={timezone_name}", schedule_line))
 
 
 def build_systemd_service(*, repo_root: Path = REPO_ROOT) -> str:
@@ -269,7 +270,7 @@ def install_cron_entry(
     existing = _run_command(["crontab", "-l"], allow_failure=True)
     existing_lines = []
     if existing.returncode == 0:
-        existing_lines = [line for line in existing.stdout.splitlines() if CRON_MARKER not in line]
+        existing_lines = _strip_managed_cron_entries(existing.stdout.splitlines())
 
     cron_entry = build_cron_entry(repo_root=repo_root, run_time=run_time, timezone_name=timezone_name)
     updated_content = "\n".join([*existing_lines, cron_entry]).strip() + "\n"
@@ -352,6 +353,33 @@ def _build_schtasks_create_command(*, task_name: str, runner_path: Path, run_tim
 def _is_access_denied_error(exc: RuntimeError) -> bool:
     message = str(exc).casefold()
     return "access is denied" in message or "0x80070005" in message
+
+
+def _strip_managed_cron_entries(lines: Sequence[str]) -> list[str]:
+    """Remove prior managed cron entries in either legacy or block form."""
+
+    cleaned_lines: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        stripped_line = line.strip()
+
+        if stripped_line == CRON_MARKER:
+            index += 1
+            if index < len(lines) and lines[index].startswith("CRON_TZ="):
+                index += 1
+            if index < len(lines):
+                index += 1
+            continue
+
+        if CRON_MARKER in line:
+            index += 1
+            continue
+
+        cleaned_lines.append(line)
+        index += 1
+
+    return cleaned_lines
 
 
 def _run_command(

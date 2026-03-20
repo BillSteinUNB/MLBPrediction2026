@@ -69,9 +69,13 @@ def test_cron_and_systemd_templates_use_shell_wrapper_and_expected_schedule() ->
     service_unit = setup_scheduler.build_systemd_service(repo_root=REPO_ROOT)
     timer_unit = setup_scheduler.build_systemd_timer(run_time=run_time)
 
-    assert cron_entry.startswith("CRON_TZ=America/New_York 5 16 * * *")
-    assert "run_daily.sh" in cron_entry
-    assert str(REPO_ROOT) in cron_entry
+    cron_lines = cron_entry.splitlines()
+    assert cron_lines[0] == setup_scheduler.CRON_MARKER
+    assert cron_lines[1] == "CRON_TZ=America/New_York"
+    assert cron_lines[2].startswith("5 16 * * *")
+    assert "/usr/bin/env bash" in cron_lines[2]
+    assert "run_daily.sh" in cron_lines[2]
+    assert str(REPO_ROOT) in cron_lines[2]
 
     assert f"WorkingDirectory={REPO_ROOT}" in service_unit
     assert "ExecStart=/usr/bin/env bash" in service_unit
@@ -111,6 +115,47 @@ def test_install_windows_task_falls_back_to_schtasks_when_powershell_registratio
     assert result["registration_mode"] == "schtasks-fallback"
     assert calls[1][:2] == ["schtasks.exe", "/Create"]
     assert calls[2][:2] == ["schtasks.exe", "/Query"]
+
+
+def test_install_cron_entry_replaces_existing_managed_block(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[list[str], str | None, bool]] = []
+
+    def _fake_run_command(
+        command: list[str],
+        *,
+        input_text: str | None = None,
+        allow_failure: bool = False,
+    ) -> SimpleNamespace:
+        calls.append((command, input_text, allow_failure))
+        if command == ["crontab", "-l"]:
+            return SimpleNamespace(
+                returncode=0,
+                stdout=(
+                    "MAILTO=ops@example.com\n"
+                    f"{setup_scheduler.CRON_MARKER}\n"
+                    "CRON_TZ=America/New_York\n"
+                    "5 16 * * * stale-command\n"
+                    "30 8 * * * echo other-job\n"
+                ),
+                stderr="",
+            )
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(setup_scheduler, "_run_command", _fake_run_command)
+
+    result = setup_scheduler.install_cron_entry(repo_root=tmp_path, run_time="16:05")
+
+    assert result["cron_entry"].splitlines()[0] == setup_scheduler.CRON_MARKER
+    assert len(calls) == 2
+
+    updated_content = calls[1][1]
+    assert updated_content is not None
+    assert updated_content.count(setup_scheduler.CRON_MARKER) == 1
+    assert "stale-command" not in updated_content
+    assert "30 8 * * * echo other-job" in updated_content
 
 
 def test_runner_scripts_pin_repo_root_and_forward_extra_args() -> None:
