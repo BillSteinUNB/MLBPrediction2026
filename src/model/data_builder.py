@@ -801,6 +801,7 @@ def _build_roster_turnover_by_team(
         return {}
 
     current_rosters: dict[str, set[int]] = {}
+    teams_with_lineup_history: set[str] = set()
     for game in day_schedule.to_dict(orient="records"):
         for team_key in ("home_team", "away_team"):
             current_rosters.setdefault(str(game[team_key]), set())
@@ -809,11 +810,14 @@ def _build_roster_turnover_by_team(
         _ = game_pk
         if team not in current_rosters:
             continue
-        current_rosters[team].update(
+        normalized_player_ids = {
             player_id
             for player_id in (_coerce_int(player_id) for player_id in player_ids)
             if player_id is not None
-        )
+        }
+        if normalized_player_ids:
+            teams_with_lineup_history.add(team)
+            current_rosters[team].update(normalized_player_ids)
 
     lineup_lookup = {
         (int(lineup.game_pk), str(lineup.team)): lineup
@@ -826,9 +830,12 @@ def _build_roster_turnover_by_team(
             lineup = lineup_lookup.get((game_pk, team))
             starter_id = None
             if lineup is not None:
-                current_rosters.setdefault(team, set()).update(
-                    player.player_id for player in lineup.players
-                )
+                lineup_player_set = {
+                    player.player_id for player in lineup.players if player.player_id is not None
+                }
+                if lineup_player_set:
+                    teams_with_lineup_history.add(team)
+                    current_rosters.setdefault(team, set()).update(lineup_player_set)
                 starter_id = lineup.starting_pitcher_id or lineup.projected_starting_pitcher_id
 
             if starter_id is None:
@@ -852,7 +859,7 @@ def _build_roster_turnover_by_team(
 
     turnover_by_team: dict[str, float] = {}
     for team, current_ids in current_rosters.items():
-        if not current_ids:
+        if team not in teams_with_lineup_history or not current_ids:
             continue
 
         prior_ids = prior_rosters.get(team)

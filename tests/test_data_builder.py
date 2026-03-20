@@ -660,6 +660,95 @@ def test_build_training_dataset_uses_live_weather_fetcher_by_default(
     assert target_row["weather_data_missing"] == 0.0
 
 
+def test_build_training_dataset_skips_roster_turnover_without_lineup_history(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, dict[str, float] | None] = {}
+
+    def capture_turnover(name: str):
+        def _capture(*_args, **kwargs):
+            captured[name] = kwargs.get("roster_turnover_by_team")
+            return []
+
+        return _capture
+
+    monkeypatch.setattr("src.model.data_builder.compute_offensive_features", capture_turnover("offense"))
+    monkeypatch.setattr("src.model.data_builder.compute_pitching_features", capture_turnover("pitching"))
+    monkeypatch.setattr("src.model.data_builder.compute_defense_features", capture_turnover("defense"))
+    monkeypatch.setattr("src.model.data_builder.compute_bullpen_features", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr("src.model.data_builder.compute_baseline_features", lambda *_args, **_kwargs: [])
+
+    schedule = pd.DataFrame(
+        [
+            _schedule_row(
+                4502,
+                "2025-04-10T23:05:00Z",
+                "NYY",
+                "BOS",
+                "Yankee Stadium",
+                home_starter_id=120,
+                away_starter_id=200,
+                f5_home_score=3,
+                f5_away_score=1,
+                final_home_score=4,
+                final_away_score=2,
+            )
+        ]
+    )
+    prior_batting = pd.DataFrame(
+        {
+            "player_id": [1, 2, 3, 4, 5, 201, 202, 203, 204, 205, 206, 207, 208, 209],
+            "Team": ["NYY"] * 5 + ["BOS"] * 9,
+            "PA": [200] * 14,
+            "wRC+": [100.0] * 14,
+            "wOBA": [0.320] * 14,
+            "ISO": [0.170] * 14,
+            "BABIP": [0.300] * 14,
+            "K%": [22.0] * 14,
+            "BB%": [8.0] * 14,
+        }
+    )
+    prior_start_metrics = pd.DataFrame(
+        {
+            "team": ["NYY", "BOS"],
+            "pitcher_id": [100, 200],
+            "game_date": ["2024-08-01", "2024-08-01"],
+            "xfip": [4.0, 4.0],
+            "xera": [4.0, 4.0],
+            "k_pct": [22.0, 22.0],
+            "bb_pct": [8.0, 8.0],
+            "gb_pct": [43.0, 43.0],
+            "hr_fb_pct": [11.0, 11.0],
+            "avg_fastball_velocity": [94.0, 94.0],
+            "pitch_mix_entropy": [1.5, 1.5],
+            "innings_pitched": [5.0, 5.0],
+        }
+    )
+
+    result = build_training_dataset(
+        start_year=2025,
+        end_year=2025,
+        output_path=tmp_path / "turnover_gate.parquet",
+        full_regular_seasons_target=1,
+        shortened_season_game_threshold=0,
+        schedule_fetcher=lambda _year: schedule.copy(),
+        batting_stats_fetcher=lambda season, **_kwargs: prior_batting.copy() if season == 2024 else pd.DataFrame(),
+        team_logs_fetcher=_fake_team_logs_fetcher({}),
+        fielding_stats_fetcher=_fake_fielding_fetcher({}),
+        framing_stats_fetcher=_fake_framing_fetcher({}),
+        start_metrics_fetcher=_fake_start_metrics_fetcher({2024: prior_start_metrics}),
+        bullpen_metrics_fetcher=_fake_bullpen_metrics_fetcher({}),
+        lineup_fetcher=lambda *_args, **_kwargs: [],
+        weather_fetcher=_fake_weather_fetcher,
+    )
+
+    assert result.dataframe["game_pk"].tolist() == [4502]
+    assert captured["offense"] is None
+    assert captured["pitching"] is None
+    assert captured["defense"] is None
+
+
 def test_build_live_feature_frame_recomputes_same_day_features_and_ignores_stale_rows(
     tmp_path: Path,
 ) -> None:
