@@ -1,0 +1,15 @@
+{
+  "featureId": "t29-financial-tests",
+  "reviewedAt": "2026-03-20T08:10:12.222111+00:00",
+  "commitId": "968d7bee626e09692f47d05026bae2cf4490e15b",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The reviewed diff expands the financial regression suite in line with the t29 contract. `tests/test_settlement.py` now covers the requested F5 moneyline and run-line grading paths including push/no-action outcomes and doubleheader scoping, `tests/test_edge_calculator.py` covers exact even and ±300 odds math plus threshold/logging behavior, and `tests/test_bankroll.py` covers Kelly sizing, the 5% cap, same-team correlation selection, kill-switch behavior, and bankroll-ledger persistence. I found no blocking or non-blocking correctness issues in the reviewed feature scope.",
+    "issues": []
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "Pass. Feature t29-financial-tests adds the requested settlement, edge-calculation, and bankroll regression coverage across the three financial test files, and the reviewed transcript/diff do not reveal code-review issues or shared-state gaps within this feature's scope."
+}
