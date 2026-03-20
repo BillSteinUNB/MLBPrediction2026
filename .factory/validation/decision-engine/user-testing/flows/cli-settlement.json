@@ -1,0 +1,300 @@
+{
+  "groupId": "cli-settlement",
+  "testedAt": "2026-03-20T06:43:23.641847+00:00",
+  "isolation": {
+    "surface": "CLI",
+    "pythonInterpreter": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe",
+    "workDirectory": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\decision-engine\\user-testing\\work\\settlement",
+    "evidenceDir": "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\decision-engine\\settlement",
+    "reportPath": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\decision-engine\\user-testing\\flows\\cli-settlement.json",
+    "tempDbPath": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\decision-engine\\user-testing\\work\\settlement\\settlement_probe.db"
+  },
+  "toolsUsed": [
+    "pytest",
+    "python-cli"
+  ],
+  "commandsRun": [
+    "python -m pytest tests/test_settlement.py -v",
+    "python <inline settlement CLI probe>"
+  ],
+  "assertions": [
+    {
+      "id": "VAL-SETTLE-001",
+      "title": "F5 ML home win",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run settle_bet for f5_ml home with isolated inputs",
+          "expected": "WIN",
+          "observed": "WIN"
+        },
+        {
+          "action": "Run targeted pytest validation on tests/test_settlement.py",
+          "expected": "pytest exit code 0",
+          "observed": "pytest exit code 0"
+        }
+      ],
+      "evidence": {
+        "terminalSnapshots": [
+          "decision-engine/settlement/settlement_cli_probe_stdout.txt",
+          "decision-engine/settlement/settlement_pytest_output.txt"
+        ],
+        "json": [
+          "decision-engine/settlement/settlement_cli_probe.json"
+        ],
+        "network": "not applicable (CLI/local execution)"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-SETTLE-002",
+      "title": "F5 ML away win",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run settle_bet for f5_ml away with isolated inputs",
+          "expected": "WIN",
+          "observed": "WIN"
+        },
+        {
+          "action": "Run targeted pytest validation on tests/test_settlement.py",
+          "expected": "pytest exit code 0",
+          "observed": "pytest exit code 0"
+        }
+      ],
+      "evidence": {
+        "terminalSnapshots": [
+          "decision-engine/settlement/settlement_cli_probe_stdout.txt",
+          "decision-engine/settlement/settlement_pytest_output.txt"
+        ],
+        "json": [
+          "decision-engine/settlement/settlement_cli_probe.json"
+        ],
+        "network": "not applicable (CLI/local execution)"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-SETTLE-003",
+      "title": "F5 ML tie is push",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run settle_bet for f5_ml home with isolated inputs",
+          "expected": "PUSH",
+          "observed": "PUSH"
+        },
+        {
+          "action": "Run targeted pytest validation on tests/test_settlement.py",
+          "expected": "pytest exit code 0",
+          "observed": "pytest exit code 0"
+        }
+      ],
+      "evidence": {
+        "terminalSnapshots": [
+          "decision-engine/settlement/settlement_cli_probe_stdout.txt",
+          "decision-engine/settlement/settlement_pytest_output.txt"
+        ],
+        "json": [
+          "decision-engine/settlement/settlement_cli_probe.json"
+        ],
+        "network": "not applicable (CLI/local execution)"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-SETTLE-004",
+      "title": "F5 RL home wins by 2+",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run settle_bet for f5_rl home with isolated inputs",
+          "expected": "WIN",
+          "observed": "WIN"
+        },
+        {
+          "action": "Run targeted pytest validation on tests/test_settlement.py",
+          "expected": "pytest exit code 0",
+          "observed": "pytest exit code 0"
+        }
+      ],
+      "evidence": {
+        "terminalSnapshots": [
+          "decision-engine/settlement/settlement_cli_probe_stdout.txt",
+          "decision-engine/settlement/settlement_pytest_output.txt"
+        ],
+        "json": [
+          "decision-engine/settlement/settlement_cli_probe.json"
+        ],
+        "network": "not applicable (CLI/local execution)"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-SETTLE-005",
+      "title": "F5 RL home wins by 1",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run settle_bet for f5_rl home with isolated inputs",
+          "expected": "LOSS",
+          "observed": "LOSS"
+        },
+        {
+          "action": "Run targeted pytest validation on tests/test_settlement.py",
+          "expected": "pytest exit code 0",
+          "observed": "pytest exit code 0"
+        }
+      ],
+      "evidence": {
+        "terminalSnapshots": [
+          "decision-engine/settlement/settlement_cli_probe_stdout.txt",
+          "decision-engine/settlement/settlement_pytest_output.txt"
+        ],
+        "json": [
+          "decision-engine/settlement/settlement_cli_probe.json"
+        ],
+        "network": "not applicable (CLI/local execution)"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-SETTLE-006",
+      "title": "F5 RL tied after 5",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run settle_bet for f5_rl away with isolated inputs",
+          "expected": "WIN",
+          "observed": "WIN"
+        },
+        {
+          "action": "Run targeted pytest validation on tests/test_settlement.py",
+          "expected": "pytest exit code 0",
+          "observed": "pytest exit code 0"
+        }
+      ],
+      "evidence": {
+        "terminalSnapshots": [
+          "decision-engine/settlement/settlement_cli_probe_stdout.txt",
+          "decision-engine/settlement/settlement_pytest_output.txt"
+        ],
+        "json": [
+          "decision-engine/settlement/settlement_cli_probe.json"
+        ],
+        "network": "not applicable (CLI/local execution)"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-SETTLE-007",
+      "title": "No action for short game",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run settle_bet for f5_ml home with isolated inputs",
+          "expected": "NO_ACTION",
+          "observed": "NO_ACTION"
+        },
+        {
+          "action": "Run targeted pytest validation on tests/test_settlement.py",
+          "expected": "pytest exit code 0",
+          "observed": "pytest exit code 0"
+        }
+      ],
+      "evidence": {
+        "terminalSnapshots": [
+          "decision-engine/settlement/settlement_cli_probe_stdout.txt",
+          "decision-engine/settlement/settlement_pytest_output.txt"
+        ],
+        "json": [
+          "decision-engine/settlement/settlement_cli_probe.json"
+        ],
+        "network": "not applicable (CLI/local execution)"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-SETTLE-008",
+      "title": "No action for starter scratch",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run settle_bet for f5_ml home with isolated inputs",
+          "expected": "NO_ACTION",
+          "observed": "NO_ACTION"
+        },
+        {
+          "action": "Run targeted pytest validation on tests/test_settlement.py",
+          "expected": "pytest exit code 0",
+          "observed": "pytest exit code 0"
+        }
+      ],
+      "evidence": {
+        "terminalSnapshots": [
+          "decision-engine/settlement/settlement_cli_probe_stdout.txt",
+          "decision-engine/settlement/settlement_pytest_output.txt"
+        ],
+        "json": [
+          "decision-engine/settlement/settlement_cli_probe.json"
+        ],
+        "network": "not applicable (CLI/local execution)"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-SETTLE-009",
+      "title": "Doubleheader disambiguation",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Create two same-day games with different game_pk values in isolated SQLite",
+          "expected": "Distinct game_pk rows for both doubleheader legs",
+          "observed": "Distinct game_pks: [2001, 2002]"
+        },
+        {
+          "action": "Settle only game_pk 2002 through settle_game_bets",
+          "expected": "Only game_pk 2002 updates from PENDING to WIN",
+          "observed": "Bet rows after settlement: [[2001, 'PENDING'], [2002, 'WIN']]"
+        },
+        {
+          "action": "Run targeted pytest validation on tests/test_settlement.py",
+          "expected": "pytest exit code 0",
+          "observed": "pytest exit code 0"
+        }
+      ],
+      "evidence": {
+        "terminalSnapshots": [
+          "decision-engine/settlement/settlement_cli_probe_stdout.txt",
+          "decision-engine/settlement/settlement_pytest_output.txt"
+        ],
+        "json": [
+          "decision-engine/settlement/settlement_cli_probe.json",
+          "decision-engine/settlement/settlement_doubleheader_query.json"
+        ],
+        "network": "not applicable (CLI/local execution)"
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [
+    {
+      "description": "tuistory CLI was not available on PATH, so terminal evidence was captured as saved stdout/text artifacts via Python CLI instead.",
+      "resolved": true,
+      "resolution": "Used the assigned Python interpreter to run targeted pytest and an isolated settlement probe, then saved stdout and JSON outputs into the mission evidence directory.",
+      "affectedAssertions": [
+        "VAL-SETTLE-001",
+        "VAL-SETTLE-002",
+        "VAL-SETTLE-003",
+        "VAL-SETTLE-004",
+        "VAL-SETTLE-005",
+        "VAL-SETTLE-006",
+        "VAL-SETTLE-007",
+        "VAL-SETTLE-008",
+        "VAL-SETTLE-009"
+      ]
+    }
+  ],
+  "blockers": [],
+  "summary": "Tested 9 assertions: 9 passed, 0 failed, 0 blocked, 0 skipped."
+}

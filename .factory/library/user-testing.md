@@ -35,6 +35,13 @@ This is a batch processing system with no web UI. Validation is performed via:
 - On 2026-03-20, a live `build_training_dataset(start_year=2025, end_year=2025)` probe failed at the external `pybaseball.team_game_logs` / Baseball Reference scrape boundary with `Table with expected id not found on scraped page`; when that boundary is down, anti-leakage can still be validated through the real builder import using fixture-backed fetchers, but full row-count/completeness validation remains blocked until the scrape recovers.
 - Model-training and walk-forward CLI validation can run fully isolated against deterministic synthetic training parquet inputs under `.factory/validation/ml-pipeline/user-testing/work/`.
 
+### Decision-Engine Milestone Setup Notes
+
+- No long-running services are required for validation.
+- Primary targeted pytest surfaces for this milestone are `tests/test_edge_calculator.py`, `tests/test_bankroll.py`, `tests/test_settlement.py`, `tests/test_daily_pipeline.py`, and `tests/test_discord_notifications.py`.
+- Use one isolated SQLite path per validator under `.factory/validation/decision-engine/user-testing/work/`; do not write to the shared `data/mlb.db` unless a check explicitly requires that path.
+- For pipeline and notification assertions, prefer dependency-injected dry-run CLI/Python checks and existing pytest fixtures over live third-party calls so validation stays on the real CLI surface without consuming odds/weather/webhook quotas.
+
 ### Validation Tools
 
 | Tool | Surface | Usage |
@@ -80,7 +87,7 @@ sqlite3 data/mlb.db "SELECT * FROM predictions WHERE date='2025-09-15'"
 **Isolation Strategy:**
 - Each validator runs pytest on separate test files
 - No shared state between validators
-- SQLite database is read-only during validation
+- Validators that need persistence should use dedicated temp SQLite paths under their assigned work directories instead of the shared project database
 
 ## Flow Validator Guidance: CLI
 
@@ -89,6 +96,7 @@ sqlite3 data/mlb.db "SELECT * FROM predictions WHERE date='2025-09-15'"
 - Keep each validator inside its own isolation directory or temp DB path.
 - Do not reuse shared `data\\mlb.db` unless a test explicitly requires it.
 - Prefer deterministic checks with targeted pytest files and small Python snippets.
+- For decision-engine pipeline checks, use dry-run payload generation and dependency injection instead of live external APIs or a real Discord webhook.
 - For odds/weather validations, use mock transports or fixtures instead of live third-party requests unless a specific assertion requires a real call.
 - Save concise evidence (stdout snippets, JSON, sqlite query output) into the assigned evidence directory.
 
