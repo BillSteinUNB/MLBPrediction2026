@@ -60,6 +60,7 @@ _TEAM_CODE_ALIASES.update(
 
 ScheduleFetcher = Callable[[int], pd.DataFrame]
 SeasonStatsFetcher = Callable[..., pd.DataFrame]
+TeamHistoryEntry = tuple[pd.Timestamp, dict[str, float]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -630,7 +631,7 @@ def _assemble_training_rows(
     default_snapshot: TeamSnapshot,
     build_timestamp: datetime,
 ) -> pd.DataFrame:
-    histories: dict[str, list[dict[str, float]]] = {}
+    histories: dict[str, list[TeamHistoryEntry]] = {}
     rows: list[dict[str, Any]] = []
 
     for game in schedule.to_dict(orient="records"):
@@ -640,7 +641,8 @@ def _assemble_training_rows(
             game_start = game_start.tz_localize("UTC")
         else:
             game_start = game_start.tz_convert("UTC")
-        as_of_timestamp = (game_start.normalize() - pd.Timedelta(days=1)).isoformat()
+        history_cutoff = game_start.normalize()
+        as_of_timestamp = (history_cutoff - pd.Timedelta(days=1)).isoformat()
         year_snapshots = snapshots_by_year.get(season - 1, {})
 
         row: dict[str, Any] = {
@@ -676,8 +678,8 @@ def _assemble_training_rows(
         ):
             team = str(game[team_key])
             opponent = str(game[opponent_key])
-            team_history = histories.get(team, [])
-            opponent_history = histories.get(opponent, [])
+            team_history = _history_before_cutoff(histories.get(team, []), history_cutoff)
+            opponent_history = _history_before_cutoff(histories.get(opponent, []), history_cutoff)
             snapshot = year_snapshots.get(team, default_snapshot)
 
             row[f"{side_name}_team_prior_games"] = float(len(team_history))
@@ -705,24 +707,30 @@ def _assemble_training_rows(
         rows.append(row)
 
         histories.setdefault(str(game["home_team"]), []).append(
-            {
-                "full_runs_scored": float(final_home_score),
-                "full_runs_allowed": float(final_away_score),
-                "f5_runs_scored": float(f5_home_score),
-                "f5_runs_allowed": float(f5_away_score),
-                "win": float(final_home_score > final_away_score),
-                "f5_win": float(f5_home_score > f5_away_score),
-            }
+            (
+                game_start,
+                {
+                    "full_runs_scored": float(final_home_score),
+                    "full_runs_allowed": float(final_away_score),
+                    "f5_runs_scored": float(f5_home_score),
+                    "f5_runs_allowed": float(f5_away_score),
+                    "win": float(final_home_score > final_away_score),
+                    "f5_win": float(f5_home_score > f5_away_score),
+                },
+            )
         )
         histories.setdefault(str(game["away_team"]), []).append(
-            {
-                "full_runs_scored": float(final_away_score),
-                "full_runs_allowed": float(final_home_score),
-                "f5_runs_scored": float(f5_away_score),
-                "f5_runs_allowed": float(f5_home_score),
-                "win": float(final_away_score > final_home_score),
-                "f5_win": float(f5_away_score > f5_home_score),
-            }
+            (
+                game_start,
+                {
+                    "full_runs_scored": float(final_away_score),
+                    "full_runs_allowed": float(final_home_score),
+                    "f5_runs_scored": float(f5_away_score),
+                    "f5_runs_allowed": float(f5_home_score),
+                    "win": float(final_away_score > final_home_score),
+                    "f5_win": float(f5_away_score > f5_home_score),
+                },
+            )
         )
 
     dataset = pd.DataFrame(rows).sort_values(["scheduled_start", "game_pk"]).reset_index(drop=True)
@@ -762,6 +770,13 @@ def _rolling_history_features(side_name: str, history: Sequence[Mapping[str, flo
             0.5,
         )
     return features
+
+
+def _history_before_cutoff(
+    history: Sequence[TeamHistoryEntry],
+    cutoff: pd.Timestamp,
+) -> list[Mapping[str, float]]:
+    return [stats for started_at, stats in history if started_at < cutoff]
 
 
 def _snapshot_features(side_name: str, snapshot: TeamSnapshot) -> dict[str, float]:

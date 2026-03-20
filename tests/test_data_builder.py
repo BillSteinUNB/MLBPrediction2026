@@ -235,6 +235,79 @@ def test_build_training_dataset_uses_only_prior_games_in_rolling_features(tmp_pa
     assert second_game["home_team_pythagorean_wp_30g"] == expected_home_pythagorean
 
 
+def test_build_training_dataset_excludes_same_day_doubleheader_results_from_later_game_features(
+    tmp_path,
+) -> None:
+    output_path = tmp_path / "doubleheader_sample.parquet"
+    schedules = {
+        2025: pd.DataFrame(
+            [
+                _schedule_row(
+                    3001,
+                    "2025-04-01T23:05:00Z",
+                    "NYY",
+                    "BOS",
+                    "Yankee Stadium",
+                    f5_home_score=2,
+                    f5_away_score=0,
+                    final_home_score=6,
+                    final_away_score=2,
+                ),
+                _schedule_row(
+                    3002,
+                    "2025-04-02T17:05:00Z",
+                    "NYY",
+                    "BOS",
+                    "Yankee Stadium",
+                    f5_home_score=4,
+                    f5_away_score=1,
+                    final_home_score=8,
+                    final_away_score=3,
+                ),
+                _schedule_row(
+                    3003,
+                    "2025-04-02T23:05:00Z",
+                    "NYY",
+                    "BOS",
+                    "Yankee Stadium",
+                    f5_home_score=1,
+                    f5_away_score=5,
+                    final_home_score=2,
+                    final_away_score=9,
+                ),
+            ]
+        )
+    }
+
+    dataset = build_training_dataset(
+        start_year=2025,
+        end_year=2025,
+        output_path=output_path,
+        full_regular_seasons_target=1,
+        shortened_season_game_threshold=0,
+        schedule_fetcher=lambda year: schedules[year],
+        batting_stats_fetcher=lambda season, **_: _batting_snapshot(),
+        pitching_stats_fetcher=lambda season, **_: _pitching_snapshot(),
+        fielding_stats_fetcher=lambda season, **_: _fielding_snapshot(),
+        framing_stats_fetcher=lambda season, **_: _framing_snapshot(),
+    ).dataframe
+
+    later_doubleheader_game = dataset.loc[dataset["game_pk"] == 3003].iloc[0]
+
+    assert later_doubleheader_game["as_of_timestamp"] == "2025-04-01T00:00:00+00:00"
+    assert later_doubleheader_game["home_team_prior_games"] == 1.0
+    assert later_doubleheader_game["away_team_prior_games"] == 1.0
+    assert later_doubleheader_game["home_offense_runs_scored_7g"] == 6.0
+    assert later_doubleheader_game["home_pitching_runs_allowed_7g"] == 2.0
+    assert later_doubleheader_game["away_offense_runs_scored_7g"] == 2.0
+    assert later_doubleheader_game["away_pitching_runs_allowed_7g"] == 6.0
+
+    expected_home_pythagorean = calculate_pythagorean_win_percentage(6.0, 2.0)
+    expected_away_pythagorean = calculate_pythagorean_win_percentage(2.0, 6.0)
+    assert later_doubleheader_game["home_team_pythagorean_wp_30g"] == expected_home_pythagorean
+    assert later_doubleheader_game["away_team_pythagorean_wp_30g"] == expected_away_pythagorean
+
+
 def test_resolve_training_years_backfills_shortened_season_with_previous_full_year() -> None:
     resolved_years = resolve_training_years(
         start_year=2019,
