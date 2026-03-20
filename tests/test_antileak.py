@@ -28,6 +28,17 @@ def test_antileak_random_sample_of_100_games_uses_prior_day_snapshot(
 
     assert_training_data_is_leakage_free(sampled_games)
 
+    april_ten_games = cached_training_frame.loc[
+        (cached_training_frame["season"] == 2025)
+        & (cached_training_frame["game_date"] == "2025-04-10")
+    ]
+    assert not april_ten_games.empty
+    assert april_ten_games["home_team_wrc_plus_7g"].between(50.0, 200.0).all()
+    assert april_ten_games["away_team_wrc_plus_7g"].between(50.0, 200.0).all()
+    assert april_ten_games["home_starter_xfip_7s"].between(2.0, 6.0).all()
+    assert april_ten_games["away_starter_xfip_7s"].between(2.0, 6.0).all()
+    assert_training_data_is_leakage_free(april_ten_games)
+
 
 def test_antileak_assertion_rejects_same_day_or_future_timestamp(
     cached_training_frame: pd.DataFrame,

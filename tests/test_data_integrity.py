@@ -32,6 +32,25 @@ def _assert_basic_training_data_integrity(dataframe: pd.DataFrame) -> None:
         raise AssertionError(f"Found non-regular game types: {non_regular_games}")
 
 
+def _assert_real_training_features_present(dataframe: pd.DataFrame) -> None:
+    expected_columns = {
+        "home_team_wrc_plus_7g",
+        "away_team_wrc_plus_7g",
+        "home_starter_xfip_7s",
+        "away_starter_xfip_7s",
+        "home_team_drs_season",
+        "home_team_bullpen_xfip",
+        "home_team_log5_30g",
+        "weather_composite",
+    }
+    missing_columns = sorted(expected_columns.difference(dataframe.columns))
+    if missing_columns:
+        raise AssertionError(
+            "Expected builder-backed training features to be present: "
+            + ", ".join(missing_columns)
+        )
+
+
 def test_training_data_fixture_has_unique_regular_season_rows_and_non_null_targets(
     cached_training_data: tuple[Path, pd.DataFrame],
 ) -> None:
@@ -39,12 +58,22 @@ def test_training_data_fixture_has_unique_regular_season_rows_and_non_null_targe
 
     summary = assert_training_data_is_complete(parquet_path)
     _assert_basic_training_data_integrity(dataframe)
+    _assert_real_training_features_present(dataframe)
 
     assert summary.row_count == len(dataframe) == 17_010
     assert dataframe["game_pk"].is_unique
     assert summary.target_null_counts == {"f5_ml_result": 0, "f5_rl_result": 0}
     assert summary.game_type_counts == {"R": 17_010}
     assert summary.seasons == _VALIDATION_FIXTURE_SEASONS
+
+    april_ten_rows = dataframe.loc[
+        (dataframe["season"] == 2025) & (dataframe["game_date"] == "2025-04-10")
+    ]
+    assert not april_ten_rows.empty
+    assert april_ten_rows["home_team_wrc_plus_7g"].between(50.0, 200.0).all()
+    assert april_ten_rows["away_team_wrc_plus_7g"].between(50.0, 200.0).all()
+    assert april_ten_rows["home_starter_xfip_7s"].between(2.0, 6.0).all()
+    assert april_ten_rows["away_starter_xfip_7s"].between(2.0, 6.0).all()
 
 
 def test_training_data_integrity_flags_duplicate_game_pk(

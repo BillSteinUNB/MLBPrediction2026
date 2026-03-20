@@ -43,6 +43,7 @@ from src.models.weather import WeatherData
 
 
 _VALIDATION_FIXTURE_SEASONS = (2018, 2019, 2021, 2022, 2023, 2024, 2025)
+_VALIDATION_FIXTURE_CACHE: dict[int, pd.DataFrame] = {}
 
 
 def _schedule_row(
@@ -307,47 +308,168 @@ def _fake_weather_fetcher(team_abbr: str, game_datetime, **_kwargs) -> WeatherDa
     )
 
 
+def _shift_fixture_year(value: str, year: int) -> str:
+    timestamp = pd.Timestamp(value)
+    shifted = timestamp.replace(year=year)
+    if "T" not in str(value):
+        return shifted.date().isoformat()
+    if shifted.tzinfo is None:
+        shifted = shifted.tz_localize("UTC")
+    else:
+        shifted = shifted.tz_convert("UTC")
+    return shifted.isoformat()
+
+
+def _build_validation_schedule_by_year(rows_per_season: int) -> dict[int, pd.DataFrame]:
+    games_per_day = 15
+    schedule_by_year: dict[int, pd.DataFrame] = {}
+
+    for season in range(2018, 2026):
+        if season == 2020:
+            schedule_by_year[season] = pd.DataFrame()
+            continue
+
+        season_base = pd.Timestamp(f"{season}-04-01T18:05:00Z")
+        rows: list[dict[str, object]] = []
+        for game_offset in range(rows_per_season):
+            scheduled_start = season_base + pd.Timedelta(days=game_offset // games_per_day)
+            scheduled_start += pd.Timedelta(minutes=(game_offset % games_per_day) * 20)
+
+            if game_offset % 3 == 0:
+                f5_home_score, f5_away_score = 4, 1
+                final_home_score, final_away_score = 6, 2
+            elif game_offset % 2 == 0:
+                f5_home_score, f5_away_score = 2, 1
+                final_home_score, final_away_score = 4, 3
+            else:
+                f5_home_score, f5_away_score = 1, 3
+                final_home_score, final_away_score = 3, 5
+
+            rows.append(
+                _schedule_row(
+                    game_pk=(season * 10_000) + game_offset,
+                    scheduled_start=scheduled_start.isoformat(),
+                    home_team="NYY",
+                    away_team="BOS",
+                    venue="Yankee Stadium",
+                    f5_home_score=f5_home_score,
+                    f5_away_score=f5_away_score,
+                    final_home_score=final_home_score,
+                    final_away_score=final_away_score,
+                )
+            )
+
+        schedule_by_year[season] = pd.DataFrame(rows)
+
+    return schedule_by_year
+
+
+def _build_validation_team_logs_by_season() -> dict[tuple[int, str], pd.DataFrame]:
+    templates = _team_logs_by_season()
+    frames_by_season: dict[tuple[int, str], pd.DataFrame] = {}
+
+    for season in range(2017, 2026):
+        for team in ("NYY", "BOS"):
+            frame = templates[(2025, team)].copy()
+            frame["Date"] = frame["Date"].map(lambda value: _shift_fixture_year(value, season))
+            frames_by_season[(season, team)] = frame
+
+    return frames_by_season
+
+
+def _build_validation_start_metrics_by_season() -> dict[int, pd.DataFrame]:
+    template = _start_metrics_by_season()[2025]
+    frames_by_season: dict[int, pd.DataFrame] = {}
+
+    for season in range(2017, 2026):
+        frame = template.copy()
+        frame["game_date"] = frame["game_date"].map(
+            lambda value: _shift_fixture_year(value, season)
+        )
+        frame["game_pk"] = frame["game_pk"].map(
+            lambda value: (season * 10_000) + (int(value) % 10_000)
+        )
+        frames_by_season[season] = frame
+
+    return frames_by_season
+
+
+def _build_validation_fielding_by_season() -> dict[int, pd.DataFrame]:
+    template = _fielding_by_season()[2025]
+    frames_by_season: dict[int, pd.DataFrame] = {}
+
+    for season in range(2017, 2026):
+        frame = template.copy()
+        frame["game_date"] = frame["game_date"].map(
+            lambda value: _shift_fixture_year(value, season)
+        )
+        frames_by_season[season] = frame
+
+    return frames_by_season
+
+
+def _build_validation_framing_by_season() -> dict[int, pd.DataFrame]:
+    template = _framing_by_season()[2025]
+    frames_by_season: dict[int, pd.DataFrame] = {}
+
+    for season in range(2017, 2026):
+        frame = template.copy()
+        frame["game_date"] = frame["game_date"].map(
+            lambda value: _shift_fixture_year(value, season)
+        )
+        frames_by_season[season] = frame
+
+    return frames_by_season
+
+
+def _build_validation_bullpen_metrics_by_season() -> dict[int, pd.DataFrame]:
+    template = _bullpen_metrics_by_season()[2025]
+    frames_by_season: dict[int, pd.DataFrame] = {}
+
+    for season in range(2017, 2026):
+        frame = template.copy()
+        frame["game_date"] = frame["game_date"].map(
+            lambda value: _shift_fixture_year(value, season)
+        )
+        frame["game_pk"] = frame["game_pk"].map(
+            lambda value: (season * 10_000) + (int(value) % 10_000)
+        )
+        frames_by_season[season] = frame
+
+    return frames_by_season
+
+
 def _write_cached_training_validation_fixture(
     output_path: Path,
     *,
     rows_per_season: int = 2430,
 ) -> pd.DataFrame:
-    team_pairs = [
-        ("NYY", "BOS", "Yankee Stadium"),
-        ("LAD", "SF", "Dodger Stadium"),
-        ("ATL", "PHI", "Truist Park"),
-        ("CHC", "STL", "Wrigley Field"),
-        ("SEA", "HOU", "T-Mobile Park"),
-    ]
-    games_per_day = 15
-    rows: list[dict[str, object]] = []
+    dataframe = _VALIDATION_FIXTURE_CACHE.get(rows_per_season)
+    if dataframe is None:
+        schedule_by_year = _build_validation_schedule_by_year(rows_per_season)
+        dataframe = build_training_dataset(
+            start_year=2018,
+            end_year=2025,
+            output_path=output_path,
+            full_regular_seasons_target=len(_VALIDATION_FIXTURE_SEASONS),
+            shortened_season_game_threshold=1,
+            schedule_fetcher=lambda year: schedule_by_year.get(year, pd.DataFrame()).copy(),
+            batting_stats_fetcher=lambda *_args, **_kwargs: pd.DataFrame(),
+            team_logs_fetcher=_fake_team_logs_fetcher(_build_validation_team_logs_by_season()),
+            fielding_stats_fetcher=_fake_fielding_fetcher(_build_validation_fielding_by_season()),
+            framing_stats_fetcher=_fake_framing_fetcher(_build_validation_framing_by_season()),
+            start_metrics_fetcher=_fake_start_metrics_fetcher(
+                _build_validation_start_metrics_by_season()
+            ),
+            bullpen_metrics_fetcher=_fake_bullpen_metrics_fetcher(
+                _build_validation_bullpen_metrics_by_season()
+            ),
+            lineup_fetcher=lambda *_args, **_kwargs: [],
+            weather_fetcher=_fake_weather_fetcher,
+        ).dataframe
+        _VALIDATION_FIXTURE_CACHE[rows_per_season] = dataframe.copy()
 
-    for season in _VALIDATION_FIXTURE_SEASONS:
-        season_base = pd.Timestamp(f"{season}-03-20T18:05:00Z")
-        for game_offset in range(rows_per_season):
-            home_team, away_team, venue = team_pairs[game_offset % len(team_pairs)]
-            scheduled_start = season_base + pd.Timedelta(days=game_offset // games_per_day)
-            scheduled_start += pd.Timedelta(minutes=(game_offset % games_per_day) * 20)
-            rows.append(
-                {
-                    "game_pk": (season * 10_000) + game_offset,
-                    "season": season,
-                    "game_date": scheduled_start.date().isoformat(),
-                    "scheduled_start": scheduled_start.isoformat(),
-                    "as_of_timestamp": (
-                        scheduled_start.normalize() - pd.Timedelta(days=1)
-                    ).isoformat(),
-                    "home_team": home_team,
-                    "away_team": away_team,
-                    "venue": venue,
-                    "game_type": "R",
-                    "status": "final",
-                    "f5_ml_result": int(game_offset % 2 == 0),
-                    "f5_rl_result": int(game_offset % 3 == 0),
-                }
-            )
-
-    dataframe = pd.DataFrame(rows)
+    dataframe = dataframe.copy()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     dataframe.to_parquet(output_path, index=False)
     return dataframe
