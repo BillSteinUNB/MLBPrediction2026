@@ -61,3 +61,27 @@ def test_default_lineups_fetcher_gracefully_degrades_on_warning(monkeypatch) -> 
     assert result == []
     assert attempts["count"] == 4
     assert sleeps == [2.0, 4.0, 8.0]
+
+
+def test_default_lineups_fetcher_opens_breaker_after_five_raw_failures(monkeypatch) -> None:
+    attempts = {"count": 0}
+    sleeps: list[float] = []
+    breaker = CircuitBreaker(name="lineups")
+
+    def _always_fail(target_date: str) -> list[object]:
+        attempts["count"] += 1
+        raise RuntimeError(f"lineups unavailable for {target_date}")
+
+    monkeypatch.setattr("src.pipeline.daily.fetch_confirmed_lineups", _always_fail)
+    monkeypatch.setattr("src.pipeline.daily._LINEUPS_CIRCUIT", breaker)
+    monkeypatch.setattr("src.ops.error_handler.time.sleep", sleeps.append)
+
+    assert _default_lineups_fetcher("2025-09-15") == []
+    assert breaker.is_open is False
+    assert breaker.consecutive_failures == 4
+
+    assert _default_lineups_fetcher("2025-09-15") == []
+    assert attempts["count"] == 5
+    assert breaker.is_open is True
+    assert breaker.consecutive_failures == 5
+    assert sleeps == [2.0, 4.0, 8.0]

@@ -219,6 +219,7 @@ def calculate_edge(
         game_pk=game_pk,
         market_type=market_type,
         side=side,
+        book_name=resolved_book_name,
         model_probability=validated_model_probability,
         fair_probability=fair_probability,
         edge_pct=edge_pct,

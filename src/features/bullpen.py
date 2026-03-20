@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 from collections.abc import Callable, Sequence
 from datetime import date, datetime, time, timedelta, timezone
@@ -25,6 +26,8 @@ FIP_CONSTANT = 3.2
 
 _BullpenMetricsFetcher = Callable[..., pd.DataFrame]
 _TeamLogsFetcher = Callable[..., pd.DataFrame]
+
+logger = logging.getLogger(__name__)
 
 
 def compute_bullpen_features(
@@ -376,17 +379,17 @@ def _normalize_bullpen_metrics(dataframe: pd.DataFrame) -> pd.DataFrame:
 
 def _empty_bullpen_metrics() -> pd.DataFrame:
     return pd.DataFrame(
-        columns=[
-            "game_pk",
-            "game_date",
-            "team",
-            "pitcher_id",
-            "pitch_count",
-            "innings_pitched",
-            "xfip",
-            "inherited_runners",
-            "inherited_runners_scored",
-        ]
+        {
+            "game_pk": pd.Series(dtype="int64"),
+            "game_date": pd.Series(dtype="datetime64[ns]"),
+            "team": pd.Series(dtype="str"),
+            "pitcher_id": pd.Series(dtype="float64"),
+            "pitch_count": pd.Series(dtype="float64"),
+            "innings_pitched": pd.Series(dtype="float64"),
+            "xfip": pd.Series(dtype="float64"),
+            "inherited_runners": pd.Series(dtype="float64"),
+            "inherited_runners_scored": pd.Series(dtype="float64"),
+        }
     )
 
 

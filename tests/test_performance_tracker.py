@@ -39,6 +39,7 @@ def _seed_snapshot(
     *,
     game_pk: int,
     market_type: str,
+    book_name: str = "DraftKings",
     home_odds: int,
     away_odds: int,
     fetched_at: datetime,
@@ -59,7 +60,7 @@ def _seed_snapshot(
             """,
             (
                 game_pk,
-                "DraftKings",
+                book_name,
                 market_type,
                 home_odds,
                 away_odds,
@@ -75,6 +76,7 @@ def _decision(
     game_pk: int,
     market_type: str = "f5_ml",
     side: str = "home",
+    book_name: str = "DraftKings",
     model_probability: float,
     edge_pct: float,
     ev: float,
@@ -87,6 +89,7 @@ def _decision(
         game_pk=game_pk,
         market_type=market_type,
         side=side,
+        book_name=book_name,
         model_probability=model_probability,
         fair_probability=model_probability - edge_pct,
         edge_pct=edge_pct,
@@ -142,6 +145,7 @@ def test_update_bankroll_records_per_bet_performance_metrics_in_sqlite(tmp_path:
                 game_pk,
                 market_type,
                 side,
+                book_name,
                 model_probability,
                 market_probability,
                 edge_pct,
@@ -160,14 +164,15 @@ def test_update_bankroll_records_per_bet_performance_metrics_in_sqlite(tmp_path:
     assert row[0] == 12345
     assert row[1] == "f5_ml"
     assert row[2] == "home"
-    assert row[3] == pytest.approx(0.59)
-    assert row[4] == pytest.approx(130 / 230)
-    assert row[5] == pytest.approx(0.04)
-    assert row[6] == "WIN"
-    assert row[7] == pytest.approx(5000 / 130)
-    assert row[8] == pytest.approx(50.0)
-    assert row[9] == "2026-04-15T16:00:00+00:00"
-    assert row[10] == "2026-04-15T21:00:00+00:00"
+    assert row[3] == "DraftKings"
+    assert row[4] == pytest.approx(0.59)
+    assert row[5] == pytest.approx(130 / 230)
+    assert row[6] == pytest.approx(0.04)
+    assert row[7] == "WIN"
+    assert row[8] == pytest.approx(5000 / 130)
+    assert row[9] == pytest.approx(50.0)
+    assert row[10] == "2026-04-15T16:00:00+00:00"
+    assert row[11] == "2026-04-15T21:00:00+00:00"
 
 
 def test_sync_closing_lines_uses_latest_snapshot_and_persists_clv(tmp_path: Path) -> None:
@@ -225,6 +230,68 @@ def test_sync_closing_lines_uses_latest_snapshot_and_persists_clv(tmp_path: Path
     assert row[0] == -140
     assert row[1] == pytest.approx(140 / 240)
     assert row[2] == pytest.approx((140 / 240) - (130 / 230), abs=1e-6)
+
+
+def test_sync_closing_lines_uses_matching_bookmaker_snapshot(tmp_path: Path) -> None:
+    from src.engine.bankroll import update_bankroll
+    from src.ops.performance_tracker import sync_closing_lines_from_snapshots
+
+    db_path = tmp_path / "performance.db"
+    init_db(db_path)
+    _seed_game(db_path, 22222)
+    _seed_snapshot(
+        db_path,
+        game_pk=22222,
+        market_type="f5_ml",
+        book_name="DraftKings",
+        home_odds=-150,
+        away_odds=130,
+        fetched_at=datetime(2026, 4, 15, 19, 50, tzinfo=UTC),
+    )
+    _seed_snapshot(
+        db_path,
+        game_pk=22222,
+        market_type="f5_ml",
+        book_name="FanDuel",
+        home_odds=-125,
+        away_odds=105,
+        fetched_at=datetime(2026, 4, 15, 19, 55, tzinfo=UTC),
+    )
+
+    update_bankroll(
+        action="place",
+        decision=_decision(
+            game_pk=22222,
+            book_name="FanDuel",
+            model_probability=0.57,
+            edge_pct=0.03,
+            ev=0.04,
+            kelly_stake=25.0,
+            odds_at_bet=-110,
+        ),
+        db_path=db_path,
+        starting_bankroll=1000.0,
+        timestamp=datetime(2026, 4, 15, 16, 0, tzinfo=UTC),
+    )
+
+    updated_count = sync_closing_lines_from_snapshots(
+        game_pk=22222,
+        market_type="f5_ml",
+        db_path=db_path,
+    )
+
+    with sqlite3.connect(db_path) as connection:
+        row = connection.execute(
+            "SELECT book_name, closing_odds, closing_probability, clv FROM bet_performance"
+        ).fetchone()
+
+    assert updated_count == 1
+    assert row == (
+        "FanDuel",
+        -125,
+        pytest.approx(125 / 225),
+        pytest.approx((125 / 225) - (110 / 210), abs=1e-6),
+    )
 
 
 def test_generate_periodic_reports_computes_roi_brier_log_loss_and_clv(tmp_path: Path) -> None:
@@ -406,5 +473,6 @@ def test_export_performance_csv_writes_tracked_rows(tmp_path: Path) -> None:
     assert len(rows) == 1
     assert rows[0]["game_pk"] == "12345"
     assert rows[0]["result"] == "LOSS"
+    assert rows[0]["book_name"] == "DraftKings"
     assert rows[0]["profit_loss"] == "-25.0"
     assert rows[0]["closing_odds"] == "-120"

@@ -837,7 +837,7 @@ def _safe_ratio(
     default: float,
 ) -> pd.Series:
     resolved_denominator = denominator.replace(0, pd.NA)
-    ratio = (numerator / resolved_denominator).astype(float)
+    ratio = pd.to_numeric(numerator / resolved_denominator, errors="coerce")
     return ratio.fillna(default)
 
 

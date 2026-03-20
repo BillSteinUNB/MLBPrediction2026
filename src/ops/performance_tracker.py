@@ -30,6 +30,7 @@ class PerformanceBetRecord(ModelBase):
     game_pk: int
     market_type: Literal["f5_ml", "f5_rl"]
     side: Literal["home", "away"]
+    book_name: str
     model_probability: Probability
     market_probability: Probability
     edge_pct: float
@@ -87,6 +88,7 @@ def _coerce_record(row: sqlite3.Row | Sequence[object]) -> PerformanceBetRecord:
         game_pk=int(row["game_pk"]),
         market_type=str(row["market_type"]),
         side=str(row["side"]),
+        book_name=str(row["book_name"]),
         model_probability=float(row["model_probability"]),
         market_probability=float(row["market_probability"]),
         edge_pct=float(row["edge_pct"]),
@@ -121,6 +123,7 @@ def _upsert_base_record(
         decision.game_pk,
         decision.market_type,
         decision.side,
+        (decision.book_name or "manual").strip() or "manual",
         decision.model_probability,
         _resolve_market_probability(decision),
         decision.edge_pct,
@@ -138,6 +141,7 @@ def _upsert_base_record(
                 game_pk,
                 market_type,
                 side,
+                book_name,
                 model_probability,
                 market_probability,
                 edge_pct,
@@ -146,7 +150,7 @@ def _upsert_base_record(
                 result,
                 placed_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             base_values,
         )
@@ -158,6 +162,7 @@ def _upsert_base_record(
         SET game_pk = ?,
             market_type = ?,
             side = ?,
+            book_name = ?,
             model_probability = ?,
             market_probability = ?,
             edge_pct = ?,
@@ -171,6 +176,7 @@ def _upsert_base_record(
             decision.game_pk,
             decision.market_type,
             decision.side,
+            (decision.book_name or "manual").strip() or "manual",
             decision.model_probability,
             _resolve_market_probability(decision),
             decision.edge_pct,
@@ -321,12 +327,14 @@ def record_bet_settlement(
     try:
         resolved_connection.execute("PRAGMA foreign_keys = ON")
         existing_placed_at = resolved_connection.execute(
-            "SELECT placed_at FROM bet_performance WHERE bet_id = ?",
+            "SELECT placed_at, book_name FROM bet_performance WHERE bet_id = ?",
             (bet_id,),
         ).fetchone()
         placement_timestamp = (
             datetime.fromisoformat(str(existing_placed_at[0])) if existing_placed_at else settled_at
         )
+        if existing_placed_at is not None and not decision.book_name:
+            decision = decision.model_copy(update={"book_name": str(existing_placed_at[1])})
         _upsert_base_record(
             resolved_connection,
             bet_id=bet_id,
@@ -379,22 +387,9 @@ def sync_closing_lines_from_snapshots(
     try:
         resolved_connection.row_factory = sqlite3.Row
         resolved_connection.execute("PRAGMA foreign_keys = ON")
-        closing_snapshot = resolved_connection.execute(
-            """
-            SELECT home_odds, away_odds
-            FROM odds_snapshots
-            WHERE game_pk = ? AND market_type = ?
-            ORDER BY fetched_at DESC, id DESC
-            LIMIT 1
-            """,
-            (game_pk, market_type),
-        ).fetchone()
-        if closing_snapshot is None:
-            return 0
-
         performance_rows = resolved_connection.execute(
             """
-            SELECT id, side, market_probability
+            SELECT id, side, book_name, market_probability
             FROM bet_performance
             WHERE game_pk = ? AND market_type = ?
             """,
@@ -402,7 +397,24 @@ def sync_closing_lines_from_snapshots(
         ).fetchall()
 
         for row in performance_rows:
-            closing_odds = int(closing_snapshot["home_odds"] if row["side"] == "home" else closing_snapshot["away_odds"])
+            closing_snapshot = resolved_connection.execute(
+                """
+                SELECT home_odds, away_odds
+                FROM odds_snapshots
+                WHERE game_pk = ? AND market_type = ? AND book_name = ?
+                ORDER BY fetched_at DESC, id DESC
+                LIMIT 1
+                """,
+                (game_pk, market_type, str(row["book_name"])),
+            ).fetchone()
+            if closing_snapshot is None:
+                continue
+
+            closing_odds = int(
+                closing_snapshot["home_odds"]
+                if row["side"] == "home"
+                else closing_snapshot["away_odds"]
+            )
             closing_probability = float(american_to_implied(closing_odds))
             clv = float(closing_probability - float(row["market_probability"]))
             resolved_connection.execute(
@@ -488,6 +500,7 @@ def export_performance_csv(
         "game_pk",
         "market_type",
         "side",
+        "book_name",
         "model_probability",
         "market_probability",
         "edge_pct",
@@ -512,6 +525,7 @@ def export_performance_csv(
                     "game_pk": record.game_pk,
                     "market_type": record.market_type,
                     "side": record.side,
+                    "book_name": record.book_name,
                     "model_probability": record.model_probability,
                     "market_probability": record.market_probability,
                     "edge_pct": record.edge_pct,

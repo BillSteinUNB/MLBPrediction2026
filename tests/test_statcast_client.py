@@ -280,6 +280,44 @@ def test_fetch_catcher_framing_and_team_game_logs_persist_parquet(
     assert (tmp_path / "team_game_logs" / "TBR_2025_pitching.parquet").exists()
 
 
+def test_fetch_team_game_logs_falls_back_to_pandas3_safe_postprocess(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from src.clients import statcast_client
+
+    def broken_team_game_logs(season: int, team: str, log_type: str = "batting") -> pd.DataFrame:
+        raise ValueError("invalid error value specified")
+
+    def fake_get_table(season: int, team: str, log_type: str) -> pd.DataFrame:
+        assert (season, team, log_type) == (2025, "TBR", "batting")
+        return pd.DataFrame(
+            [
+                ["1", "1", None, "5"],
+                ["Rk", "Gtm", "@", "R"],
+                ["2", "2", "@", "3"],
+            ],
+            columns=pd.MultiIndex.from_tuples(
+                [
+                    ("Unnamed: 0_level_0", "Rk"),
+                    ("Unnamed: 1_level_0", "Gtm"),
+                    ("Unnamed: 3_level_0", "Unnamed: 3_level_1"),
+                    ("Offense", "R"),
+                ]
+            ),
+        )
+
+    monkeypatch.setattr(statcast_client, "team_game_logs", broken_team_game_logs)
+    monkeypatch.setattr(statcast_client, "_pybaseball_team_game_logs_table", fake_get_table)
+
+    team_logs_df = statcast_client.fetch_team_game_logs(2025, "TB", raw_data_root=tmp_path)
+
+    assert team_logs_df["Game"].tolist() == [1]
+    assert team_logs_df["Home"].tolist() == [True]
+    assert team_logs_df["Offense_R"].tolist() == [5]
+    assert (tmp_path / "team_game_logs" / "TBR_2025.parquet").exists()
+
+
 def test_fetch_catcher_framing_regenerates_stale_cache_when_metadata_changes(
     tmp_path: Path,
     monkeypatch,

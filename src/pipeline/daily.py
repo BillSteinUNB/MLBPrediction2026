@@ -50,6 +50,7 @@ from src.ops.error_handler import (
     retry,
 )
 from src.ops.logging_config import configure_logging
+from src.ops.performance_tracker import sync_closing_lines_from_snapshots
 
 
 logger = logging.getLogger(__name__)
@@ -470,7 +471,6 @@ def run_daily_pipeline(
     )
 
 
-@retry(logger_=logger)
 def _fetch_schedule_payload(target_date: date) -> dict[str, Any]:
     with httpx.Client(timeout=60.0) as client:
         response = client.get(
@@ -486,17 +486,14 @@ def _fetch_schedule_payload(target_date: date) -> dict[str, Any]:
     return response.json()
 
 
-@retry(logger_=logger)
 def _fetch_historical_schedule(season: int) -> pd.DataFrame:
     return _prepare_schedule_frame(_fetch_regular_season_schedule(season))
 
 
-@retry(logger_=logger)
 def _fetch_lineups_with_retry(target_date: str) -> list[Lineup]:
     return fetch_confirmed_lineups(target_date)
 
 
-@retry(logger_=logger)
 def _fetch_live_odds_with_retry(
     *,
     db_path: str | Path,
@@ -510,9 +507,22 @@ def _fetch_live_odds_with_retry(
     )
 
 
+def _retry_with_circuit_breaker(
+    operation: Callable[..., Any],
+    breaker: CircuitBreaker,
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
+    @retry(logger_=logger)
+    def _wrapped() -> Any:
+        return breaker.call(operation, *args, **kwargs)
+
+    return _wrapped()
+
+
 def _default_schedule_fetcher(target_date: date, mode: Mode) -> pd.DataFrame:
     del mode
-    payload = _SCHEDULE_CIRCUIT.call(_fetch_schedule_payload, target_date)
+    payload = _retry_with_circuit_breaker(_fetch_schedule_payload, _SCHEDULE_CIRCUIT, target_date)
     rows: list[dict[str, Any]] = []
     for date_entry in payload.get("dates", []):
         for game in date_entry.get("games", []):
@@ -525,7 +535,7 @@ def _default_schedule_fetcher(target_date: date, mode: Mode) -> pd.DataFrame:
 
 def _default_history_fetcher(season: int, before_date: date) -> pd.DataFrame:
     schedule = call_with_graceful_degradation(
-        lambda: _HISTORY_CIRCUIT.call(_fetch_historical_schedule, season),
+        lambda: _retry_with_circuit_breaker(_fetch_historical_schedule, _HISTORY_CIRCUIT, season),
         operation_name=f"historical schedule fetch for {season}",
         fallback=pd.DataFrame(),
         logger_=logger,
@@ -539,7 +549,7 @@ def _default_history_fetcher(season: int, before_date: date) -> pd.DataFrame:
 
 def _default_lineups_fetcher(target_date: str) -> list[Lineup]:
     return call_with_graceful_degradation(
-        lambda: _LINEUPS_CIRCUIT.call(_fetch_lineups_with_retry, target_date),
+        lambda: _retry_with_circuit_breaker(_fetch_lineups_with_retry, _LINEUPS_CIRCUIT, target_date),
         operation_name=f"lineup fetch for {target_date}",
         fallback=[],
         logger_=logger,
@@ -551,8 +561,9 @@ def _default_odds_fetcher(target_date: date, mode: Mode, db_path: str | Path) ->
         start = datetime.combine(target_date, time.min, tzinfo=UTC)
         end = start + timedelta(days=1)
         return call_with_graceful_degradation(
-            lambda: _ODDS_CIRCUIT.call(
+            lambda: _retry_with_circuit_breaker(
                 _fetch_live_odds_with_retry,
+                _ODDS_CIRCUIT,
                 db_path=db_path,
                 commence_time_from=start,
                 commence_time_to=end,
@@ -757,6 +768,13 @@ def _persist_odds_snapshots(db_path: str | Path, snapshots: Sequence[OddsSnapsho
                 for snapshot in snapshots
             ],
         )
+        for game_pk, market_type in {(snapshot.game_pk, snapshot.market_type) for snapshot in snapshots}:
+            sync_closing_lines_from_snapshots(
+                game_pk=game_pk,
+                market_type=market_type,
+                connection=connection,
+                commit=False,
+            )
         connection.commit()
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import sqlite3
 import tempfile
@@ -132,6 +133,8 @@ BullpenMetricsFetcher = Callable[..., pd.DataFrame]
 WeatherFetcher = Callable[..., WeatherData | None]
 LineupPlayerIdsByDate = Mapping[str | date | datetime, Mapping[tuple[int, str], Sequence[int]]]
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True, slots=True)
 class TrainingDataBuildResult:
@@ -216,6 +219,11 @@ def build_training_dataset(
 
     resolved_schedule_fetcher = schedule_fetcher or _fetch_regular_season_schedule
     requested_years = tuple(range(start_year, end_year + 1))
+    logger.info(
+        "[build] Starting training-data build for requested years %s-%s",
+        start_year,
+        end_year,
+    )
 
     schedules_by_year: dict[int, pd.DataFrame] = {}
     for year in requested_years:
@@ -245,6 +253,16 @@ def build_training_dataset(
         schedule = schedule.loc[
             pd.to_datetime(schedule["scheduled_start"], utc=True) < schedule_cutoff
         ].reset_index(drop=True)
+        logger.info(
+            "[build] Applied scheduled_start_before cutoff < %s",
+            schedule_cutoff.isoformat(),
+        )
+
+    logger.info(
+        "[build] Using effective years %s with %s scheduled games",
+        ", ".join(str(year) for year in effective_years),
+        len(schedule),
+    )
 
     build_timestamp = datetime.now(UTC)
     resolved_lineup_fetcher = lineup_fetcher or _empty_lineups_fetcher
@@ -270,6 +288,7 @@ def build_training_dataset(
             lineup_player_ids_by_date=lineup_player_ids_by_date,
         )
         feature_frame = _load_feature_frame(working_db_path)
+        logger.info("[build] Loaded %s feature rows from sqlite cache", len(feature_frame))
         dataset = _assemble_training_rows(
             schedule,
             feature_frame=feature_frame,
@@ -289,6 +308,7 @@ def build_training_dataset(
     dataset = dataset.copy()
     dataset["data_version_hash"] = data_version_hash
     dataset["build_timestamp"] = build_timestamp.isoformat()
+    logger.info("[build] Assembled dataset with %s rows", len(dataset))
 
     resolved_output_path = Path(output_path)
     resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -730,7 +750,10 @@ def _compute_feature_modules(
         team_logs_fetcher=cached_team_logs_fetcher,
     )
 
-    for game_date in sorted(schedule["game_date"].astype(str).unique().tolist()):
+    game_dates = sorted(schedule["game_date"].astype(str).unique().tolist())
+    total_days = len(game_dates)
+    for index, game_date in enumerate(game_dates, start=1):
+        logger.info("[build %s/%s] Preparing %s", index, total_days, game_date)
         day_lineups = list(cached_lineup_fetcher(game_date))
         roster_turnover_by_team = _build_roster_turnover_by_team(
             game_date=game_date,
@@ -742,6 +765,7 @@ def _compute_feature_modules(
             database_path=database_path,
             refresh=refresh,
         )
+        logger.info("[build %s/%s] offense %s", index, total_days, game_date)
         compute_offensive_features(
             game_date,
             db_path=database_path,
@@ -752,6 +776,7 @@ def _compute_feature_modules(
             team_logs_fetcher=cached_team_logs_fetcher,
             batting_stats_fetcher=cached_batting_stats_fetcher,
         )
+        logger.info("[build %s/%s] pitching %s", index, total_days, game_date)
         compute_pitching_features(
             game_date,
             db_path=database_path,
@@ -761,6 +786,7 @@ def _compute_feature_modules(
             lineup_fetcher=cached_lineup_fetcher,
             start_metrics_fetcher=cached_start_metrics_fetcher,
         )
+        logger.info("[build %s/%s] defense %s", index, total_days, game_date)
         compute_defense_features(
             game_date,
             db_path=database_path,
@@ -770,6 +796,7 @@ def _compute_feature_modules(
             framing_fetcher=cached_framing_stats_fetcher,
             team_logs_fetcher=cached_team_logs_fetcher,
         )
+        logger.info("[build %s/%s] bullpen %s", index, total_days, game_date)
         compute_bullpen_features(
             game_date,
             db_path=database_path,
@@ -777,11 +804,13 @@ def _compute_feature_modules(
             bullpen_metrics_fetcher=cached_bullpen_metrics_fetcher,
             team_logs_fetcher=cached_team_logs_fetcher,
         )
+        logger.info("[build %s/%s] baselines %s", index, total_days, game_date)
         compute_baseline_features(
             game_date,
             db_path=database_path,
             windows=DEFAULT_PYTHAGOREAN_WINDOWS,
         )
+        logger.info("[build %s/%s] complete %s", index, total_days, game_date)
 
 
 def _build_roster_turnover_by_team(

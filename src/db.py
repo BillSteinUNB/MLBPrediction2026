@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 DEFAULT_DB_PATH = Path("data") / "mlb.db"
 
 
@@ -112,6 +112,7 @@ SCHEMA_STATEMENTS = (
         game_pk INTEGER NOT NULL,
         market_type TEXT NOT NULL CHECK (market_type IN ('f5_ml', 'f5_rl')),
         side TEXT NOT NULL CHECK (side IN ('home', 'away')),
+        book_name TEXT NOT NULL DEFAULT 'manual',
         model_probability REAL NOT NULL CHECK (model_probability BETWEEN 0 AND 1),
         market_probability REAL NOT NULL CHECK (market_probability BETWEEN 0 AND 1),
         edge_pct REAL NOT NULL,
@@ -140,6 +141,32 @@ SCHEMA_STATEMENTS = (
 )
 
 
+def _table_exists(connection: sqlite3.Connection, table_name: str) -> bool:
+    row = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    return row is not None
+
+
+def _column_exists(connection: sqlite3.Connection, table_name: str, column_name: str) -> bool:
+    return any(
+        row[1] == column_name
+        for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+    )
+
+
+def _apply_migrations(connection: sqlite3.Connection) -> None:
+    if _table_exists(connection, "bet_performance") and not _column_exists(
+        connection,
+        "bet_performance",
+        "book_name",
+    ):
+        connection.execute(
+            "ALTER TABLE bet_performance ADD COLUMN book_name TEXT NOT NULL DEFAULT 'manual'"
+        )
+
+
 def init_db(db_path: str | Path = DEFAULT_DB_PATH) -> Path:
     """Initialize the SQLite schema and record the current schema version."""
 
@@ -151,6 +178,8 @@ def init_db(db_path: str | Path = DEFAULT_DB_PATH) -> Path:
 
         for statement in SCHEMA_STATEMENTS:
             connection.execute(statement)
+
+        _apply_migrations(connection)
 
         connection.execute(
             """

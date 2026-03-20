@@ -62,8 +62,13 @@ class CircuitBreaker:
         self.before_call()
         try:
             result = operation(*args, **kwargs)
-        except Exception:
+        except Exception as exc:
             self.record_failure()
+            if self.is_open:
+                raise CircuitBreakerOpenError(
+                    f"Circuit breaker '{self.name}' is open after "
+                    f"{self.consecutive_failures} consecutive failures"
+                ) from exc
             raise
 
         self.record_success()
@@ -95,7 +100,9 @@ def retry(
             for attempt in range(max_retries + 1):
                 try:
                     return operation(*args, **kwargs)
-                except retry_exceptions:
+                except retry_exceptions as exc:
+                    if isinstance(exc, CircuitBreakerOpenError):
+                        raise
                     if attempt >= max_retries:
                         active_logger.error(
                             "%s failed after %s total attempts",

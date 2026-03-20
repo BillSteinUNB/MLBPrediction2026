@@ -9,3 +9,7 @@ htmlcov/
 *.egg-info/
 data/*.db
 temp_autoresearch/
+data/logs/
+data/raw/
+temp_backtest_probe/
+temp_log_rotation_validation/

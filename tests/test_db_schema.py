@@ -100,6 +100,8 @@ def test_bet_performance_tracks_market_probability_and_clv_columns(tmp_path: Pat
 
     assert performance_columns["bet_id"][0].upper() == "INTEGER"
     assert performance_columns["bet_id"][1] == 1
+    assert performance_columns["book_name"][0].upper() == "TEXT"
+    assert performance_columns["book_name"][1] == 1
     assert performance_columns["model_probability"][0].upper() == "REAL"
     assert performance_columns["model_probability"][1] == 1
     assert performance_columns["market_probability"][0].upper() == "REAL"

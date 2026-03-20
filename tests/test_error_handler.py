@@ -48,7 +48,7 @@ def test_circuit_breaker_opens_after_five_consecutive_failures() -> None:
         attempts["count"] += 1
         raise RuntimeError("boom")
 
-    for _ in range(5):
+    for _ in range(4):
         with pytest.raises(RuntimeError, match="boom"):
             breaker.call(_always_fail)
 
@@ -56,6 +56,31 @@ def test_circuit_breaker_opens_after_five_consecutive_failures() -> None:
         breaker.call(_always_fail)
 
     assert attempts["count"] == 5
+
+
+def test_retry_composed_around_circuit_breaker_stops_after_five_raw_failures(monkeypatch) -> None:
+    sleeps: list[float] = []
+    breaker = CircuitBreaker(name="odds", failure_threshold=5)
+    attempts = {"count": 0}
+
+    monkeypatch.setattr("src.ops.error_handler.time.sleep", sleeps.append)
+
+    def _always_fail() -> None:
+        attempts["count"] += 1
+        raise RuntimeError("boom")
+
+    @retry()
+    def _wrapped() -> None:
+        breaker.call(_always_fail)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        _wrapped()
+
+    with pytest.raises(CircuitBreakerOpenError, match="odds"):
+        _wrapped()
+
+    assert attempts["count"] == 5
+    assert sleeps == [2.0, 4.0, 8.0]
 
 
 def test_call_with_graceful_degradation_returns_fallback_on_warning(caplog) -> None:

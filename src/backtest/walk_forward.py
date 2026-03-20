@@ -191,6 +191,11 @@ def run_walk_forward_backtest(
     """Run a deterministic walk-forward backtest and persist predictions plus window metrics."""
 
     _set_random_seed(seed)
+    logger.info(
+        "[backtest] Starting walk-forward from %s to %s",
+        start_date,
+        end_date,
+    )
     resolved_estimator_kwargs = {**DEFAULT_ESTIMATOR_KWARGS, **dict(estimator_kwargs or {})}
     code_version_hash = _compute_code_version_hash()
 
@@ -210,6 +215,7 @@ def run_walk_forward_backtest(
         )
         if not windows:
             raise ValueError("No walk-forward windows matched the requested date range")
+        logger.info("[backtest] Prepared %s windows from explicit training data", len(windows))
 
         feature_columns = _resolve_numeric_feature_columns(dataframe)
         resolved_raw_meta_feature_columns = _resolve_raw_meta_feature_columns(
@@ -258,8 +264,18 @@ def run_walk_forward_backtest(
             train_window_months=train_window_months,
             test_window_months=test_window_months,
         )
+        logger.info("[backtest] Prepared %s requested windows", len(windows))
 
         for window in windows:
+            logger.info(
+                "[backtest %s/%s] building data train=%s..%s test=%s..%s",
+                window.window_index,
+                len(windows),
+                window.train_start.date(),
+                (window.train_end - pd.Timedelta(days=1)).date(),
+                window.test_start.date(),
+                (window.test_end - pd.Timedelta(days=1)).date(),
+            )
             dataframe, build = _resolve_window_training_data(
                 window=window,
                 cache_dir=cache_dir,
@@ -268,8 +284,9 @@ def run_walk_forward_backtest(
             )
             if build.train_row_count == 0 or build.test_row_count == 0:
                 logger.info(
-                    "Skipping walk-forward window %s because rebuilt feature data yielded %s train rows and %s test rows",
+                    "[backtest %s/%s] skipping because feature data yielded %s train rows and %s test rows",
                     window.window_index,
+                    len(windows),
                     build.train_row_count,
                     build.test_row_count,
                 )
@@ -300,6 +317,14 @@ def run_walk_forward_backtest(
             prediction_frames.append(predictions)
             window_metric_rows.append(metrics)
             window_builds.append(build)
+            logger.info(
+                "[backtest %s/%s] complete brier=%.4f roi=%.4f bets=%s",
+                window.window_index,
+                len(windows),
+                metrics["brier_score"],
+                metrics["roi"],
+                metrics["bet_count"],
+            )
 
         if not prediction_frames:
             raise ValueError("No walk-forward windows matched the requested date range")

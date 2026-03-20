@@ -18,6 +18,7 @@ from pybaseball import (
     statcast_outs_above_average,
     team_game_logs,
 )
+from pybaseball.team_game_logs import get_table as _pybaseball_team_game_logs_table
 
 from src.config import _load_settings_yaml
 
@@ -288,10 +289,63 @@ def fetch_team_game_logs(
     if parquet_path.exists() and not refresh:
         return pd.read_parquet(parquet_path)
 
-    dataframe = team_game_logs(season, resolved_team, log_type=log_type).copy()
+    try:
+        dataframe = team_game_logs(season, resolved_team, log_type=log_type).copy()
+    except ValueError as exc:
+        if "invalid error value specified" not in str(exc):
+            raise
+        dataframe = _fetch_team_game_logs_pandas3_safe(
+            season=season,
+            team=resolved_team,
+            log_type=log_type,
+        )
     dataframe = _stringify_columns(dataframe)
     _write_parquet(dataframe, parquet_path)
     return dataframe
+
+
+def _fetch_team_game_logs_pandas3_safe(
+    *,
+    season: int,
+    team: str,
+    log_type: str,
+) -> pd.DataFrame:
+    raw_logs = _pybaseball_team_game_logs_table(season, team, log_type)
+    return _postprocess_team_game_logs_pandas3(raw_logs)
+
+
+def _postprocess_team_game_logs_pandas3(dataframe: pd.DataFrame) -> pd.DataFrame:
+    processed = dataframe.copy()
+    processed.drop([("Unnamed: 0_level_0", "Rk")], axis=1, inplace=True, errors="ignore")
+    processed = processed.iloc[:-1].copy()
+    processed = processed.rename(
+        columns={
+            "Gtm": "Game",
+            "Unnamed: 3_level_1": "Home",
+            "#": "NumPlayers",
+            "Opp. Starter (GmeSc)": "OppStart",
+            "Pitchers Used (Rest-GameScore-Dec)": "PitchersUsed",
+        }
+    ).copy()
+
+    home_column = ("Unnamed: 3_level_0", "Home")
+    if home_column in processed.columns:
+        processed[home_column] = processed[home_column].isnull()
+
+    game_column = ("Unnamed: 1_level_0", "Game")
+    if game_column in processed.columns:
+        processed = processed.loc[processed[game_column] != "Gtm"].copy()
+
+    for column in processed.columns:
+        try:
+            processed[column] = pd.to_numeric(processed[column], errors="raise")
+        except (TypeError, ValueError):
+            continue
+
+    if game_column in processed.columns:
+        processed[game_column] = pd.to_numeric(processed[game_column], errors="raise").astype(int)
+
+    return processed.reset_index(drop=True)
 
 
 def _iterate_dates(

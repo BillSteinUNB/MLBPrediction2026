@@ -423,6 +423,21 @@ def _persist_snapshots(connection: sqlite3.Connection, snapshots: Sequence[OddsS
             for snapshot in snapshots
         ],
     )
+    if not snapshots:
+        return
+
+    from src.ops.performance_tracker import sync_closing_lines_from_snapshots
+
+    for game_pk, market_type in {
+        (snapshot.game_pk, snapshot.market_type)
+        for snapshot in snapshots
+    }:
+        sync_closing_lines_from_snapshots(
+            game_pk=game_pk,
+            market_type=market_type,
+            connection=connection,
+            commit=False,
+        )
 
 
 def american_to_implied(odds: int) -> float:

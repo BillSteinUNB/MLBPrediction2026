@@ -29,6 +29,7 @@ class BetDecision(ModelBase):
     game_pk: int
     market_type: MarketType
     side: BetSide
+    book_name: str | None = None
     model_probability: Probability
     fair_probability: Probability
     edge_pct: float

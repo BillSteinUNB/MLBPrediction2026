@@ -334,6 +334,32 @@ def test_compute_bullpen_features_returns_defaults_for_first_three_days(
     assert stored == ("2025-04-01T00:00:00+00:00", 3)
 
 
+def test_compute_bullpen_features_handles_empty_metrics_without_dt_accessor_failure(
+    tmp_path: Path,
+) -> None:
+    from src.features.bullpen import compute_bullpen_features
+
+    db_path = tmp_path / "bullpen.db"
+    init_db(db_path)
+    _seed_game(
+        db_path,
+        game_pk=7201,
+        game_date="2025-04-10T20:05:00+00:00",
+        home_team="NYY",
+        away_team="BOS",
+    )
+
+    rows = compute_bullpen_features(
+        "2025-04-10",
+        db_path=db_path,
+        bullpen_metrics_fetcher=_fake_bullpen_metrics_fetcher({2025: pd.DataFrame(), 2024: pd.DataFrame()}),
+    )
+
+    by_name = {row.feature_name: row.feature_value for row in rows}
+    assert by_name["home_team_bullpen_xfip"] == pytest.approx(4.2)
+    assert by_name["away_team_bullpen_high_leverage_available_count"] == pytest.approx(5.0)
+
+
 def test_compute_bullpen_features_parses_flattened_pitching_ir_logs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

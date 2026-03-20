@@ -384,9 +384,16 @@ def _normalize_start_metrics(dataframe: pd.DataFrame) -> pd.DataFrame:
 
 
 def _empty_start_metrics() -> pd.DataFrame:
-    return pd.DataFrame(
-        columns=["game_pk", "game_date", "team", "pitcher_id", *METRICS, "innings_pitched"]
-    )
+    data: dict[str, pd.Series] = {
+        "game_pk": pd.Series(dtype="int64"),
+        "game_date": pd.Series(dtype="datetime64[ns]"),
+        "team": pd.Series(dtype="str"),
+        "pitcher_id": pd.Series(dtype="float64"),
+        "innings_pitched": pd.Series(dtype="float64"),
+    }
+    for metric in METRICS:
+        data[metric] = pd.Series(dtype="float64")
+    return pd.DataFrame(data)
 
 
 def _fetch_season_start_metrics(
