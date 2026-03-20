@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,6 +10,7 @@ from types import SimpleNamespace
 import pandas as pd
 
 from src.backtest.walk_forward import create_walk_forward_windows, run_walk_forward_backtest
+from src.model.calibration import DEFAULT_CALIBRATION_METHOD
 
 
 def _synthetic_training_frame() -> pd.DataFrame:
@@ -188,3 +191,77 @@ def test_run_walk_forward_backtest_rebuilds_window_data_and_records_build_log(
         "2022-03-01T00:00:00+00:00",
         "2022-04-01T00:00:00+00:00",
     ]
+
+
+def test_run_walk_forward_backtest_defaults_to_live_calibration_method_and_matches_explicit_override(
+    tmp_path,
+) -> None:
+    frame = _synthetic_training_frame()
+
+    default_result = run_walk_forward_backtest(
+        training_data=frame,
+        start_date="2022-01-01",
+        end_date="2022-03-31",
+        output_dir=tmp_path / "default",
+        calibration_fraction=0.15,
+        estimator_kwargs={"max_depth": 1, "n_estimators": 8, "learning_rate": 0.2},
+    )
+    explicit_result = run_walk_forward_backtest(
+        training_data=frame,
+        start_date="2022-01-01",
+        end_date="2022-03-31",
+        output_dir=tmp_path / "explicit",
+        calibration_fraction=0.15,
+        calibration_method=DEFAULT_CALIBRATION_METHOD,
+        estimator_kwargs={"max_depth": 1, "n_estimators": 8, "learning_rate": 0.2},
+    )
+
+    assert default_result.predictions["calibration_method"].eq(DEFAULT_CALIBRATION_METHOD).all()
+    assert default_result.window_metrics["calibration_method"].eq(DEFAULT_CALIBRATION_METHOD).all()
+
+    summary_payload = json.loads(default_result.summary_path.read_text(encoding="utf-8"))
+    assert summary_payload["calibration_method"] == DEFAULT_CALIBRATION_METHOD
+
+    assert default_result.predictions_path.read_bytes() == explicit_result.predictions_path.read_bytes()
+    assert (
+        default_result.window_metrics_path.read_bytes()
+        == explicit_result.window_metrics_path.read_bytes()
+    )
+
+
+def test_walk_forward_cli_without_override_uses_live_calibration_default(tmp_path) -> None:
+    input_path = tmp_path / "training_data.parquet"
+    _synthetic_training_frame().to_parquet(input_path, index=False)
+
+    output_dir = tmp_path / "cli"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "src.backtest.run",
+            "--start",
+            "2022-01-01",
+            "--end",
+            "2022-03-31",
+            "--training-data",
+            str(input_path),
+            "--output-dir",
+            str(output_dir),
+            "--calibration-fraction",
+            "0.15",
+            "--max-depth",
+            "1",
+            "--n-estimators",
+            "8",
+            "--learning-rate",
+            "0.2",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    summary_path = next(output_dir.glob("walk_forward_summary_*.json"))
+    summary_payload = json.loads(summary_path.read_text(encoding="utf-8"))
+
+    assert summary_payload["calibration_method"] == DEFAULT_CALIBRATION_METHOD

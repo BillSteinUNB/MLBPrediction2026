@@ -19,6 +19,8 @@ from xgboost import XGBClassifier
 
 from src.model.calibration import (
     CalibratedStackingModel,
+    DEFAULT_CALIBRATION_METHOD,
+    SUPPORTED_CALIBRATION_METHODS,
     _fit_probability_calibrator,
 )
 from src.model.data_builder import (
@@ -48,7 +50,7 @@ DEFAULT_BACKTEST_CACHE_DIR = Path("data") / "training"
 DEFAULT_TRAIN_WINDOW_MONTHS = 6
 DEFAULT_TEST_WINDOW_MONTHS = 1
 DEFAULT_CALIBRATION_FRACTION = 0.15
-DEFAULT_WALK_FORWARD_CALIBRATION_METHOD = "identity"
+DEFAULT_WALK_FORWARD_CALIBRATION_METHOD = DEFAULT_CALIBRATION_METHOD
 DEFAULT_EDGE_THRESHOLD = 0.03
 DEFAULT_MARKET_VIG = 0.04
 DEFAULT_TIME_SERIES_SPLITS = 3
@@ -397,7 +399,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--calibration-method",
         default=DEFAULT_WALK_FORWARD_CALIBRATION_METHOD,
-        choices=("identity", "isotonic", "platt", "blend"),
+        choices=SUPPORTED_CALIBRATION_METHODS,
     )
     parser.add_argument("--edge-threshold", type=float, default=DEFAULT_EDGE_THRESHOLD)
     parser.add_argument("--market-vig", type=float, default=DEFAULT_MARKET_VIG)
