@@ -9,6 +9,10 @@ from dotenv import load_dotenv
 from src.config import DEFAULT_ENV_FILE
 
 
+DISCORD_RED = 0xED4245
+DISCORD_GREEN = 0x57F287
+
+
 def _resolve_webhook_url(webhook_url: str | None = None) -> str:
     if webhook_url:
         return webhook_url
@@ -25,18 +29,37 @@ def _format_percent(value: float) -> str:
     return f"{value:.1%}"
 
 
-def _stringify_weather(pick: Mapping[str, Any]) -> str:
-    venue = str(pick.get("venue", "Unknown venue"))
-    weather = str(pick.get("weather", "Weather unavailable"))
-    return f"{venue} | {weather}"
+def _format_currency(value: float) -> str:
+    return f"${value:,.2f}"
 
 
-def _pick_embed(pick: Mapping[str, Any]) -> dict[str, Any]:
+def _build_bankroll_footer(bankroll_summary: Mapping[str, Any] | None) -> dict[str, str] | None:
+    if bankroll_summary is None:
+        return None
+
     return {
+        "text": (
+            f"Bankroll {_format_currency(float(bankroll_summary.get('current_bankroll', 0.0)))} | "
+            f"Peak {_format_currency(float(bankroll_summary.get('peak_bankroll', 0.0)))} | "
+            f"Drawdown {_format_percent(float(bankroll_summary.get('drawdown_pct', 0.0)))} | "
+            f"Bets {int(bankroll_summary.get('total_bets', 0) or 0)} | "
+            f"Win {_format_percent(float(bankroll_summary.get('win_rate', 0.0)))} | "
+            f"ROI {_format_percent(float(bankroll_summary.get('roi', 0.0)))}"
+        )
+    }
+
+
+def _pick_embed(
+    pick: Mapping[str, Any],
+    *,
+    bankroll_summary: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    embed: dict[str, Any] = {
         "title": str(pick.get("matchup", "MLB F5 Pick")),
-        "description": str(pick.get("market", "F5")),
+        "color": DISCORD_GREEN,
         "fields": [
-            {"name": "Game Time", "value": str(pick.get("scheduled_start", "Unknown")), "inline": False},
+            {"name": "Time", "value": str(pick.get("scheduled_start", "Unknown")), "inline": False},
+            {"name": "Market", "value": str(pick.get("market", "F5")), "inline": True},
             {"name": "Odds", "value": str(pick.get("odds", "N/A")), "inline": True},
             {
                 "name": "Model Prob",
@@ -44,7 +67,7 @@ def _pick_embed(pick: Mapping[str, Any]) -> dict[str, Any]:
                 "inline": True,
             },
             {
-                "name": "Edge",
+                "name": "Edge %",
                 "value": _format_percent(float(pick.get("edge_pct", 0.0))),
                 "inline": True,
             },
@@ -53,9 +76,20 @@ def _pick_embed(pick: Mapping[str, Any]) -> dict[str, Any]:
                 "value": f"${float(pick.get('kelly_stake', 0.0)):.2f}",
                 "inline": True,
             },
-            {"name": "Venue / Weather", "value": _stringify_weather(pick), "inline": False},
+            {"name": "Venue", "value": str(pick.get("venue", "Unknown venue")), "inline": True},
+            {
+                "name": "Weather",
+                "value": str(pick.get("weather", "Weather unavailable")),
+                "inline": False,
+            },
         ],
     }
+
+    footer = _build_bankroll_footer(bankroll_summary)
+    if footer is not None:
+        embed["footer"] = footer
+
+    return embed
 
 
 def _deliver_payload(
@@ -85,6 +119,7 @@ def send_picks(
     *,
     pipeline_date: str,
     picks: Sequence[Mapping[str, Any]],
+    bankroll_summary: Mapping[str, Any] | None = None,
     dry_run: bool = False,
     webhook_url: str | None = None,
     client: httpx.Client | None = None,
@@ -93,7 +128,10 @@ def send_picks(
 
     payload = {
         "content": f"MLB F5 picks for {pipeline_date}",
-        "embeds": [_pick_embed(pick) for pick in picks],
+        "embeds": [
+            _pick_embed(pick, bankroll_summary=bankroll_summary)
+            for pick in picks
+        ],
     }
     return _deliver_payload(
         payload,
@@ -135,7 +173,13 @@ def send_failure_alert(
 
     payload = {
         "content": f":rotating_light: Daily pipeline failed for {pipeline_date}",
-        "embeds": [{"description": error_message}],
+        "embeds": [
+            {
+                "title": "Pipeline failure",
+                "description": error_message,
+                "color": DISCORD_RED,
+            }
+        ],
     }
     return _deliver_payload(
         payload,
@@ -156,10 +200,16 @@ def send_drawdown_alert(
     """Send a kill-switch alert when bankroll drawdown suppresses all bets."""
 
     payload = {
-        "content": (
-            f":warning: Kill-switch active for {pipeline_date} — current drawdown is "
-            f"{_format_percent(drawdown_pct)}"
-        )
+        "content": f":warning: Kill-switch active for {pipeline_date}",
+        "embeds": [
+            {
+                "title": "Drawdown alert",
+                "description": (
+                    f"Current drawdown reached {_format_percent(drawdown_pct)} and new bets are disabled."
+                ),
+                "color": DISCORD_RED,
+            }
+        ],
     }
     return _deliver_payload(
         payload,

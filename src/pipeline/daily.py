@@ -18,7 +18,7 @@ from src.clients.odds_client import fetch_mlb_odds, freeze_odds
 from src.clients.weather_client import fetch_game_weather
 from src.config import _load_settings_yaml
 from src.db import DEFAULT_DB_PATH, init_db
-from src.engine.bankroll import calculate_kelly_stake, update_bankroll
+from src.engine.bankroll import calculate_kelly_stake, get_bankroll_summary, update_bankroll
 from src.engine.edge_calculator import calculate_edge
 from src.engine.settlement import settle_game_bets
 from src.features.adjustments.abs_adjustment import is_abs_active
@@ -396,6 +396,10 @@ def run_daily_pipeline(
         results=results,
         schedule_lookup=schedule_lookup,
         inference_frame=inference_frame,
+        bankroll_summary=get_bankroll_summary(
+            db_path=database_path,
+            starting_bankroll=starting_bankroll,
+        ).model_dump(mode="json"),
         drawdown_pct=drawdown_pct,
         kill_switch_triggered=kill_switch_triggered,
     )
@@ -958,6 +962,7 @@ def _send_daily_notification(
     results: Sequence[GameProcessingResult],
     schedule_lookup: dict[int, dict[str, Any]],
     inference_frame: pd.DataFrame,
+    bankroll_summary: dict[str, Any],
     drawdown_pct: float,
     kill_switch_triggered: bool,
 ) -> tuple[str, dict[str, Any]]:
@@ -973,6 +978,7 @@ def _send_daily_notification(
                 )
                 for result in picks
             ],
+            bankroll_summary=bankroll_summary,
             dry_run=dry_run,
         )
         return "picks", payload

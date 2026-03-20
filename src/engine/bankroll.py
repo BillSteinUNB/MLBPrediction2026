@@ -544,6 +544,26 @@ def update_bankroll(
         )
 
 
+def get_bankroll_summary(
+    *,
+    db_path: str | Path = DEFAULT_DB_PATH,
+    starting_bankroll: float = 1000.0,
+    max_drawdown: float = DEFAULT_MAX_DRAWDOWN,
+) -> BankrollSummary:
+    """Return the persisted bankroll summary for notification and reporting flows."""
+
+    validated_starting_bankroll = _NON_NEGATIVE_ADAPTER.validate_python(starting_bankroll)
+    resolved_max_drawdown = _validate_fraction("max_drawdown", max_drawdown)
+    database_path = init_db(db_path)
+
+    with sqlite3.connect(database_path) as connection:
+        return _summarize_bankroll(
+            connection,
+            starting_bankroll=validated_starting_bankroll,
+            max_drawdown=resolved_max_drawdown,
+        )
+
+
 __all__ = [
     "BankrollSummary",
     "DEFAULT_KELLY_FRACTION",
@@ -551,5 +571,6 @@ __all__ = [
     "KellyStakeResult",
     "MAX_BET_FRACTION",
     "calculate_kelly_stake",
+    "get_bankroll_summary",
     "update_bankroll",
 ]

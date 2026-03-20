@@ -201,8 +201,18 @@ def test_run_daily_pipeline_dry_run_persists_predictions_and_returns_pick_payloa
     assert result.no_pick_count == 0
     assert result.error_count == 0
     assert result.notification_type == "picks"
+    assert len(notifier.calls) == 1
     assert notifier.calls[0][0] == "picks"
     assert notifier.calls[0][1]["dry_run"] is True
+    assert notifier.calls[0][1]["bankroll_summary"] == {
+        "current_bankroll": 1000.0,
+        "peak_bankroll": 1000.0,
+        "drawdown_pct": 0.0,
+        "total_bets": 0,
+        "win_rate": 0.0,
+        "roi": 0.0,
+        "kill_switch_active": False,
+    }
 
     with sqlite3.connect(db_path) as connection:
         prediction_count = connection.execute("SELECT COUNT(*) FROM predictions").fetchone()[0]
