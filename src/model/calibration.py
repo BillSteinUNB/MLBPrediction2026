@@ -14,6 +14,7 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.isotonic import IsotonicRegression
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, brier_score_loss, log_loss, roc_auc_score
 
 from src.model.data_builder import DEFAULT_OUTPUT_PATH, build_training_dataset
@@ -39,6 +40,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_CALIBRATION_FRACTION = 0.10
 DEFAULT_CALIBRATION_BIN_COUNT = 10
+DEFAULT_CALIBRATION_METHOD = "platt"
+SUPPORTED_CALIBRATION_METHODS = ("identity", "isotonic", "platt", "blend")
 TARGET_BRIER_SCORE = 0.25
 TARGET_ECE = 0.05
 TARGET_RELIABILITY_GAP = 0.05
@@ -64,6 +67,7 @@ class CalibrationModelArtifact:
     model_name: str
     stacking_model_name: str
     target_column: str
+    calibration_method: str
     model_version: str
     model_path: Path
     metadata_path: Path
@@ -83,6 +87,7 @@ class CalibrationRunResult:
     data_version_hash: str
     holdout_season: int
     calibration_fraction: float
+    calibration_method: str
     model_training_row_count: int
     calibration_row_count: int
     holdout_row_count: int
@@ -97,7 +102,13 @@ class CalibratedStackingModel:
     model_name: str
     target_column: str
     stacking_model: StackingEnsembleModel
-    calibrator: IsotonicRegression
+    calibrator: object
+
+    @property
+    def calibration_method(self) -> str:
+        """Return the persisted probability calibrator name."""
+
+        return str(getattr(self.calibrator, "method", "unknown"))
 
     def predict_stacked_probability(self, dataframe: pd.DataFrame) -> np.ndarray:
         """Predict the uncalibrated stacked probability for the positive class."""
@@ -129,6 +140,65 @@ CalibratedStackingModel.__module__ = "src.model.calibration"
 
 
 @dataclass(frozen=True, slots=True)
+class IdentityProbabilityCalibrator:
+    """No-op probability calibrator used when the stacked probabilities already calibrate best."""
+
+    method: str = "identity"
+
+    def transform(self, probabilities: Sequence[float] | np.ndarray) -> np.ndarray:
+        return _coerce_probability_array(probabilities)
+
+
+@dataclass(frozen=True, slots=True)
+class IsotonicProbabilityCalibrator:
+    """Wrap an isotonic regressor with a common transform interface."""
+
+    model: IsotonicRegression
+    method: str = "isotonic"
+
+    def transform(self, probabilities: Sequence[float] | np.ndarray) -> np.ndarray:
+        return np.asarray(self.model.transform(_coerce_probability_array(probabilities)), dtype=float)
+
+
+@dataclass(frozen=True, slots=True)
+class PlattProbabilityCalibrator:
+    """Logistic calibration wrapper for Platt scaling on probability logits."""
+
+    model: LogisticRegression
+    method: str = "platt"
+
+    def transform(self, probabilities: Sequence[float] | np.ndarray) -> np.ndarray:
+        probability_frame = _coerce_probability_array(probabilities).reshape(-1, 1)
+        return np.asarray(self.model.predict_proba(probability_frame)[:, 1], dtype=float)
+
+
+@dataclass(frozen=True, slots=True)
+class BlendProbabilityCalibrator:
+    """Simple equal-weight ensemble of isotonic and Platt probability calibrators."""
+
+    isotonic: IsotonicProbabilityCalibrator
+    platt: PlattProbabilityCalibrator
+    method: str = "blend"
+
+    def transform(self, probabilities: Sequence[float] | np.ndarray) -> np.ndarray:
+        resolved_probability = _coerce_probability_array(probabilities)
+        return np.asarray(
+            (
+                self.isotonic.transform(resolved_probability)
+                + self.platt.transform(resolved_probability)
+            )
+            / 2.0,
+            dtype=float,
+        )
+
+
+IdentityProbabilityCalibrator.__module__ = "src.model.calibration"
+IsotonicProbabilityCalibrator.__module__ = "src.model.calibration"
+PlattProbabilityCalibrator.__module__ = "src.model.calibration"
+BlendProbabilityCalibrator.__module__ = "src.model.calibration"
+
+
+@dataclass(frozen=True, slots=True)
 class _DedicatedCalibrationSplit:
     model_training_frame: pd.DataFrame
     calibration_frame: pd.DataFrame
@@ -142,6 +212,7 @@ def train_calibrated_models(
     output_dir: str | Path = DEFAULT_MODEL_OUTPUT_DIR,
     holdout_season: int | None = None,
     calibration_fraction: float = DEFAULT_CALIBRATION_FRACTION,
+    calibration_method: str = DEFAULT_CALIBRATION_METHOD,
     raw_meta_feature_columns: Sequence[str] = DEFAULT_RAW_META_FEATURE_COLUMNS,
     base_search_space: Mapping[str, Sequence[float | int]] = DEFAULT_SEARCH_SPACE,
     time_series_splits: int = DEFAULT_TIME_SERIES_SPLITS,
@@ -195,6 +266,7 @@ def train_calibrated_models(
             stacking_model_name=str(spec["stacking_model_name"]),
             target_column=str(spec["target_column"]),
             drop_ties=bool(spec["drop_ties"]),
+            calibration_method=calibration_method,
             stacking_model_path=stacking_result.models[str(spec["stacking_model_name"])].model_path,
             output_dir=resolved_output_dir,
             model_version=stacking_result.model_version,
@@ -214,6 +286,7 @@ def train_calibrated_models(
                 "data_version_hash": stacking_result.data_version_hash,
                 "holdout_season": effective_holdout_season,
                 "calibration_fraction": calibration_fraction,
+                "calibration_method": calibration_method,
                 "model_training_row_count": int(len(dedicated_split.model_training_frame)),
                 "calibration_row_count": int(dedicated_split.calibration_row_count),
                 "holdout_row_count": int(len(dedicated_split.holdout_frame)),
@@ -232,6 +305,7 @@ def train_calibrated_models(
         data_version_hash=stacking_result.data_version_hash,
         holdout_season=effective_holdout_season,
         calibration_fraction=calibration_fraction,
+        calibration_method=calibration_method,
         model_training_row_count=len(dedicated_split.model_training_frame),
         calibration_row_count=dedicated_split.calibration_row_count,
         holdout_row_count=len(dedicated_split.holdout_frame),
@@ -337,6 +411,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--end-year", type=int, default=2025)
     parser.add_argument("--refresh-training-data", action="store_true")
     parser.add_argument("--calibration-fraction", type=float, default=DEFAULT_CALIBRATION_FRACTION)
+    parser.add_argument(
+        "--calibration-method",
+        default=DEFAULT_CALIBRATION_METHOD,
+        choices=SUPPORTED_CALIBRATION_METHODS,
+    )
     parser.add_argument("--time-series-splits", type=int, default=DEFAULT_TIME_SERIES_SPLITS)
     parser.add_argument("--search-iterations", type=int, default=DEFAULT_SEARCH_ITERATIONS)
     parser.add_argument("--random-state", type=int, default=DEFAULT_RANDOM_STATE)
@@ -359,6 +438,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         output_dir=args.output_dir,
         holdout_season=args.holdout_season,
         calibration_fraction=args.calibration_fraction,
+        calibration_method=args.calibration_method,
         time_series_splits=args.time_series_splits,
         search_iterations=args.search_iterations,
         random_state=args.random_state,
@@ -374,6 +454,7 @@ def _train_single_calibrated_model(
     stacking_model_name: str,
     target_column: str,
     drop_ties: bool,
+    calibration_method: str,
     stacking_model_path: Path,
     output_dir: Path,
     model_version: str,
@@ -413,8 +494,12 @@ def _train_single_calibrated_model(
         dtype=float,
     )
 
-    calibrator = IsotonicRegression(y_min=0.0, y_max=1.0, out_of_bounds="clip")
-    calibrator.fit(calibration_stacked_probability, calibration_target)
+    calibrator = _fit_probability_calibrator(
+        method=calibration_method,
+        probabilities=calibration_stacked_probability,
+        y_true=calibration_target,
+    )
+    resolved_calibration_method = str(getattr(calibrator, "method", calibration_method))
     holdout_calibrated_probability = np.asarray(
         calibrator.transform(holdout_stacked_probability),
         dtype=float,
@@ -454,6 +539,7 @@ def _train_single_calibrated_model(
                 "model_name": model_name,
                 "stacking_model_name": stacking_model_name,
                 "target_column": target_column,
+                "calibration_method": resolved_calibration_method,
                 "model_version": model_version,
                 "stacking_model_path": str(stacking_model_path),
                 "train_row_count": int(len(model_training_frame)),
@@ -462,7 +548,15 @@ def _train_single_calibrated_model(
                 "calibration_fraction": calibration_fraction,
                 "calibration_window_start": calibration_window_start,
                 "calibration_window_end": calibration_window_end,
-                "calibrator_threshold_count": int(len(getattr(calibrator, "X_thresholds_", []))),
+                "calibrator_threshold_count": int(
+                    len(
+                        getattr(
+                            getattr(calibrator, "model", calibrator),
+                            "X_thresholds_",
+                            [],
+                        )
+                    )
+                ),
                 "holdout_metrics": holdout_metrics,
                 "trained_at": datetime.now(UTC).isoformat(),
             },
@@ -475,6 +569,7 @@ def _train_single_calibrated_model(
         model_name=model_name,
         stacking_model_name=stacking_model_name,
         target_column=target_column,
+        calibration_method=resolved_calibration_method,
         model_version=model_version,
         model_path=model_path,
         metadata_path=metadata_path,
@@ -578,6 +673,56 @@ def _evaluate_holdout_metrics(
     }
 
 
+def _fit_probability_calibrator(
+    *,
+    method: str,
+    probabilities: Sequence[float] | np.ndarray,
+    y_true: Sequence[int] | pd.Series | np.ndarray,
+) -> IdentityProbabilityCalibrator | IsotonicProbabilityCalibrator | PlattProbabilityCalibrator | BlendProbabilityCalibrator:
+    resolved_method = str(method).strip().lower()
+    if resolved_method not in SUPPORTED_CALIBRATION_METHODS:
+        raise ValueError(
+            f"Unsupported calibration_method '{method}'. Expected one of: "
+            f"{', '.join(SUPPORTED_CALIBRATION_METHODS)}"
+        )
+
+    resolved_probability = _coerce_probability_array(probabilities)
+    resolved_target = pd.Series(y_true).astype(int).reset_index(drop=True)
+    if resolved_target.nunique() < 2 or resolved_method == "identity":
+        return IdentityProbabilityCalibrator()
+
+    if resolved_method == "isotonic":
+        calibrator = IsotonicRegression(y_min=0.0, y_max=1.0, out_of_bounds="clip")
+        calibrator.fit(resolved_probability, resolved_target)
+        return IsotonicProbabilityCalibrator(model=calibrator)
+
+    if resolved_method == "platt":
+        calibrator = LogisticRegression(max_iter=1_000)
+        calibrator.fit(resolved_probability.reshape(-1, 1), resolved_target)
+        return PlattProbabilityCalibrator(model=calibrator)
+
+    isotonic = _fit_probability_calibrator(
+        method="isotonic",
+        probabilities=resolved_probability,
+        y_true=resolved_target,
+    )
+    platt = _fit_probability_calibrator(
+        method="platt",
+        probabilities=resolved_probability,
+        y_true=resolved_target,
+    )
+    if not isinstance(isotonic, IsotonicProbabilityCalibrator) or not isinstance(
+        platt,
+        PlattProbabilityCalibrator,
+    ):
+        raise TypeError("Blend calibration requires isotonic and Platt calibrators")
+    return BlendProbabilityCalibrator(isotonic=isotonic, platt=platt)
+
+
+def _coerce_probability_array(probabilities: Sequence[float] | np.ndarray) -> np.ndarray:
+    return np.clip(np.asarray(probabilities, dtype=float), 0.0, 1.0)
+
+
 def _max_reliability_gap(reliability_diagram: Sequence[Mapping[str, Any]]) -> float:
     occupied_gaps = [
         float(entry["absolute_gap"])
@@ -619,6 +764,7 @@ def _calibration_run_result_to_json_ready(result: CalibrationRunResult) -> dict[
         "data_version_hash": result.data_version_hash,
         "holdout_season": result.holdout_season,
         "calibration_fraction": result.calibration_fraction,
+        "calibration_method": result.calibration_method,
         "model_training_row_count": result.model_training_row_count,
         "calibration_row_count": result.calibration_row_count,
         "holdout_row_count": result.holdout_row_count,

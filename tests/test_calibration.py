@@ -119,6 +119,7 @@ def test_train_calibrated_models_trains_and_saves_versioned_bundle(tmp_path) -> 
         probabilities = loaded_model.predict_calibrated(holdout_frame)
 
         assert loaded_model.__class__.__name__ == "CalibratedStackingModel"
+        assert loaded_model.calibration_method == "platt"
         assert probabilities.shape == (len(holdout_frame),)
         assert ((probabilities >= 0.0) & (probabilities <= 1.0)).all()
 
@@ -132,6 +133,7 @@ def test_train_calibrated_models_reports_quality_gates_and_reliability_data(tmp_
         output_dir=tmp_path / "models",
         holdout_season=2025,
         calibration_fraction=0.10,
+        calibration_method="isotonic",
         base_search_space={
             "max_depth": [1],
             "n_estimators": [12],
@@ -145,6 +147,7 @@ def test_train_calibrated_models_reports_quality_gates_and_reliability_data(tmp_
     ml_artifact = result.models["f5_ml_calibrated_model"]
     metadata = json.loads(ml_artifact.metadata_path.read_text(encoding="utf-8"))
 
+    assert metadata["calibration_method"] == "isotonic"
     assert metadata["calibration_fraction"] == 0.10
     assert metadata["calibration_row_count"] == 15
     assert metadata["holdout_metrics"]["calibrated_brier"] < 0.25
@@ -188,6 +191,39 @@ def test_predict_calibrated_accepts_model_path_and_loaded_bundle(tmp_path) -> No
 
     np.testing.assert_allclose(from_path, from_model)
     np.testing.assert_allclose(from_model, from_method)
+
+
+def test_train_calibrated_models_supports_identity_method(tmp_path) -> None:
+    input_path = tmp_path / "training_data.parquet"
+    frame = _training_frame()
+    frame.to_parquet(input_path, index=False)
+
+    result = train_calibrated_models(
+        training_data=input_path,
+        output_dir=tmp_path / "models",
+        holdout_season=2025,
+        calibration_fraction=0.10,
+        calibration_method="identity",
+        base_search_space={
+            "max_depth": [1],
+            "n_estimators": [12],
+            "learning_rate": [0.15],
+        },
+        time_series_splits=4,
+        search_iterations=1,
+        random_state=41,
+    )
+
+    artifact = result.models["f5_ml_calibrated_model"]
+    holdout_frame = frame.loc[frame["season"] == 2025].reset_index(drop=True)
+    loaded_model = joblib.load(artifact.model_path)
+    stacking_model = joblib.load(artifact.stacking_model_path)
+
+    calibrated = loaded_model.predict_calibrated(holdout_frame)
+    stacked = stacking_model.predict_proba(holdout_frame)[:, 1]
+
+    assert loaded_model.calibration_method == "identity"
+    np.testing.assert_allclose(calibrated, stacked)
 
 
 def test_cli_training_produces_loadable_calibrated_bundle(tmp_path) -> None:
