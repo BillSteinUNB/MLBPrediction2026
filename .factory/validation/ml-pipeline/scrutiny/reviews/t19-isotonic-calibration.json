@@ -1,0 +1,38 @@
+{
+  "featureId": "t19-isotonic-calibration",
+  "reviewedAt": "2026-03-20T00:58:00Z",
+  "commitId": "4e163f9",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Reviewed the feature metadata, completed-worker handoff, transcript skeleton, commit diff, and current `src/model/calibration.py` / `tests/test_calibration.py` implementation. The fix now supports configurable probability calibrators, keeps the dedicated chronological calibration split, and the handoff shows the real 2025 holdout run meeting the requested Brier/ECE/reliability targets with Platt scaling. I did not find a remaining blocking defect in the touched code, but there is one non-blocking metadata edge case.",
+    "issues": [
+      {
+        "file": "src/model/calibration.py",
+        "line": 289,
+        "severity": "non_blocking",
+        "description": "If `_fit_probability_calibrator()` falls back to `IdentityProbabilityCalibrator` for a single-class calibration slice (`src/model/calibration.py:691-692`), `train_calibrated_models()` still writes the requested `calibration_method` into the run summary/result (`src/model/calibration.py:289` and `:308`). That makes `calibration_run_*.json` and the CLI JSON misreport which calibrator actually shipped, which could hide degenerate calibration slices from downstream tooling."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "services",
+      "observation": "The shared startup commands are still wrong for this Windows repo workflow: `init_windows` contains the broken `init_db(''data/mlb.db'')` quoting, and `.factory/init.sh` still relies on bare `pip`, so workers continue to bypass the documented init helpers manually.",
+      "evidence": "`.factory/services.yaml:7` contains `init_db(''data/mlb.db'')`; `.factory/init.sh:24` runs bare `pip install -e \".[dev]\"`; the handoff `C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\handoffs\\2026-03-20T00-12-56-791Z__t19-isotonic-calibration__86929812-1fe2-47b3-a5c7-2540b60cc879.json:49-67` records the resulting deviation and workaround."
+    },
+    {
+      "area": "skills",
+      "observation": "The `ml-worker` skill manual-verification step is too generic for calibration-gate fixes: it still prescribes a subset train plus short backtest, while this feature needed the real `src.model.calibration` 2025 holdout evaluation to prove the acceptance criteria.",
+      "evidence": "`.factory/skills/ml-worker/SKILL.md:41-44` says to train on a subset and run a short backtest; the handoff `C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\handoffs\\2026-03-20T00-12-56-791Z__t19-isotonic-calibration__86929812-1fe2-47b3-a5c7-2540b60cc879.json:64-67` explains why the worker had to deviate and run the full holdout calibration check instead."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The shared calibration library note is stale after this fix: it still says isotonic calibration is blocked by 0.15-0.17 reliability gaps, even though the completed fix switched the default path to Platt scaling and the verified 2025 holdout run passed all three gates.",
+      "evidence": "`.factory/library/ml-calibration.md:1-10` still describes the unresolved isotonic blocker; the handoff `C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\handoffs\\2026-03-20T00-12-56-791Z__t19-isotonic-calibration__86929812-1fe2-47b3-a5c7-2540b60cc879.json:10-11` and `:36-38` record the new Platt-based implementation and passing holdout metrics."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Pass. Commit `4e163f9` resolves the feature goal by moving calibration to a configurable method set and using Platt scaling to meet the 2025 holdout Brier, ECE, and reliability-gap gates on both F5 models. I found one non-blocking edge-case issue in run-level `calibration_method` reporting, and I noted shared-state gaps in the services manifest, the `ml-worker` skill, and the stale calibration library note."
+}

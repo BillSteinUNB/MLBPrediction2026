@@ -1,0 +1,34 @@
+{
+  "featureId": "t20-walk-forward-backtest",
+  "reviewedAt": "2026-03-20T00:35:10.665455+00:00",
+  "commitId": "ce389d260c8b04b185a59f1cce8f7269c1686fc6",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature adds a deterministic monthly walk-forward runner, persistence outputs, and focused tests, but the committed implementation still misses two blocking requirements from the feature contract: it never recomputes feature data per walk-forward step, and the default CLI path backtests an uncalibrated identity model instead of the current calibrated pipeline.",
+    "issues": [
+      {
+        "file": "src/backtest/walk_forward.py",
+        "line": 171,
+        "severity": "blocking",
+        "description": "`run_walk_forward_backtest()` resolves the training dataset once (`_resolve_training_data()` at lines 171-178), and `_resolve_training_data()` builds/caches a single parquet once for the whole requested span (`build_training_dataset()` at lines 669-674). Each monthly window then just slices that already-materialized dataframe in `_evaluate_window()`. The feature description explicitly required 'Anti-leakage: recompute features at each step'; this implementation never regenerates per-window features, so it does not actually satisfy that requirement and cannot prove the walk-forward inputs were rebuilt from only information available at each monthly step."
+      },
+      {
+        "file": "src/backtest/walk_forward.py",
+        "line": 47,
+        "severity": "blocking",
+        "description": "The backtest defaults to `calibration_method = \"identity\"` (lines 47 and 317), while the current calibration pipeline defaults to `platt` in `src/model/calibration.py:43,215,416`. `.factory/services.yaml:27` invokes `python -m src.backtest.run` without overriding that flag, so the reviewed CLI/backtest path measures an uncalibrated stack rather than the project’s current calibrated inference path. That breaks backtest-to-production parity and makes the reported Brier/ROI metrics non-representative of the model configuration the rest of the ML pipeline now uses."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The shared state does not clearly record the canonical calibration method that downstream features should use. Mission/library docs still describe the stack as isotonic-calibrated, while the live calibration code defaults to Platt scaling; this ambiguity likely made it easy for the walk-forward feature to choose an `identity` default and drift away from the actual inference path.",
+      "evidence": "Mission docs still describe an isotonic stack at `C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\mission.md:7,33-34` and `C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\library\\architecture.md:19,53-55`, but the live code defaults to Platt at `src/model/calibration.py:43,215,416`. The reviewed feature then defaulted to identity at `src/backtest/walk_forward.py:47,317`, and the manifest backtest entrypoint at `.factory/services.yaml:27` provides no calibration override."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed. The implementation is organized and reproducible, but it does not fulfill the explicit per-step feature recomputation requirement and the shipped CLI path backtests an identity-calibrated model instead of the project’s current calibrated stack, so the feature is not yet an accurate walk-forward validation of the intended pipeline."
+}

@@ -26,3 +26,6 @@ pipeline:
   daily_dryrun: python -m src.pipeline.daily --date today --mode prod --dry-run
   backtest: python -m src.backtest.run --start 2019-03-20 --end 2025-10-31
   calibrate_eval: python -m src.model.calibration
+  build_training_data: python -m src.model.data_builder
+  train_xgboost: python -m src.model.xgboost_trainer
+  train_stacking: python -m src.model.stacking

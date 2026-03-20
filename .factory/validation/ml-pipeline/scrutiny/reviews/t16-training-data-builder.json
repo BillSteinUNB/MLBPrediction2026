@@ -1,0 +1,45 @@
+{
+  "featureId": "t16-training-data-builder",
+  "reviewedAt": "2026-03-20T00:36:12.328261+00:00",
+  "commitId": "3d5ee049efde797465bddff9ec8f4a9c48dd58ee",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "Reviewed the feature entry, handoff, transcript skeleton, commit diff, and the current `src/model/data_builder.py` / `tests/test_data_builder.py` implementation against the existing t9-t15 feature modules. The builder does produce a reproducible parquet plus metadata, but it still fails the feature contract in two blocking ways: it can leak same-day results into later games, and it does not actually assemble the previously implemented feature-engineering outputs, instead substituting coarse prior-season snapshots and hard-coded constants. The added tests only cover filtering/NaN checks and a different-day rolling example, so these regressions are not caught.",
+    "issues": [
+      {
+        "file": "src/model/data_builder.py",
+        "line": 679,
+        "severity": "blocking",
+        "description": "`_assemble_training_rows()` stamps every row with `as_of_timestamp = previous day` (`src/model/data_builder.py:643`), but it derives features from the mutable in-memory `histories` lists (`:679-686`) and then appends the just-finished game back into those histories (`:707-724`). For doubleheaders or any later game on the same date, the later row will therefore include earlier same-day outcomes even though the feature contract requires data available strictly before that game/day. The safeguard in `assert_training_data_is_leakage_free()` only compares the stored timestamp field to `scheduled_start` (`:239-249`), so this leakage path slips through validation." 
+      },
+      {
+        "file": "src/model/data_builder.py",
+        "line": 767,
+        "severity": "blocking",
+        "description": "The builder does not actually assemble the feature set produced by t9-t15. `_snapshot_features()` emits a reduced prior-year proxy schema (`*_prior`) and hard-codes several pitching/bullpen defaults such as `starter_uses_team_composite = 1.0` and bullpen rest/availability constants (`src/model/data_builder.py:767-793`), while `_assemble_training_rows()` hard-codes every weather field to neutral/missing for all rows (`:663-669`). That bypasses the real rolling offense/lineup outputs in `src/features/offense.py:134-157`, starter history/opener outputs in `src/features/pitching.py:156-188`, defense windows in `src/features/defense.py:674-677`, bullpen fatigue outputs in `src/features/bullpen.py:99-103`, and only partially mirrors baseline features. As written, the dataset is a proxy feature matrix rather than the requested training dataset that assembles all previously engineered features and fills only missing values with Marcel/league-average fallbacks." 
+      },
+      {
+        "file": "tests/test_data_builder.py",
+        "line": 184,
+        "severity": "non_blocking",
+        "description": "The new tests verify regular-season filtering, no-NaN output (`tests/test_data_builder.py:174`), and one rolling-history example across two games on different dates (`:184-231`). They never cover same-day doubleheaders or assert that the expected offense/pitching/defense/bullpen/weather feature families are present, which is why both blocking defects above can pass the test suite unchanged."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The `ml-worker` skill still gives a generic manual-verification recipe that requires subset model training and a short backtest, which does not match a training-data-builder feature like t16. The worker's deviation appears justified rather than procedural drift.",
+      "evidence": "`.factory/skills/ml-worker/SKILL.md:41-44` says to train a model on a subset and run a short backtest during manual verification; the handoff `C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\handoffs\\2026-03-19T22-57-34-428Z__t16-training-data-builder__bceefdea-74b0-4461-b5fe-626b80c7b822.json:71-81` records `followedProcedure: false` and explains the worker reasonably limited manual verification to dataset build / anti-leakage / NaN checks for this feature."
+    },
+    {
+      "area": "services",
+      "observation": "The shared services manifest still does not advertise a training-data-builder command even though it calls itself the single source of truth for useful project commands, so future workers must rediscover the builder entrypoint from code or transcripts.",
+      "evidence": "`.factory/services.yaml:1-2` labels the file the single source of truth; `.factory/services.yaml:24-28` lists daily/backtest/calibration pipeline commands but no `src.model.data_builder` entrypoint; the handoff `C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\handoffs\\2026-03-19T22-57-34-428Z__t16-training-data-builder__bceefdea-74b0-4461-b5fe-626b80c7b822.json:31-33` shows the worker had to invoke `build_training_dataset()` directly for verification."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Fail. Commit `3d5ee049efde797465bddff9ec8f4a9c48dd58ee` builds a reproducible parquet/metadata pair, but the reviewed implementation still leaks earlier same-day games into later rows and substitutes a reduced proxy feature set plus constants instead of assembling the actual t9-t15 feature outputs required for the training dataset. I also noted shared-state gaps in the `ml-worker` skill guidance and the services manifest."
+}

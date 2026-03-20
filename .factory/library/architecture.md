@@ -16,7 +16,7 @@ This is a **batch processing system** (not a web service). The pipeline runs on-
 ├─────────────────────────────────────────────────────────────┤
 │  1. Ingest: Schedule, Lineups, Odds, Weather                │
 │  2. Feature: Compute all features with anti-leakage          │
-│  3. Predict: XGBoost → LR Stacking → Isotonic Calibration    │
+│  3. Predict: XGBoost → LR Stacking → Probability Calibration │
 │  4. Edge: De-vig odds, compare vs model prob                 │
 │  5. Size: Quarter Kelly bankroll management                  │
 │  6. Store: SQLite persistence                                │
@@ -52,7 +52,9 @@ Every feature row has `as_of_timestamp` set to the day BEFORE the game. This is 
 ### Stacked Ensemble
 1. **XGBoost** (base learner): Captures non-linear feature interactions
 2. **Logistic Regression** (meta-learner): Calibrates XGBoost outputs
-3. **Isotonic Regression** (calibrator): Maps to perfectly calibrated probabilities
+3. **Probability calibrator**: `src/model/calibration.py` supports identity, isotonic,
+   Platt, and blend calibrators, with **Platt scaling as the current default** for the
+   verified 2025 holdout path.
 
 Training uses out-of-fold predictions to prevent leakage.
 
