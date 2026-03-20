@@ -71,6 +71,33 @@ def test_calculate_kelly_stake_applies_quarter_kelly_formula() -> None:
     assert result.kill_switch_active is False
 
 
+@pytest.mark.parametrize(
+    ("model_probability", "odds", "expected_full_kelly_fraction"),
+    [
+        pytest.param(0.58, 100, 0.16, id="even-odds"),
+        pytest.param(0.78, -300, 0.12, id="minus-300"),
+        pytest.param(0.35, 300, 2 / 15, id="plus-300"),
+    ],
+)
+def test_calculate_kelly_stake_matches_known_formula_for_even_and_three_hundred_odds(
+    model_probability: float,
+    odds: int,
+    expected_full_kelly_fraction: float,
+) -> None:
+    from src.engine.bankroll import calculate_kelly_stake
+
+    result = calculate_kelly_stake(
+        bankroll=1000.0,
+        model_probability=model_probability,
+        odds=odds,
+    )
+
+    assert result.full_kelly_fraction == pytest.approx(expected_full_kelly_fraction)
+    assert result.stake_fraction == pytest.approx(expected_full_kelly_fraction * 0.25)
+    assert result.stake == pytest.approx(1000.0 * expected_full_kelly_fraction * 0.25)
+    assert result.kill_switch_active is False
+
+
 def test_calculate_kelly_stake_enforces_five_percent_cap() -> None:
     from src.engine.bankroll import calculate_kelly_stake
 
@@ -130,6 +157,40 @@ def test_calculate_kelly_stake_treats_same_team_ml_and_rl_as_single_bet() -> Non
     assert result.stake == pytest.approx(1000.0 * full_kelly_fraction * 0.25)
     assert result.selected_market_type == "f5_rl"
     assert result.suppressed_market_types == ("f5_ml",)
+
+
+def test_calculate_kelly_stake_same_team_correlation_selects_highest_kelly_market() -> None:
+    from src.engine.bankroll import calculate_kelly_stake
+
+    ml_decision = _decision(
+        market_type="f5_ml",
+        side="home",
+        model_probability=0.60,
+        fair_probability=0.5,
+        edge_pct=0.10,
+        ev=0.20,
+        odds_at_bet=100,
+    )
+    rl_decision = _decision(
+        market_type="f5_rl",
+        side="home",
+        model_probability=0.38,
+        fair_probability=0.36,
+        edge_pct=0.02,
+        ev=0.52,
+        odds_at_bet=300,
+    )
+
+    result = calculate_kelly_stake(
+        bankroll=1000.0,
+        correlated_decisions=[ml_decision, rl_decision],
+    )
+
+    assert result.full_kelly_fraction == pytest.approx(0.20)
+    assert result.stake_fraction == pytest.approx(0.05)
+    assert result.stake == pytest.approx(50.0)
+    assert result.selected_market_type == "f5_ml"
+    assert result.suppressed_market_types == ("f5_rl",)
 
 
 def test_update_bankroll_records_bet_placement_and_win_in_sqlite(tmp_path: Path) -> None:
@@ -256,3 +317,75 @@ def test_update_bankroll_logs_drawdown_alert_and_killswitch_once(tmp_path: Path)
 
     assert event_counts["drawdown_alert"] == 1
     assert event_counts["kill_switch"] == 1
+
+
+def test_update_bankroll_rejects_place_when_kill_switch_is_active(tmp_path: Path) -> None:
+    from src.engine.bankroll import calculate_kelly_stake, update_bankroll
+
+    db_path = tmp_path / "bankroll.db"
+    init_db(db_path)
+
+    current_bankroll = 1000.0
+    for game_pk in range(1, 10):
+        _seed_game(db_path, game_pk)
+        kelly = calculate_kelly_stake(
+            bankroll=current_bankroll,
+            peak_bankroll=1000.0,
+            model_probability=0.75,
+            odds=130,
+        )
+        losing_bet = _decision(
+            game_pk=game_pk,
+            market_type="f5_ml",
+            side="home",
+            model_probability=0.75,
+            fair_probability=0.5,
+            edge_pct=0.25,
+            ev=0.725,
+            kelly_stake=kelly.stake,
+            odds_at_bet=130,
+        )
+        update_bankroll(
+            action="place",
+            decision=losing_bet,
+            db_path=db_path,
+            starting_bankroll=1000.0,
+            timestamp=datetime(2026, 4, 15, 16, game_pk, tzinfo=UTC),
+        )
+        summary = update_bankroll(
+            action="settle",
+            decision=losing_bet.model_copy(
+                update={
+                    "result": BetResult.LOSS,
+                    "settled_at": datetime(2026, 4, 15, 21, game_pk, tzinfo=UTC),
+                }
+            ),
+            db_path=db_path,
+            starting_bankroll=1000.0,
+            timestamp=datetime(2026, 4, 15, 21, game_pk, tzinfo=UTC),
+        )
+        current_bankroll = summary.current_bankroll
+        if summary.kill_switch_active:
+            break
+
+    _seed_game(db_path, 999)
+    blocked_bet = _decision(
+        game_pk=999,
+        market_type="f5_ml",
+        side="home",
+        model_probability=0.58,
+        fair_probability=0.5,
+        edge_pct=0.08,
+        ev=0.16,
+        kelly_stake=10.0,
+        odds_at_bet=100,
+    )
+
+    with pytest.raises(ValueError, match="Kill-switch is active"):
+        update_bankroll(
+            action="place",
+            decision=blocked_bet,
+            db_path=db_path,
+            starting_bankroll=1000.0,
+            timestamp=datetime(2026, 4, 16, 16, 0, tzinfo=UTC),
+        )

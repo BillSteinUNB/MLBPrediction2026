@@ -64,7 +64,9 @@ def _decision(
         pytest.param("f5_ml", "home", 2, 2, 5.0, False, BetResult.PUSH, id="ml-tie-push"),
         pytest.param("f5_rl", "home", 4, 2, 5.0, False, BetResult.WIN, id="rl-home-minus-wins-by-two"),
         pytest.param("f5_rl", "home", 3, 2, 5.0, False, BetResult.LOSS, id="rl-home-minus-loses-by-one"),
+        pytest.param("f5_rl", "home", 2, 2, 5.0, False, BetResult.LOSS, id="rl-home-minus-loses-on-tie"),
         pytest.param("f5_rl", "away", 2, 2, 5.0, False, BetResult.WIN, id="rl-away-plus-wins-on-tie"),
+        pytest.param("f5_rl", "away", 1, 3, 5.0, False, BetResult.WIN, id="rl-away-plus-wins-when-leading"),
         pytest.param("f5_rl", "home", 1, 3, 5.0, False, BetResult.LOSS, id="rl-home-minus-loses-when-trailing"),
         pytest.param("f5_ml", "home", 3, 1, 4.5, False, BetResult.NO_ACTION, id="short-game-no-action"),
         pytest.param("f5_ml", "home", 3, 1, 5.0, True, BetResult.NO_ACTION, id="starter-scratch-no-action"),
@@ -92,6 +94,31 @@ def test_settle_bet_handles_all_contract_scenarios(
     )
 
     assert result is expected
+
+
+@pytest.mark.parametrize(
+    ("home_score", "away_score"),
+    [
+        pytest.param(None, 2, id="missing-home-score"),
+        pytest.param(2, None, id="missing-away-score"),
+    ],
+)
+def test_settle_bet_returns_no_action_when_scores_are_missing(
+    home_score: int | None,
+    away_score: int | None,
+) -> None:
+    from src.engine.settlement import settle_bet
+
+    decision = _decision(market_type="f5_rl", side="away")
+
+    result = settle_bet(
+        decision,
+        home_score=home_score,
+        away_score=away_score,
+        innings_completed=5.0,
+    )
+
+    assert result is BetResult.NO_ACTION
 
 
 @pytest.mark.parametrize(
