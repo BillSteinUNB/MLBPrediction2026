@@ -213,7 +213,7 @@ def calculate_edge(
 
     edge_pct = float(validated_model_probability - fair_probability)
     ev = expected_value(validated_model_probability, odds_at_bet)
-    is_positive_ev = bool(edge_pct >= resolved_threshold and ev > 0)
+    is_positive_ev = bool(edge_pct >= resolved_threshold)
 
     decision = BetDecision(
         game_pk=game_pk,

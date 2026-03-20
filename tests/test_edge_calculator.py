@@ -54,7 +54,9 @@ def test_devig_probabilities_sum_to_one_for_even_and_heavy_lines() -> None:
     assert heavy_home > heavy_away
 
 
-def test_calculate_edge_matches_known_home_edge_example(tmp_path: Path) -> None:
+def test_calculate_edge_matches_known_home_edge_example_and_keeps_ev_informational(
+    tmp_path: Path,
+) -> None:
     from src.engine.edge_calculator import calculate_edge
 
     db_path = tmp_path / "edge.db"
@@ -76,7 +78,8 @@ def test_calculate_edge_matches_known_home_edge_example(tmp_path: Path) -> None:
     assert decision.edge_pct == pytest.approx(0.58 - (0.6 / 1.1))
     assert decision.edge_pct == pytest.approx(0.0345454545)
     assert decision.ev == pytest.approx((0.58 * (100 / 150)) - (0.42 * 1.0))
-    assert decision.is_positive_ev is False
+    assert decision.ev < 0
+    assert decision.is_positive_ev is True
 
 
 def test_calculate_edge_recommends_bets_at_or_above_three_percent_threshold(tmp_path: Path) -> None:
