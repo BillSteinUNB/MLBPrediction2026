@@ -193,23 +193,28 @@ def send_drawdown_alert(
     *,
     pipeline_date: str,
     drawdown_pct: float,
+    recommendations: Sequence[Mapping[str, Any]] | None = None,
     dry_run: bool = False,
     webhook_url: str | None = None,
     client: httpx.Client | None = None,
 ) -> dict[str, Any]:
     """Send a kill-switch alert when bankroll drawdown suppresses all bets."""
 
+    embeds: list[dict[str, Any]] = [
+        {
+            "title": "Drawdown alert",
+            "description": (
+                f"Current drawdown reached {_format_percent(drawdown_pct)} and new bets are disabled."
+            ),
+            "color": DISCORD_RED,
+        }
+    ]
+    if recommendations:
+        embeds.extend(_pick_embed(recommendation) for recommendation in recommendations)
+
     payload = {
         "content": f":warning: Kill-switch active for {pipeline_date}",
-        "embeds": [
-            {
-                "title": "Drawdown alert",
-                "description": (
-                    f"Current drawdown reached {_format_percent(drawdown_pct)} and new bets are disabled."
-                ),
-                "color": DISCORD_RED,
-            }
-        ],
+        "embeds": embeds,
     }
     return _deliver_payload(
         payload,

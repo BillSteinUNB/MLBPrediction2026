@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Callable
 
 import pandas as pd
+import pytest
 
 from src.db import init_db
 from src.models.lineup import Lineup, LineupPlayer
@@ -518,14 +519,27 @@ def test_run_daily_pipeline_sends_drawdown_alert_when_kill_switch_is_active(tmp_
     assert result.no_pick_count == 1
     assert result.notification_type == "drawdown_alert"
     assert notifier.calls[0][0] == "drawdown_alert"
+    recommendations = notifier.calls[0][1]["recommendations"]
+    assert len(recommendations) == 1
+    assert recommendations[0]["matchup"] == "BOS @ NYY"
+    assert recommendations[0]["scheduled_start"] == "2025-09-15T18:05:00+00:00"
+    assert recommendations[0]["market"] == "f5_ml home"
+    assert recommendations[0]["odds"] == "-110"
+    assert recommendations[0]["model_probability"] == 0.66
+    assert recommendations[0]["edge_pct"] == pytest.approx(result.games[0].selected_decision.edge_pct)
+    assert recommendations[0]["kelly_stake"] == 0.0
+    assert recommendations[0]["venue"] == "Stadium 1"
+    assert recommendations[0]["weather"] == "composite=1.00, wind=0.00"
+    assert result.games[0].selected_decision is not None
+    assert result.games[0].selected_decision.kelly_stake == 0.0
 
     with sqlite3.connect(db_path) as connection:
         stored_reason = connection.execute(
-            "SELECT no_pick_reason FROM daily_pipeline_results WHERE game_pk = 1001"
-        ).fetchone()[0]
+            "SELECT status, selected_market_type, selected_side, kelly_stake, no_pick_reason FROM daily_pipeline_results WHERE game_pk = 1001"
+        ).fetchone()
         bet_count = connection.execute("SELECT COUNT(*) FROM bets").fetchone()[0]
 
-    assert stored_reason == "kill-switch active"
+    assert stored_reason == ("no_pick", "f5_ml", "home", 0.0, "kill-switch active")
     assert bet_count == 0
 
 

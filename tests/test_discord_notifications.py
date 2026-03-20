@@ -150,14 +150,31 @@ def test_send_drawdown_alert_uses_red_embed_and_formats_drawdown_pct() -> None:
     payload = send_drawdown_alert(
         pipeline_date="2025-09-15",
         drawdown_pct=0.31,
+        recommendations=[
+            {
+                "matchup": "BOS @ NYY",
+                "scheduled_start": "2025-09-15T18:05:00+00:00",
+                "market": "f5_ml home",
+                "odds": "-110",
+                "model_probability": 0.58,
+                "edge_pct": 0.035,
+                "kelly_stake": 0.0,
+                "venue": "Yankee Stadium",
+                "weather": "72F, wind out to CF 11 mph",
+            }
+        ],
         dry_run=True,
     )
 
     assert payload["content"] == ":warning: Kill-switch active for 2025-09-15"
-    assert payload["embeds"] == [
-        {
-            "title": "Drawdown alert",
-            "description": "Current drawdown reached 31.0% and new bets are disabled.",
-            "color": 0xED4245,
-        }
-    ]
+    assert len(payload["embeds"]) == 2
+    assert payload["embeds"][0] == {
+        "title": "Drawdown alert",
+        "description": "Current drawdown reached 31.0% and new bets are disabled.",
+        "color": 0xED4245,
+    }
+
+    recommendation_fields = _field_lookup(payload["embeds"][1])
+    assert payload["embeds"][1]["title"] == "BOS @ NYY"
+    assert recommendation_fields["Market"] == "f5_ml home"
+    assert recommendation_fields["Kelly Stake"] == "$0.00"

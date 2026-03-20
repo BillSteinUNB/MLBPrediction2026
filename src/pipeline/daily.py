@@ -350,16 +350,28 @@ def run_daily_pipeline(
                 current_bankroll=virtual_bankroll,
                 peak_bankroll=peak_bankroll,
             )
-            if decision is None:
-                no_pick_reason = "kill-switch active" if kill_switch_active else "edge below threshold"
-                kill_switch_triggered = kill_switch_triggered or kill_switch_active
+            if kill_switch_active:
+                kill_switch_triggered = True
                 results.append(
                     GameProcessingResult(
                         game_pk=game_pk,
                         matchup=matchup,
                         status="no_pick",
                         prediction=prediction,
-                        no_pick_reason=no_pick_reason,
+                        selected_decision=decision,
+                        no_pick_reason="kill-switch active",
+                    )
+                )
+                continue
+
+            if decision is None:
+                results.append(
+                    GameProcessingResult(
+                        game_pk=game_pk,
+                        matchup=matchup,
+                        status="no_pick",
+                        prediction=prediction,
+                        no_pick_reason="edge below threshold",
                     )
                 )
                 continue
@@ -844,6 +856,7 @@ def _select_game_decision(
         grouped_by_side.setdefault(candidate.side, []).append(candidate)
 
     ranked_groups: list[tuple[float, float, BetDecision]] = []
+    kill_switch_recommendations: list[tuple[float, BetDecision]] = []
     kill_switch_active = False
     for decisions in grouped_by_side.values():
         kelly = calculate_kelly_stake(
@@ -851,12 +864,6 @@ def _select_game_decision(
             correlated_decisions=decisions,
             peak_bankroll=peak_bankroll,
         )
-        if kelly.kill_switch_active:
-            kill_switch_active = True
-            continue
-        if kelly.stake <= 0:
-            continue
-
         selected_market_type = kelly.selected_market_type or decisions[0].market_type
         selected_side = kelly.selected_side or decisions[0].side
         selected_decision = next(
@@ -864,6 +871,18 @@ def _select_game_decision(
             for decision in decisions
             if decision.market_type == selected_market_type and decision.side == selected_side
         )
+        if kelly.kill_switch_active:
+            kill_switch_active = True
+            kill_switch_recommendations.append(
+                (
+                    float(selected_decision.edge_pct),
+                    selected_decision.model_copy(update={"kelly_stake": 0.0}),
+                )
+            )
+            continue
+        if kelly.stake <= 0:
+            continue
+
         ranked_groups.append(
             (
                 float(kelly.stake),
@@ -873,6 +892,9 @@ def _select_game_decision(
         )
 
     if not ranked_groups:
+        if kill_switch_recommendations:
+            kill_switch_recommendations.sort(key=lambda item: item[0], reverse=True)
+            return kill_switch_recommendations[0][1], True
         return None, kill_switch_active
 
     ranked_groups.sort(key=lambda item: (item[0], item[1]), reverse=True)
@@ -928,9 +950,19 @@ def _send_daily_notification(
         return "picks", payload
 
     if kill_switch_triggered:
+        recommendations = [
+            _build_pick_payload_item(
+                result,
+                schedule_lookup=schedule_lookup,
+                inference_frame=inference_frame,
+            )
+            for result in results
+            if result.no_pick_reason == "kill-switch active" and result.selected_decision is not None
+        ]
         payload = notifier.send_drawdown_alert(
             pipeline_date=pipeline_date,
             drawdown_pct=drawdown_pct,
+            recommendations=recommendations,
             dry_run=dry_run,
         )
         return "drawdown_alert", payload
