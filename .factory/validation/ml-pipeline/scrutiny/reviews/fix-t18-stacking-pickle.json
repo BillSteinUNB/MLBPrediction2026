@@ -1,0 +1,26 @@
+{
+  "featureId": "fix-t18-stacking-pickle",
+  "reviewedAt": "2026-03-20T01:43:19.153334+00:00",
+  "commitId": "e7ceafef63cb80c4af59fc59f5037b3298bb696c",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Reviewed the prior failed review, feature metadata, fix handoff, transcript skeleton, original `aa17431` diff, fix commit `e7ceafe`, and the current `src/model/stacking.py` / `tests/test_stacking.py` implementation. The fix directly addresses the remaining fresh-interpreter pickle failure by aliasing module-as-main executions back to `src.model.stacking` before persistence (`src/model/stacking.py:195-198`), and the new subprocess regression test proves a saved bundle reloads in a separate interpreter (`tests/test_stacking.py:169-238`). I also checked the current stacking persistence path (`src/model/stacking.py:403-448`) to confirm the earlier holdout-Brier gate failure remains fixed and is not regressed by this change.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The shared library documents the module-pinning workaround only for calibration bundles, not as a general convention for any custom class persisted from a `python -m ...` ML CLI. This stacking fix had to mirror that pattern again in code, so the reusable serialization rule is still not captured centrally.",
+      "evidence": "`.factory/library/ml-calibration.md:13-15` documents `sys.modules.setdefault(...)` / `__module__` pinning only for `src.model.calibration`, while this fix adds the same safeguard for stacking at `src/model/stacking.py:195-198`."
+    },
+    {
+      "area": "services",
+      "observation": "The Windows startup helper remains out of sync with actual repo usage: `init_windows` still contains the broken `init_db(''data/mlb.db'')` quoting, which the fix worker again had to bypass during environment setup.",
+      "evidence": "`.factory/services.yaml:7` still contains `init_db(''data/mlb.db'')`, and the fix handoff `C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\handoffs\\2026-03-20T01-25-42-404Z__fix-t18-stacking-pickle__b2cb1314-a391-402f-bfb8-d1d991b5fe7e.json:61-71` records `skillFeedback.followedProcedure=false` because that snippet raised a `SyntaxError`."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/ml-pipeline/scrutiny/reviews/t18-lr-stacking.json",
+  "summary": "Pass. The original stacking feature failed because CLI-produced bundles were pickled as `__main__.StackingEnsembleModel` and could not be loaded in a fresh interpreter. Commit `e7ceafe` fixes that by pinning the stacking module/class metadata before `joblib.dump()`, and the new subprocess round-trip test demonstrates that a fresh Python process now reloads the artifact as `src.model.stacking` without regressing the earlier holdout-Brier persistence gate."
+}

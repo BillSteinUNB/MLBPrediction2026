@@ -1,0 +1,21 @@
+{
+  "featureId": "fix-t16-sameday-leakage",
+  "reviewedAt": "2026-03-20T01:44:09.499362+00:00",
+  "commitId": "df1c7fec4b3409784229a123f8b1960325251ab0",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Reviewed the fix feature metadata, handoff, prior failing review, fix transcript skeleton, the original t16 commit diff, the fix commit diff, and the current `src/model/data_builder.py` / `tests/test_data_builder.py` code path. The same-day leakage failure is adequately addressed in scope: the reviewed fix changed training-row assembly so same-day history is no longer reused while rows still advertise a prior-day `as_of_timestamp`, and the current builder path preserves that contract by computing feature modules per game date with `< target_day` cutoffs before assembling rows. The doubleheader regression now asserts later same-day rows keep the same prior-day timestamp and retain identical pregame feature values rather than absorbing the earlier game result. I did not find a new blocking issue within this fix's scope.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "services",
+      "observation": "The Windows `typecheck_windows` command in the shared services manifest appears unreliable in this exec environment, so the worker had to replace it with a custom `py_compile` sweep. That gap is actionable shared state because the manifest is documented as the single source of truth for project commands.",
+      "evidence": "`.factory/services.yaml:9` defines `typecheck_windows` with PowerShell `$env:` / `ForEach-Object` syntax; the fix handoff `C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\handoffs\\2026-03-20T00-50-08-012Z__fix-t16-sameday-leakage__5b3c2899-4880-4072-b0ef-cd9e5c12962f.json:51-61` records `followedProcedure: false` because that snippet was unreliable and the worker had to validate syntax another way."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/ml-pipeline/scrutiny/reviews/t16-training-data-builder.json",
+  "summary": "Pass. This fix resolves the prior blocking same-day/doubleheader leakage problem by keeping all same-date training rows on the documented prior-day cutoff and backing that behavior with a regression test. No new blocking issue was found in scope, though the shared Windows typecheck command remains a manifest gap."
+}

@@ -31,5 +31,5 @@
 - During feature `t16-training-data-builder`, the worker built `data/training/training_data_2019_2025.parquet` plus raw leaderboard/cache artifacts to verify the historical dataset, then stashed those untracked data files to keep the working tree clean:
   - `worker-bceefdea isolate raw data artifacts`
 - Pop that stash if a future worker wants the generated training parquet or cached raw-season snapshots without rebuilding.
-- Live `pybaseball.team_game_logs()` calls currently fail in this environment because pybaseball still calls `pd.to_numeric(..., errors="ignore")`, which raises under the installed pandas version. The training-data builder therefore uses MLB schedule data plus season snapshot fallbacks instead of team-game-log fetches.
+- The training-data builder now defaults `team_logs_fetcher` to `fetch_team_game_logs()` and threads those dated team logs through the offense, defense, and bullpen feature modules when rebuilding historical datasets. The old schedule-only / season-snapshot-only fallback description is no longer accurate for the current builder path.
 - The training-data builder backfills 2018 and skips shortened 2020 by default so the effective sample covers seven full regular seasons and lands near the mission's ~17k-row expectation.

@@ -14,6 +14,10 @@
   and set the custom calibrator/model classes' `__module__` to `src.model.calibration`
   so `python -m src.model.calibration` artifacts remain reloadable via `joblib` in a
   fresh interpreter.
+- The same module-alias / `__module__` pinning convention is now also required for
+  `python -m src.model.stacking` artifacts; `src/model/stacking.py` mirrors the pattern
+  so custom `StackingEnsembleModel` bundles reload in a fresh interpreter instead of
+  being stranded as `__main__` classes.
 - `.factory/services.yaml` command `pipeline.calibrate_eval` points at
   `python -m src.model.calibration`.
 - Verified 2025 holdout metrics on `data/training/training_data_2019_2025.parquet` with
