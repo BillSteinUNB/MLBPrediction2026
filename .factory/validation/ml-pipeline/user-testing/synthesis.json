@@ -1,39 +1,24 @@
 {
   "milestone": "ml-pipeline",
-  "round": 1,
-  "status": "fail",
+  "round": 2,
+  "status": "pass",
   "assertionsSummary": {
-    "total": 12,
-    "passed": 11,
+    "total": 1,
+    "passed": 1,
     "failed": 0,
-    "blocked": 1
+    "blocked": 0
   },
   "passedAssertions": [
-    "VAL-BACKTEST-001",
-    "VAL-BACKTEST-002",
-    "VAL-BACKTEST-003",
-    "VAL-BACKTEST-004",
-    "VAL-DATA-004",
-    "VAL-MODEL-001",
-    "VAL-MODEL-002",
-    "VAL-MODEL-003",
-    "VAL-MODEL-004",
-    "VAL-MODEL-005",
-    "VAL-MODEL-006"
+    "VAL-DATA-006"
   ],
   "failedAssertions": [],
-  "blockedAssertions": [
-    {
-      "id": "VAL-DATA-006",
-      "blockedBy": "Live build_training_dataset validation hit the external pybaseball.team_game_logs / Baseball Reference scrape error: Table with expected id not found on scraped page."
-    }
-  ],
+  "blockedAssertions": [],
   "appliedUpdates": [
     {
       "target": "user-testing.md",
-      "description": "Added ml-pipeline setup notes documenting the targeted pytest surfaces, the live pybaseball scrape blocker for full training-data builds, and the synthetic-parquet CLI validation strategy used for model and backtest assertions.",
+      "description": "Documented that VAL-DATA-006 should be validated through src.model.data_builder.assert_training_data_is_complete() against an isolated parquet artifact because there is no dedicated data-builder CLI entrypoint for that assertion.",
       "source": "flow-report"
     }
   ],
-  "previousRound": null
+  "previousRound": ".factory/validation/ml-pipeline/user-testing/synthesis.round1.json"
 }

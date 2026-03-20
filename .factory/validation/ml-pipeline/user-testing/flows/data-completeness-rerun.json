@@ -1,0 +1,49 @@
+{
+  "groupId": "data-completeness-rerun",
+  "surface": "CLI",
+  "status": "pass",
+  "assertions": [
+    {
+      "id": "VAL-DATA-006",
+      "status": "pass",
+      "reason": "Cached completeness validation passed on an isolated parquet artifact: 17010 rows, zero NaN targets, and only regular-season games across seasons 2018, 2019, 2021-2025.",
+      "evidence": [
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\data-completeness-rerun\\VAL-DATA-006-pytest.txt",
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\data-completeness-rerun\\VAL-DATA-006-cli.txt",
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\data-completeness-rerun\\VAL-DATA-006-cached-summary.json"
+      ]
+    }
+  ],
+  "commandsRun": [
+    {
+      "command": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe -m pytest C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\tests\\test_data_builder.py::test_resolve_training_years_backfills_shortened_season_with_previous_full_year C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\tests\\test_data_builder.py::test_assert_training_data_is_complete_accepts_cached_validation_parquet C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\tests\\test_data_builder.py::test_assert_training_data_is_complete_rejects_unexpected_row_count C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\tests\\test_data_builder.py::test_assert_training_data_is_complete_rejects_nan_targets C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\tests\\test_data_builder.py::test_assert_training_data_is_complete_rejects_non_regular_games -v --tb=short",
+      "exitCode": 0,
+      "observation": "5 targeted pytest cases passed in 2.08s, covering shortened-season backfill plus cached completeness acceptance and rejection paths."
+    },
+    {
+      "command": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe -c \"from tests.test_data_builder import _write_cached_training_validation_fixture; from src.model.data_builder import assert_training_data_is_complete; ...\"",
+      "exitCode": 0,
+      "observation": "Cached completeness probe produced an isolated parquet artifact with 17010 rows; each season 2018, 2019, 2021-2025 contributed 2430 regular-season rows, both target columns had zero NaN values, and game_type was R for all rows."
+    }
+  ],
+  "toolsUsed": [
+    "pytest",
+    "python"
+  ],
+  "frictions": [
+    {
+      "description": "No dedicated data-builder CLI entrypoint exists for this assertion, so the closest real CLI surface is a Python CLI import of the public assert_training_data_is_complete() helper against an isolated parquet artifact.",
+      "resolved": true,
+      "resolution": "Used the repo virtualenv Python to generate the fixture parquet in the assigned work dir and validate it through src.model.data_builder.assert_training_data_is_complete().",
+      "affectedAssertions": [
+        "VAL-DATA-006"
+      ]
+    }
+  ],
+  "blockers": [],
+  "artifacts": {
+    "evidenceDir": "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\data-completeness-rerun",
+    "workDir": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\data-completeness-rerun",
+    "trainingData": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\data-completeness-rerun\\training_data_validation_fixture.parquet"
+  }
+}
