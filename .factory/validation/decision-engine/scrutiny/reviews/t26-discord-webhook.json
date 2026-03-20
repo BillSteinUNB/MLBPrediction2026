@@ -1,0 +1,28 @@
+{
+  "featureId": "t26-discord-webhook",
+  "reviewedAt": "2026-03-20T05:17:33.108610+00:00",
+  "commitId": "cc14f12058002f699ec2b9ebe110ebd823c6f79a",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature does improve Discord payload richness: pick cards now expose the requested fields, dry-run returns JSON payloads, the pipeline threads bankroll summary data into pick notifications, and the notifier batches multiple picks into a single webhook payload. However, the implementation still does not guarantee the feature's explicit \"Max 1 webhook per pipeline run\" requirement, so I cannot pass the review.",
+    "issues": [
+      {
+        "file": "src/pipeline/daily.py",
+        "line": 392,
+        "severity": "blocking",
+        "description": "`run_daily_pipeline()` sends the Discord notification before post-send side effects run (`update_bankroll()`, `freeze_odds()`, `_maybe_settle_backtest_pick()` at lines 407-423). If any of those later operations raises, `main()` catches the exception and calls `send_failure_alert()` at line 1219, which can emit a second webhook for the same pipeline invocation. That violates the feature contract's `Max 1 webhook per pipeline run` requirement."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The repo already documents Windows-safe install/test/lint commands, but the engine-worker guidance still points workers at POSIX-style pytest/glob commands. This feature's worker had to deviate to the Windows interpreter form for validation, so the skill guidance is lagging the shared environment knowledge.",
+      "evidence": "handoff.skillFeedback for session `2ddfead3-1cd9-4478-aa73-75e72f515127` records justified Windows-specific deviations; `C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\skills\\engine-worker\\SKILL.md:40,49` still prescribes `pytest tests/test_edge*.py ...` and `python -m py_compile src/engine/*.py src/notifications/*.py`, while `C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\services.yaml:6,9,12,15` and `C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\library\\environment.md:57-61` document the Windows-safe interpreter variants already in use."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Fail. The reviewed t26 Discord notification feature adds the requested embed fields, dry-run payload behavior, bankroll footer data, and batching coverage, but the pipeline can still send a second failure alert after a picks webhook if later persistence/freezing steps fail. The shared-state follow-up is to align engine-worker guidance with the already-documented Windows-safe validator commands."
+}

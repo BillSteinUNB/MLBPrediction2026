@@ -1,0 +1,34 @@
+{
+  "featureId": "t21-edge-calculator",
+  "reviewedAt": "2026-03-20T02:20:00+00:00",
+  "commitId": "dbd876c",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "Reviewed the mission metadata, worker handoff, transcript skeleton, engine-worker skill, commit diff, and the current edge-calculator/tests implementation. The module correctly converts American odds, de-vigs the market, computes edge/EV, and logs audit rows, but the recommendation flag does not implement the feature contract: it requires positive EV in addition to the documented 3% edge threshold, so qualifying edges can be suppressed before the pipeline reaches Kelly sizing.",
+    "issues": [
+      {
+        "file": "src/engine/edge_calculator.py",
+        "line": 216,
+        "severity": "blocking",
+        "description": "`calculate_edge()` sets `is_positive_ev = bool(edge_pct >= resolved_threshold and ev > 0)`, but the feature contract and validation mapping say recommendations should be driven by `edge >= 0.03` after de-vigging, with EV reported separately. For the contract-style example (`model_probability=0.58`, `home_odds=-150`, `away_odds=100`), this function computes a qualifying `edge_pct` of about `0.0345` yet still returns `False` because `ev` is negative. Downstream, `src/pipeline/daily.py:894-896` filters candidates on `candidate.is_positive_ev`, so this mismatch causes the pipeline to drop bets that satisfy the stated recommendation rule."
+      },
+      {
+        "file": "tests/test_edge_calculator.py",
+        "line": 79,
+        "severity": "non_blocking",
+        "description": "The regression suite codifies the same contract mismatch by asserting `decision.is_positive_ev is False` for the mission's known 3.45% edge example. Because the threshold test at lines 82-101 only exercises a case where EV is also positive, the tests would not catch the documented edge-threshold-only behavior if the implementation were corrected later."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "Shared repo guidance says SQLite schema lives in `src/db.py`, but this feature introduced a new persistent table by creating it lazily inside the engine module instead of the central schema file.",
+      "evidence": "`C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\AGENTS.md:96` describes `src/db.py` as the SQLite schema entrypoint and `.factory/library/architecture.md:41` says `db.py` holds SQLite schema/operations, while `src/engine/edge_calculator.py:23-66` defines `edge_calculations` and `src/db.py` has no matching table definition."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed. The feature adds the requested de-vig, edge, EV, and SQLite audit machinery, but it enforces `EV > 0` as part of the recommendation flag, which contradicts the feature contract's `edge >= 0.03` rule and causes downstream candidate filtering to reject qualifying edges."
+}

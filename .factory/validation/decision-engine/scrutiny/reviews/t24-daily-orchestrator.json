@@ -1,0 +1,34 @@
+{
+  "featureId": "t24-daily-orchestrator",
+  "reviewedAt": "2026-03-20T05:19:08.165007Z",
+  "commitId": "ee04ccf82ec46752496eb73c2f400f35d94a7c38",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature adds a usable CLI entry point, dry-run payloads, per-game error isolation, and persistence hooks, but it does not actually orchestrate the required daily feature computation path. The default pipeline only computes baseline features, ignores fetched lineups during feature assembly, and can fall back to neutral defaults for the rest of the model inputs, so the implementation does not fully satisfy the feature contract for daily end-to-end inference.",
+    "issues": [
+      {
+        "file": "src/pipeline/daily.py",
+        "line": 517,
+        "severity": "blocking",
+        "description": "_default_feature_frame_builder() discards the fetched lineups and historical_games, calls only compute_baseline_features(), then reuses whatever feature rows already exist in SQLite and backfills the rest with _fill_missing_feature_values(). As written, a normal daily run never orchestrates the offense/pitching/defense/bullpen/weather feature modules required by t24, so predictions can be generated from stale rows or neutral defaults instead of same-day computed features."
+      },
+      {
+        "file": "src/pipeline/daily.py",
+        "line": 293,
+        "severity": "non_blocking",
+        "description": "The pipeline persists odds a second time via _persist_odds_snapshots() even though fetch_mlb_odds() already persists live snapshots to odds_snapshots before returning them (src/clients/odds_client.py). Production runs will duplicate every fetched odds row, inflating the odds history and freeze/update counts."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The pipeline-worker skill still describes t24 as a full live feature-computation pipeline, but the repository now intentionally uses a narrowed fast-inference path that reuses persisted features and skips live offense/pitching/defense/bullpen recomputation because of the current pybaseball/pandas compatibility problem. The skill should mention this repo-specific limitation so future workers do not assume the live CLI recomputes the full feature stack.",
+      "evidence": ".factory/skills/pipeline-worker/SKILL.md step 3 says to implement the full ingest→feature→predict pipeline, while .factory/library/workspace-state.md records that t24-daily-orchestrator now reuses persisted rows and avoids full live recomputation due to pybaseball.team_game_logs issues under pandas 3."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed. The orchestrator handles dry-run/no-pick/error-isolation flows, but the default implementation does not compute the required daily feature stack and instead predicts from persisted/defaulted inputs; additionally, prod odds snapshots are double-written."
+}
