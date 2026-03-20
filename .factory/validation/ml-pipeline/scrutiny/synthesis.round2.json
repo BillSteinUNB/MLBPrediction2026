@@ -1,0 +1,79 @@
+{
+  "milestone": "ml-pipeline",
+  "round": 2,
+  "status": "fail",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "$env:PYTHONDONTWRITEBYTECODE=1; & \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe\" -m pytest \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\tests\" -v --tb=short",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "$env:PYTHONDONTWRITEBYTECODE=1; & \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe\" -m py_compile (Get-ChildItem -Path \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\src\" -Recurse -Filter \"*.py\" | ForEach-Object { $_.FullName })",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "& \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe\" -m ruff check \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\src\" \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\tests\"",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 6,
+    "passed": 5,
+    "failed": 1,
+    "failedFeatures": [
+      "fix-t16-feature-integration"
+    ]
+  },
+  "blockingIssues": [
+    {
+      "featureId": "fix-t16-feature-integration",
+      "severity": "blocking",
+      "description": "`build_training_dataset()` still leaves `weather_fetcher` optional, and all shipped callers rebuild training data without passing one, so the default training/model/backtest path continues to emit neutral weather constants instead of actual t14-derived weather features."
+    },
+    {
+      "featureId": "fix-t16-feature-integration",
+      "severity": "blocking",
+      "description": "`_fill_missing_feature_values()` backfills NaNs with full-dataset column means after the full 2019-2025 dataset is assembled, rather than using Marcel or league-average fallbacks at feature-generation time; this misses the stated fill strategy and can leak future information into earlier rows."
+    }
+  ],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Updated `.factory/library/workspace-state.md` to replace the stale note that the training-data builder avoids team game logs; the current builder now threads `team_logs_fetcher` through offense, defense, and bullpen feature rebuilds.",
+      "sourceFeature": "fix-t16-feature-integration"
+    },
+    {
+      "target": "library",
+      "description": "Extended `.factory/library/ml-calibration.md` to record that the `python -m` module-alias / `__module__` pinning convention also applies to stacking bundles, not just calibration bundles.",
+      "sourceFeature": "fix-t18-stacking-pickle"
+    }
+  ],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "ml-worker skill",
+      "suggestion": "Explicitly direct Windows workers to the repo's Windows-native setup and validation commands (or direct `.venv\\Scripts\\python.exe` invocations) instead of shell-specific examples, since multiple ML workers still needed justified deviations during setup and syntax-check steps.",
+      "evidence": "The reviews for `fix-t20-walkforward-rebuild` and earlier ml-pipeline fixes both cite justified Windows-specific deviations even though `.factory/services.yaml` already publishes Windows-native command variants.",
+      "isSystemic": true
+    },
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Add a shared rule that when a verified default changes for a cross-cutting ML stage (such as calibration), downstream mission guidance and milestone briefs must be updated in the same round so reviewers and implementers are not working from stale defaults.",
+      "evidence": "`fix-t20-calibration-parity` resolved a real drift caused in part by stale mission text that still described an isotonic-calibrated stack while the live code and library now use Platt as the default calibration path.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "The claim that `.factory/services.yaml` `typecheck_windows` is unreliable in this exec environment.",
+      "reason": "retested locally during synthesis with the exact manifest command and it exited 0, so this was not reproducible evidence for a shared-state bug"
+    },
+    {
+      "observation": "The repeated `init_windows` quoting bug observation from `.factory/services.yaml`.",
+      "reason": "already captured in prior scrutiny rounds, and fixing it would require overwriting an existing shared manifest entry rather than making an additive update during synthesis"
+    }
+  ],
+  "previousRound": ".factory/validation/ml-pipeline/scrutiny/synthesis.round1.json"
+}

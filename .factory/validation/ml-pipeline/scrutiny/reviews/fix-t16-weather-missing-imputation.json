@@ -1,0 +1,26 @@
+{
+  "featureId": "fix-t16-weather-missing-imputation",
+  "reviewedAt": "2026-03-20T02:04:36.862257+00:00",
+  "commitId": "0ec8568e1b6e39c07fb03ba3cc0790abf8748dfb",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Reviewed the feature metadata, prior failing review and synthesis, the fix handoff and transcript skeleton, the original feature diff (989408220f80a47ba08109cd120c5b8b8b9db787), the fix diff (0ec8568e1b6e39c07fb03ba3cc0790abf8748dfb), and the current builder/caller/test code. The fix adequately resolves both prior blockers in the live codebase: `build_training_dataset()` now defaults to `fetch_game_weather` and the trainer, stacking, calibration, and walk-forward rebuild paths thread the live fetcher through their default rebuild flows; `_fill_missing_feature_values()` no longer computes full-dataset means and instead applies leakage-safe feature-family defaults aligned with the module baselines. The original feature-module integration from `fix-t16-feature-integration` remains present in the current builder and tests still lock parity against the integrated feature columns.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "Shared workspace notes still do not record the builder's new default-weather and leakage-safe-imputation behavior. Future workers reading shared state could incorrectly assume neutral weather or dataset-mean fills still apply on the default training rebuild path.",
+      "evidence": ".factory/library/workspace-state.md:34-35 documents the team-log/backfill builder changes but not the newer weather/imputation defaults; current behavior is at src/model/data_builder.py:240 (`resolved_weather_fetcher = weather_fetcher or fetch_game_weather`) and src/model/data_builder.py:812-844 (feature-family default fills replacing dataset-mean imputation)."
+    },
+    {
+      "area": "skills",
+      "observation": "The `ml-worker` skill's manual-verification step appears too rigid for narrow ML wiring/regression fixes. This worker justifiably deviated from the prescribed extra manual retraining/backtest run because the change was already directly covered by targeted regression tests plus the full suite.",
+      "evidence": ".factory/skills/ml-worker/SKILL.md:41-46 requires manual verification before linting, while the fix handoff marks a justified deviation at C:/Users/bills/.factory/missions/83c0c194-72d1-4821-8b08-68a3497c3590/handoffs/2026-03-20T02-00-06-422Z__fix-t16-weather-missing-imputation__f1fd34fa-e6b4-4661-a592-f7a98fd2cf90.json:63-65."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/ml-pipeline/scrutiny/reviews/fix-t16-feature-integration.json",
+  "summary": "Pass. The re-review confirmed that the new fix resolves both prior blocking issues in the current codebase: default training-data rebuilds now use the live weather fetcher, and residual feature imputation no longer uses full-dataset means. No new blocking code issues were found; shared-state follow-ups are limited to documenting the new builder defaults and making the ml-worker manual-verification guidance more conditional for narrow regression fixes."
+}
