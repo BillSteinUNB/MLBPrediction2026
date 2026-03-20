@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 
 import joblib
@@ -162,3 +164,75 @@ def test_train_stacking_models_skips_persisting_regressed_models_under_default_s
         assert summary_artifact["persisted"] is False
         assert summary_artifact["skip_reason"] == artifact.skip_reason
         assert summary_artifact["holdout_metrics"]["stacked_brier"] > summary_artifact["holdout_metrics"]["base_brier"]
+
+
+def test_stacking_bundle_created_from_main_module_reloads_in_fresh_interpreter(tmp_path) -> None:
+    input_path = tmp_path / "training_data.parquet"
+    _training_frame().to_parquet(input_path, index=False)
+    output_dir = tmp_path / "models"
+    producer_code = "\n".join(
+        [
+            "import sys",
+            "from pathlib import Path",
+            "",
+            'source_path = Path.cwd() / "src" / "model" / "stacking.py"',
+            'source = source_path.read_text(encoding="utf-8")',
+            "source = source.rsplit('\\nif __name__ == \"__main__\":\\n    raise SystemExit(main())\\n', 1)[0]",
+            'namespace = sys.modules["__main__"].__dict__',
+            'namespace["__file__"] = str(source_path)',
+            'exec(compile(source, str(source_path), "exec"), namespace)',
+            'result = namespace["train_stacking_models"](',
+            '    training_data=Path(sys.argv[1]),',
+            '    output_dir=Path(sys.argv[2]),',
+            '    holdout_season=2025,',
+            '    base_search_space={',
+            '        "max_depth": [1],',
+            '        "n_estimators": [1],',
+            '        "learning_rate": [0.01],',
+            '    },',
+            '    time_series_splits=4,',
+            '    search_iterations=1,',
+            '    random_state=17,',
+            '    enforce_holdout_brier_gate=False,',
+            ')',
+            'print(result.models["f5_ml_stacking_model"].model_path)',
+        ]
+    )
+    loader_code = "\n".join(
+        [
+            "import joblib",
+            "import sys",
+            "",
+            "model = joblib.load(sys.argv[1])",
+            "print(model.__class__.__module__)",
+        ]
+    )
+
+    producer = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            producer_code,
+            str(input_path),
+            str(output_dir),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert producer.returncode == 0, producer.stderr
+    artifact_path = producer.stdout.strip().splitlines()[-1]
+
+    loader = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            loader_code,
+            artifact_path,
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert loader.returncode == 0, loader.stderr
+    assert loader.stdout.strip() == "src.model.stacking"

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import sys
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -189,6 +190,12 @@ class StackingEnsembleModel:
         """Predict binary labels from the stacked meta-learner."""
 
         return self.meta_learner.predict(self.build_meta_features(dataframe))
+
+
+if __name__ == "__main__":
+    sys.modules.setdefault("src.model.stacking", sys.modules[__name__])
+
+StackingEnsembleModel.__module__ = "src.model.stacking"
 
 
 def train_stacking_models(
