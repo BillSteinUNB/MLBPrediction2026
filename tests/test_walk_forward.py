@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 
@@ -112,3 +115,76 @@ def test_run_walk_forward_backtest_writes_metrics_and_is_byte_reproducible(tmp_p
     assert predictions["bet_side"].isin(["home", "away", "none"]).all()
     assert predictions["market_home_fair_prob"].between(0.0, 1.0).all()
     assert predictions["model_home_prob"].between(0.0, 1.0).all()
+
+
+def test_run_walk_forward_backtest_rebuilds_window_data_and_records_build_log(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    frame = _synthetic_training_frame()
+    build_calls: list[dict[str, str]] = []
+
+    def _fake_build_training_dataset(**kwargs):
+        cutoff = pd.Timestamp(kwargs["scheduled_start_before"])
+        output_path = Path(kwargs["output_path"])
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        filtered = frame.loc[
+            pd.to_datetime(frame["scheduled_start"], utc=True) < cutoff
+        ].copy()
+        filtered.to_parquet(output_path, index=False)
+
+        metadata_path = output_path.with_suffix(".metadata.json")
+        metadata_path.write_text(
+            json.dumps({"scheduled_start_before": cutoff.isoformat()}),
+            encoding="utf-8",
+        )
+        build_calls.append(
+            {
+                "cutoff": cutoff.isoformat(),
+                "output_path": str(output_path),
+            }
+        )
+        return SimpleNamespace(
+            dataframe=filtered,
+            output_path=output_path,
+            metadata_path=metadata_path,
+            data_version_hash=f"window-build-{len(build_calls)}",
+            build_timestamp=datetime(2026, 3, 19, tzinfo=UTC),
+            requested_years=(2021, 2022),
+            effective_years=(2021, 2022),
+        )
+
+    monkeypatch.setattr(
+        "src.backtest.walk_forward.build_training_dataset",
+        _fake_build_training_dataset,
+    )
+
+    result = run_walk_forward_backtest(
+        start_date="2022-01-01",
+        end_date="2022-03-31",
+        cache_dir=tmp_path / "cache",
+        output_dir=tmp_path / "output",
+        refresh_data=True,
+        calibration_fraction=0.15,
+        estimator_kwargs={"max_depth": 1, "n_estimators": 8, "learning_rate": 0.2},
+    )
+
+    assert [call["cutoff"] for call in build_calls] == [
+        "2022-02-01T00:00:00+00:00",
+        "2022-03-01T00:00:00+00:00",
+        "2022-04-01T00:00:00+00:00",
+    ]
+    assert result.window_metrics["feature_data_cutoff"].tolist() == [
+        "2022-02-01T00:00:00+00:00",
+        "2022-03-01T00:00:00+00:00",
+        "2022-04-01T00:00:00+00:00",
+    ]
+    assert result.window_metrics["feature_data_action"].tolist() == ["rebuilt", "rebuilt", "rebuilt"]
+
+    summary_payload = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    assert [entry["scheduled_start_before"] for entry in summary_payload["window_builds"]] == [
+        "2022-02-01T00:00:00+00:00",
+        "2022-03-01T00:00:00+00:00",
+        "2022-04-01T00:00:00+00:00",
+    ]

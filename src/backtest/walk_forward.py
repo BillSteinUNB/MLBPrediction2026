@@ -3,8 +3,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import random
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from math import ceil
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -37,6 +38,9 @@ from src.model.xgboost_trainer import (
     _load_training_dataframe,
     _resolve_numeric_feature_columns,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_BACKTEST_OUTPUT_DIR = Path("data") / "backtest"
@@ -89,6 +93,20 @@ class WalkForwardBacktestResult:
     window_count: int
     data_version_hash: str
     code_version_hash: str
+    window_builds: tuple["WalkForwardWindowBuild", ...]
+
+
+@dataclass(frozen=True, slots=True)
+class WalkForwardWindowBuild:
+    window_index: int
+    data_source: str
+    build_action: str
+    scheduled_start_before: str
+    cache_path: str | None
+    row_count: int
+    train_row_count: int
+    test_row_count: int
+    data_version_hash: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,56 +186,119 @@ def run_walk_forward_backtest(
     """Run a deterministic walk-forward backtest and persist predictions plus window metrics."""
 
     _set_random_seed(seed)
-    dataframe, cache_path = _resolve_training_data(
-        training_data=training_data,
-        start_date=start_date,
-        end_date=end_date,
-        train_window_months=train_window_months,
-        cache_dir=cache_dir,
-        refresh_data=refresh_data,
-    )
-    assert_training_data_is_leakage_free(dataframe)
-
-    windows = create_walk_forward_windows(
-        dataframe,
-        start_date=start_date,
-        end_date=end_date,
-        train_window_months=train_window_months,
-        test_window_months=test_window_months,
-    )
-    if not windows:
-        raise ValueError("No walk-forward windows matched the requested date range")
-
-    feature_columns = _resolve_numeric_feature_columns(dataframe)
-    resolved_raw_meta_feature_columns = _resolve_raw_meta_feature_columns(
-        dataframe,
-        requested_columns=raw_meta_feature_columns,
-    )
     resolved_estimator_kwargs = {**DEFAULT_ESTIMATOR_KWARGS, **dict(estimator_kwargs or {})}
-    data_version_hash = _resolve_data_version_hash(dataframe)
     code_version_hash = _compute_code_version_hash()
 
     prediction_frames: list[pd.DataFrame] = []
     window_metric_rows: list[dict[str, Any]] = []
-    for window in windows:
-        predictions, metrics = _evaluate_window(
-            dataframe=dataframe,
-            window=window,
-            feature_columns=feature_columns,
-            raw_meta_feature_columns=resolved_raw_meta_feature_columns,
-            calibration_fraction=calibration_fraction,
-            calibration_method=calibration_method,
-            edge_threshold=edge_threshold,
-            market_vig=market_vig,
-            time_series_splits=time_series_splits,
-            estimator_kwargs=resolved_estimator_kwargs,
-            meta_learner_max_iter=meta_learner_max_iter,
-            seed=seed,
-            data_version_hash=data_version_hash,
-            code_version_hash=code_version_hash,
+    window_builds: list[WalkForwardWindowBuild] = []
+
+    if training_data is not None:
+        dataframe = _load_backtest_dataframe(training_data)
+        assert_training_data_is_leakage_free(dataframe)
+        windows = create_walk_forward_windows(
+            dataframe,
+            start_date=start_date,
+            end_date=end_date,
+            train_window_months=train_window_months,
+            test_window_months=test_window_months,
         )
-        prediction_frames.append(predictions)
-        window_metric_rows.append(metrics)
+        if not windows:
+            raise ValueError("No walk-forward windows matched the requested date range")
+
+        feature_columns = _resolve_numeric_feature_columns(dataframe)
+        resolved_raw_meta_feature_columns = _resolve_raw_meta_feature_columns(
+            dataframe,
+            requested_columns=raw_meta_feature_columns,
+        )
+        data_version_hash = _resolve_data_version_hash(dataframe)
+        cache_path = str(Path(training_data)) if isinstance(training_data, str | Path) else None
+
+        for window in windows:
+            build = WalkForwardWindowBuild(
+                window_index=window.window_index,
+                data_source="explicit_training_data",
+                build_action="provided",
+                scheduled_start_before=window.test_end.isoformat(),
+                cache_path=cache_path,
+                row_count=int(len(dataframe)),
+                train_row_count=int(len(_slice_time_range(dataframe, start=window.train_start, end=window.train_end))),
+                test_row_count=int(len(_slice_time_range(dataframe, start=window.test_start, end=window.test_end))),
+                data_version_hash=data_version_hash,
+            )
+            predictions, metrics = _evaluate_window(
+                dataframe=dataframe,
+                window=window,
+                feature_columns=feature_columns,
+                raw_meta_feature_columns=resolved_raw_meta_feature_columns,
+                calibration_fraction=calibration_fraction,
+                calibration_method=calibration_method,
+                edge_threshold=edge_threshold,
+                market_vig=market_vig,
+                time_series_splits=time_series_splits,
+                estimator_kwargs=resolved_estimator_kwargs,
+                meta_learner_max_iter=meta_learner_max_iter,
+                seed=seed,
+                data_version_hash=data_version_hash,
+                code_version_hash=code_version_hash,
+            )
+            metrics.update(_window_build_to_metric_fields(build))
+            prediction_frames.append(predictions)
+            window_metric_rows.append(metrics)
+            window_builds.append(build)
+    else:
+        windows = _create_requested_windows(
+            start_date=start_date,
+            end_date=end_date,
+            train_window_months=train_window_months,
+            test_window_months=test_window_months,
+        )
+
+        for window in windows:
+            dataframe, build = _resolve_window_training_data(
+                window=window,
+                cache_dir=cache_dir,
+                refresh_data=refresh_data,
+            )
+            if build.train_row_count == 0 or build.test_row_count == 0:
+                logger.info(
+                    "Skipping walk-forward window %s because rebuilt feature data yielded %s train rows and %s test rows",
+                    window.window_index,
+                    build.train_row_count,
+                    build.test_row_count,
+                )
+                continue
+
+            feature_columns = _resolve_numeric_feature_columns(dataframe)
+            resolved_raw_meta_feature_columns = _resolve_raw_meta_feature_columns(
+                dataframe,
+                requested_columns=raw_meta_feature_columns,
+            )
+            predictions, metrics = _evaluate_window(
+                dataframe=dataframe,
+                window=window,
+                feature_columns=feature_columns,
+                raw_meta_feature_columns=resolved_raw_meta_feature_columns,
+                calibration_fraction=calibration_fraction,
+                calibration_method=calibration_method,
+                edge_threshold=edge_threshold,
+                market_vig=market_vig,
+                time_series_splits=time_series_splits,
+                estimator_kwargs=resolved_estimator_kwargs,
+                meta_learner_max_iter=meta_learner_max_iter,
+                seed=seed,
+                data_version_hash=build.data_version_hash,
+                code_version_hash=code_version_hash,
+            )
+            metrics.update(_window_build_to_metric_fields(build))
+            prediction_frames.append(predictions)
+            window_metric_rows.append(metrics)
+            window_builds.append(build)
+
+        if not prediction_frames:
+            raise ValueError("No walk-forward windows matched the requested date range")
+
+    data_version_hash = _combine_window_data_version_hashes(window_builds)
 
     predictions = pd.concat(prediction_frames, ignore_index=True).sort_values(
         ["window_index", "scheduled_start", "game_pk"]
@@ -259,7 +340,7 @@ def run_walk_forward_backtest(
         "market_vig": market_vig,
         "time_series_splits": time_series_splits,
         "estimator_kwargs": resolved_estimator_kwargs,
-        "raw_meta_feature_columns": list(resolved_raw_meta_feature_columns),
+        "raw_meta_feature_columns": list(raw_meta_feature_columns),
         "window_count": int(len(window_metrics)),
         "aggregate_brier_score": aggregate_brier,
         "aggregate_roi": aggregate_roi,
@@ -268,9 +349,9 @@ def run_walk_forward_backtest(
         "total_staked_units": total_staked,
         "data_version_hash": data_version_hash,
         "code_version_hash": code_version_hash,
-        "cache_path": str(cache_path) if cache_path else None,
         "predictions_path": str(predictions_path),
         "window_metrics_path": str(window_metrics_path),
+        "window_builds": [asdict(window_build) for window_build in window_builds],
         "output_fingerprint": output_fingerprint,
     }
     summary_path.write_text(
@@ -291,6 +372,7 @@ def run_walk_forward_backtest(
         window_count=len(window_metrics),
         data_version_hash=data_version_hash,
         code_version_hash=code_version_hash,
+        window_builds=tuple(window_builds),
     )
 
 
@@ -332,6 +414,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=DEFAULT_ESTIMATOR_KWARGS["learning_rate"],
     )
     args = parser.parse_args(argv)
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
     result = run_walk_forward_backtest(
         training_data=args.training_data,
@@ -647,35 +731,83 @@ def _train_window_model(
     )
 
 
-def _resolve_training_data(
+def _create_requested_windows(
     *,
-    training_data: pd.DataFrame | str | Path | None,
     start_date: str,
     end_date: str,
     train_window_months: int,
-    cache_dir: str | Path,
-    refresh_data: bool,
-) -> tuple[pd.DataFrame, Path | None]:
-    if training_data is not None:
-        return _load_backtest_dataframe(training_data), None
-
+    test_window_months: int,
+) -> list[WalkForwardWindow]:
     start_timestamp = _month_floor(start_date)
     end_timestamp = _month_floor(end_date)
-    dataset_start = start_timestamp - pd.DateOffset(months=train_window_months)
-    cache_path = Path(cache_dir) / (
-        f"walk_forward_cache_{dataset_start.year}_{end_timestamp.year}.parquet"
-    )
 
-    if refresh_data or not cache_path.exists():
+    windows: list[WalkForwardWindow] = []
+    window_index = 1
+    test_start = start_timestamp
+    while test_start <= end_timestamp:
+        test_end = test_start + pd.DateOffset(months=test_window_months)
+        windows.append(
+            WalkForwardWindow(
+                window_index=window_index,
+                train_start=test_start - pd.DateOffset(months=train_window_months),
+                train_end=test_start,
+                test_start=test_start,
+                test_end=test_end,
+            )
+        )
+        test_start = test_end
+        window_index += 1
+
+    return windows
+
+
+def _resolve_window_training_data(
+    *,
+    window: WalkForwardWindow,
+    cache_dir: str | Path,
+    refresh_data: bool,
+) -> tuple[pd.DataFrame, WalkForwardWindowBuild]:
+    cache_path = Path(cache_dir) / (
+        f"walk_forward_cache_{window.train_start.strftime('%Y%m%d')}_{window.test_end.strftime('%Y%m%d')}.parquet"
+    )
+    cutoff_timestamp = pd.Timestamp(window.test_end).tz_convert("UTC")
+    build_action = "rebuilt" if refresh_data or not cache_path.exists() else "cached"
+
+    if build_action == "rebuilt":
         build_training_dataset(
-            start_year=dataset_start.year,
-            end_year=end_timestamp.year,
+            start_year=window.train_start.year,
+            end_year=(window.test_end - pd.Timedelta(microseconds=1)).year,
             output_path=cache_path,
-            full_regular_seasons_target=(end_timestamp.year - dataset_start.year + 1),
+            full_regular_seasons_target=(window.test_end.year - window.train_start.year + 1),
+            scheduled_start_before=cutoff_timestamp.isoformat(),
             refresh=refresh_data,
         )
 
-    return _load_backtest_dataframe(cache_path), cache_path
+    dataframe = _load_backtest_dataframe(cache_path)
+    assert_training_data_is_leakage_free(dataframe)
+    train_row_count = int(len(_slice_time_range(dataframe, start=window.train_start, end=window.train_end)))
+    test_row_count = int(len(_slice_time_range(dataframe, start=window.test_start, end=window.test_end)))
+    build = WalkForwardWindowBuild(
+        window_index=window.window_index,
+        data_source="window_rebuild",
+        build_action=build_action,
+        scheduled_start_before=cutoff_timestamp.isoformat(),
+        cache_path=str(cache_path),
+        row_count=int(len(dataframe)),
+        train_row_count=train_row_count,
+        test_row_count=test_row_count,
+        data_version_hash=_resolve_data_version_hash(dataframe),
+    )
+    logger.info(
+        "%s feature data for walk-forward window %s with cutoff < %s (%s total rows, %s train, %s test)",
+        "Rebuilt" if build_action == "rebuilt" else "Loaded cached",
+        window.window_index,
+        build.scheduled_start_before,
+        build.row_count,
+        build.train_row_count,
+        build.test_row_count,
+    )
+    return dataframe, build
 
 
 def _load_backtest_dataframe(training_data: pd.DataFrame | str | Path) -> pd.DataFrame:
@@ -710,6 +842,38 @@ def _resolve_data_version_hash(dataframe: pd.DataFrame) -> str:
         if len(hashes) == 1:
             return hashes[0]
     return _compute_data_version_hash(dataframe)
+
+
+def _combine_window_data_version_hashes(window_builds: Sequence[WalkForwardWindowBuild]) -> str:
+    unique_hashes = {window_build.data_version_hash for window_build in window_builds}
+    if len(unique_hashes) == 1:
+        return next(iter(unique_hashes))
+
+    payload = json.dumps(
+        [
+            {
+                "window_index": window_build.window_index,
+                "scheduled_start_before": window_build.scheduled_start_before,
+                "data_version_hash": window_build.data_version_hash,
+            }
+            for window_build in window_builds
+        ],
+        sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _window_build_to_metric_fields(window_build: WalkForwardWindowBuild) -> dict[str, Any]:
+    return {
+        "feature_data_source": window_build.data_source,
+        "feature_data_action": window_build.build_action,
+        "feature_data_cutoff": window_build.scheduled_start_before,
+        "feature_data_path": window_build.cache_path,
+        "feature_data_row_count": window_build.row_count,
+        "feature_data_train_row_count": window_build.train_row_count,
+        "feature_data_test_row_count": window_build.test_row_count,
+        "feature_data_version_hash": window_build.data_version_hash,
+    }
 
 
 def _compute_code_version_hash() -> str:

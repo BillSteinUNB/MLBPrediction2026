@@ -127,6 +127,7 @@ def build_training_dataset(
     output_path: str | Path = DEFAULT_OUTPUT_PATH,
     full_regular_seasons_target: int = DEFAULT_FULL_REGULAR_SEASONS_TARGET,
     shortened_season_game_threshold: int = SHORTENED_SEASON_GAME_THRESHOLD,
+    scheduled_start_before: str | date | datetime | None = None,
     refresh: bool = False,
     schedule_fetcher: ScheduleFetcher | None = None,
     batting_stats_fetcher: SeasonStatsFetcher = fetch_batting_stats,
@@ -170,6 +171,11 @@ def build_training_dataset(
         ignore_index=True,
     )
     schedule = schedule.sort_values(["scheduled_start", "game_pk"]).reset_index(drop=True)
+    if scheduled_start_before is not None:
+        schedule_cutoff = _normalize_scheduled_start_before(scheduled_start_before)
+        schedule = schedule.loc[
+            pd.to_datetime(schedule["scheduled_start"], utc=True) < schedule_cutoff
+        ].reset_index(drop=True)
 
     build_timestamp = datetime.now(UTC)
     resolved_lineup_fetcher = lineup_fetcher or _empty_lineups_fetcher
@@ -227,6 +233,11 @@ def build_training_dataset(
                 "shortened_seasons_skipped": [
                     year for year in requested_years if year not in effective_years
                 ],
+                "scheduled_start_before": (
+                    _normalize_scheduled_start_before(scheduled_start_before).isoformat()
+                    if scheduled_start_before is not None
+                    else None
+                ),
                 "row_count": int(len(dataset)),
                 "feature_column_count": int(len(_feature_columns(dataset))),
                 "data_version_hash": data_version_hash,
@@ -775,6 +786,15 @@ def _normalize_lookup_date(value: str | date | datetime) -> str:
     if isinstance(value, date):
         return value.isoformat()
     return str(value)
+
+
+def _normalize_scheduled_start_before(value: str | date | datetime) -> pd.Timestamp:
+    timestamp = pd.Timestamp(value)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize("UTC")
+    else:
+        timestamp = timestamp.tz_convert("UTC")
+    return timestamp
 
 
 def _memoize_dataframe_fetcher(fetcher: Callable[..., pd.DataFrame]) -> Callable[..., pd.DataFrame]:
