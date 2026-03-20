@@ -252,6 +252,7 @@ def train_calibrated_models(
         search_iterations=search_iterations,
         random_state=random_state,
         meta_learner_max_iter=meta_learner_max_iter,
+        enforce_holdout_brier_gate=False,
     )
 
     calibration_game_pks = set(dedicated_split.calibration_frame["game_pk"].tolist())

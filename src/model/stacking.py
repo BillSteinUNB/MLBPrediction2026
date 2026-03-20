@@ -74,6 +74,8 @@ class StackingModelArtifact:
     raw_meta_feature_columns: list[str]
     meta_feature_columns: list[str]
     oof_prediction_strategy: str
+    persisted: bool
+    skip_reason: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,6 +202,7 @@ def train_stacking_models(
     search_iterations: int = DEFAULT_SEARCH_ITERATIONS,
     random_state: int = DEFAULT_RANDOM_STATE,
     meta_learner_max_iter: int = DEFAULT_META_LEARNER_MAX_ITER,
+    enforce_holdout_brier_gate: bool = True,
 ) -> StackingRunResult:
     """Train and persist LR stacking models on out-of-fold XGBoost probabilities."""
 
@@ -246,6 +249,7 @@ def train_stacking_models(
             time_series_splits=time_series_splits,
             random_state=random_state,
             meta_learner_max_iter=meta_learner_max_iter,
+            enforce_holdout_brier_gate=enforce_holdout_brier_gate,
         )
         artifacts[stacking_artifact.model_name] = stacking_artifact
 
@@ -334,6 +338,7 @@ def _train_single_stacking_model(
     time_series_splits: int,
     random_state: int,
     meta_learner_max_iter: int,
+    enforce_holdout_brier_gate: bool,
 ) -> StackingModelArtifact:
     frame = _prepare_training_frame(dataset, target_column=target_column, drop_ties=drop_ties)
     train_frame = frame.loc[frame["season"] < holdout_season].copy().reset_index(drop=True)
@@ -386,6 +391,22 @@ def _train_single_stacking_model(
     }
     logger.info("%s holdout metrics: %s", model_name, holdout_metrics)
 
+    model_path = output_dir / f"{model_name}_{model_version}.joblib"
+    metadata_path = model_path.with_suffix(".metadata.json")
+    persisted = (
+        not enforce_holdout_brier_gate
+        or holdout_metrics["stacked_brier"] <= holdout_metrics["base_brier"]
+    )
+    skip_reason: str | None = None
+
+    if enforce_holdout_brier_gate and not persisted:
+        skip_reason = (
+            "Skipped persistence because holdout stacked_brier "
+            f"{holdout_metrics['stacked_brier']:.6f} exceeded base_brier "
+            f"{holdout_metrics['base_brier']:.6f}."
+        )
+        logger.warning("%s %s", model_name, skip_reason)
+
     stacking_model = StackingEnsembleModel(
         model_name=model_name,
         target_column=target_column,
@@ -395,34 +416,33 @@ def _train_single_stacking_model(
         raw_meta_feature_columns=raw_meta_feature_columns,
         meta_feature_columns=meta_feature_columns,
     )
-    model_path = output_dir / f"{model_name}_{model_version}.joblib"
-    joblib.dump(stacking_model, model_path)
 
-    metadata_path = model_path.with_suffix(".metadata.json")
-    metadata_path.write_text(
-        json.dumps(
-            {
-                "model_name": model_name,
-                "base_model_name": base_model_name,
-                "target_column": target_column,
-                "model_version": model_version,
-                "base_model_path": str(base_model_path),
-                "train_row_count": int(len(train_frame)),
-                "oof_row_count": int(len(oof_frame)),
-                "warmup_row_count": int(oof_result.warmup_row_count),
-                "holdout_row_count": int(len(holdout_frame)),
-                "feature_columns": feature_columns,
-                "raw_meta_feature_columns": raw_meta_feature_columns,
-                "meta_feature_columns": meta_feature_columns,
-                "oof_prediction_strategy": "cross_val_predict",
-                "oof_fold_count": int(oof_result.fold_count),
-                "holdout_metrics": holdout_metrics,
-                "trained_at": datetime.now(UTC).isoformat(),
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    metadata_payload = {
+        "model_name": model_name,
+        "base_model_name": base_model_name,
+        "target_column": target_column,
+        "model_version": model_version,
+        "base_model_path": str(base_model_path),
+        "train_row_count": int(len(train_frame)),
+        "oof_row_count": int(len(oof_frame)),
+        "warmup_row_count": int(oof_result.warmup_row_count),
+        "holdout_row_count": int(len(holdout_frame)),
+        "feature_columns": feature_columns,
+        "raw_meta_feature_columns": raw_meta_feature_columns,
+        "meta_feature_columns": meta_feature_columns,
+        "oof_prediction_strategy": "cross_val_predict",
+        "oof_fold_count": int(oof_result.fold_count),
+        "holdout_metrics": holdout_metrics,
+        "persisted": persisted,
+        "skip_reason": skip_reason,
+        "trained_at": datetime.now(UTC).isoformat(),
+    }
+    if persisted:
+        joblib.dump(stacking_model, model_path)
+        metadata_path.write_text(
+            json.dumps(metadata_payload, indent=2),
+            encoding="utf-8",
+        )
 
     return StackingModelArtifact(
         model_name=model_name,
@@ -440,6 +460,8 @@ def _train_single_stacking_model(
         raw_meta_feature_columns=raw_meta_feature_columns,
         meta_feature_columns=meta_feature_columns,
         oof_prediction_strategy="cross_val_predict",
+        persisted=persisted,
+        skip_reason=skip_reason,
     )
 
 

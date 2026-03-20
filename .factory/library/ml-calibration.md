@@ -3,6 +3,13 @@
 - `src/model/calibration.py` now supports `identity`, `isotonic`, `platt`, and `blend`
   probability calibrators on top of the stacking bundle. The current default is
   `DEFAULT_CALIBRATION_METHOD = "platt"`.
+- `src/model/stacking.py` now records `persisted=false` plus a `skip_reason` in the
+  run summary when the default stacking path regresses holdout Brier versus the base
+  XGBoost model; in that case it intentionally does **not** write stacking joblib or
+  metadata files.
+- `src/model/calibration.py` explicitly disables that stacking persistence gate for its
+  internal pre-calibration training step so reduced-search calibration runs can still
+  emit reloadable calibration bundles.
 - CLI-created calibration bundles pin `sys.modules.setdefault("src.model.calibration", ...)`
   and set the custom calibrator/model classes' `__module__` to `src.model.calibration`
   so `python -m src.model.calibration` artifacts remain reloadable via `joblib` in a

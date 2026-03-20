@@ -132,3 +132,33 @@ def test_train_stacking_models_uses_cross_val_predict_oof_features_and_improves_
     assert metadata["oof_row_count"] > 0
     assert metadata["holdout_metrics"]["stacked_brier"] <= metadata["holdout_metrics"]["base_brier"]
     assert metadata["holdout_metrics"]["stacked_brier"] < 0.25
+
+
+def test_train_stacking_models_skips_persisting_regressed_models_under_default_search_settings(
+    tmp_path,
+) -> None:
+    input_path = tmp_path / "training_data.parquet"
+    _training_frame().to_parquet(input_path, index=False)
+
+    result = train_stacking_models(
+        training_data=input_path,
+        output_dir=tmp_path / "models",
+        holdout_season=2025,
+        random_state=17,
+    )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+
+    for model_name in ("f5_ml_stacking_model", "f5_rl_stacking_model"):
+        artifact = result.models[model_name]
+        assert artifact.base_model_path.exists()
+        assert artifact.holdout_metrics["stacked_brier"] > artifact.holdout_metrics["base_brier"]
+        assert artifact.persisted is False
+        assert artifact.skip_reason is not None
+        assert not artifact.model_path.exists()
+        assert not artifact.metadata_path.exists()
+
+        summary_artifact = summary["models"][model_name]
+        assert summary_artifact["persisted"] is False
+        assert summary_artifact["skip_reason"] == artifact.skip_reason
+        assert summary_artifact["holdout_metrics"]["stacked_brier"] > summary_artifact["holdout_metrics"]["base_brier"]
