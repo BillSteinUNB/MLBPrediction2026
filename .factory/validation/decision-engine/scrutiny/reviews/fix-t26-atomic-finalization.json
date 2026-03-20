@@ -1,0 +1,15 @@
+{
+  "featureId": "fix-t26-atomic-finalization",
+  "reviewedAt": "2026-03-20T06:33:45.986076Z",
+  "commitId": "ffc5c19e16317a7e05001d2d8fb99091ef10c2ee",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Reviewed the prior failed review, both handoffs, both commit diffs, the fix transcript skeleton, and the affected current code. This fix addresses the blocker from `fix-t26-single-webhook`: `_apply_pick_side_effects()` now keeps placement, odds freezing, and optional backtest settlement inside one SQLite transaction (`src/pipeline/daily.py:992-1068`), and the helper functions now accept a shared connection plus deferred commits (`src/engine/bankroll.py:476-547`, `src/clients/odds_client.py:603-635`, `src/engine/settlement.py:43-168`). The new regression `tests/test_daily_pipeline.py:436-482` proves that a settlement failure after placement leaves no persisted bet, frozen odds row, or bankroll ledger mutation. I did not find a remaining blocker or a new blocking issue within this fix's scope.",
+    "issues": []
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": ".factory/validation/decision-engine/scrutiny/reviews/fix-t26-single-webhook.json",
+  "summary": "Pass. The fix closes the prior atomicity blocker by making pick finalization transactional across bankroll placement, odds freezing, and backtest settlement, and the added regression confirms post-placement failures fully roll back state. I found no blocking issues and no shared-state observations in the reviewed scope."
+}

@@ -1,66 +1,40 @@
 {
   "milestone": "decision-engine",
-  "round": 2,
-  "status": "fail",
+  "round": 3,
+  "status": "pass",
   "validatorsRun": {
     "test": {
       "passed": true,
-      "command": "python -m pytest tests/ -v --tb=short",
+      "command": "powershell -NoProfile -Command \"& 'C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe' -m pytest 'C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\tests' -v --tb=short\"",
       "exitCode": 0
     },
     "typecheck": {
       "passed": true,
-      "command": "python -c \"import pathlib, py_compile; [py_compile.compile(str(path), doraise=True) for path in pathlib.Path('src').rglob('*.py')]; print('py_compile ok')\"",
+      "command": "powershell -NoProfile -Command \"@'\nimport pathlib, py_compile\nfor path in pathlib.Path(r'C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\src').rglob('*.py'):\n    py_compile.compile(str(path), doraise=True)\nprint('py_compile ok')\n'@ | & 'C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe' -\"",
       "exitCode": 0
     },
     "lint": {
       "passed": true,
-      "command": "powershell -NoProfile -Command \"& '.\\.venv\\Scripts\\python.exe' -m ruff check '.\\src' '.\\tests'\"",
+      "command": "powershell -NoProfile -Command \"& 'C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe' -m ruff check 'C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\src' 'C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\tests'\"",
       "exitCode": 0
     }
   },
   "reviewsSummary": {
-    "total": 4,
+    "total": 2,
     "passed": 2,
-    "failed": 2,
-    "failedFeatures": [
-      "fix-t25-first-year-roster-turnover",
-      "fix-t26-single-webhook"
-    ]
+    "failed": 0,
+    "failedFeatures": []
   },
-  "blockingIssues": [
-    {
-      "featureId": "fix-t25-first-year-roster-turnover",
-      "severity": "blocking",
-      "description": "The fix makes rookie fallback and roster-turnover wiring reachable for live offense/pitching/defense callers, but `src/model/data_builder.py:735` now threads `roster_turnover_by_team` through historical rebuilds that still default to `_empty_lineups_fetcher()`. When lineups are absent, `_build_roster_turnover_by_team()` falls back to starter-only current rosters (`src/model/data_builder.py:824-837`), so training, calibration, stacking, and walk-forward rebuilds can halve prior weights for offense/defense based on starter continuity rather than actual >40% roster turnover."
-    },
-    {
-      "featureId": "fix-t26-single-webhook",
-      "severity": "blocking",
-      "description": "The fix removes the original picks-then-failure double-webhook path, but `_apply_pick_side_effects()` in `src/pipeline/daily.py:1009` still commits `update_bankroll()` before `freeze_odds()` / settlement. If a later side effect fails, the run downgrades the game to an error and suppresses the pick while leaving the bet and bankroll ledger mutation committed, creating a hidden placed bet / bankroll debit that is missing from the pipeline results and webhook output."
-    }
-  ],
-  "appliedUpdates": [
-    {
-      "target": "library",
-      "description": "Updated `.factory/library/workspace-state.md` to reflect that `fix-t24-live-features` restored fresh same-day feature assembly via `build_live_feature_frame()` and no longer uses the old persisted-row fast path for live runs.",
-      "sourceFeature": "fix-t24-live-features"
-    }
-  ],
+  "blockingIssues": [],
+  "appliedUpdates": [],
   "suggestedGuidanceUpdates": [
     {
-      "target": ".factory/services.yaml",
-      "suggestion": "Fix or replace the shared `init_windows` command with a tested Windows-safe init command; the current inline `init_db(''data/mlb.db'')` quoting is unreliable in PowerShell and continues to force worker startup deviations.",
-      "evidence": "Review `fix-t24-live-features` flagged `.factory/services.yaml:7`, and this scrutiny run independently had to bypass the manifest command after reproducing quote-related failures while initializing the repo on Windows.",
-      "isSystemic": true
-    },
-    {
       "target": "feature-worker skill",
-      "suggestion": "Call out that `src/model/data_builder.py::_compute_feature_modules()` is shared by both live inference and historical rebuilds, and require verification of both paths when feature-module wiring changes land there.",
-      "evidence": "Review `fix-t25-first-year-roster-turnover` showed the live-path blocker was fixed, but the same shared data-builder change regressed training/backtest rebuilds because the worker only validated the live path with lineups present.",
-      "isSystemic": false
+      "suggestion": "Add Windows-specific startup and validation guidance telling workers to prefer the existing `*_windows` commands in `.factory/services.yaml` when operating on Windows, instead of defaulting to POSIX-oriented setup or generic commands.",
+      "evidence": "Review `fix-t25-roster-turnover-gate` found `.factory/skills/feature-worker/SKILL.md:40-50` still lists generic commands while `.factory/services.yaml:6-7,12` already provides `install_windows`, `init_windows`, and `test_windows`; the feature handoff records a justified deviation after `.factory/init.sh` failed on Windows.",
+      "isSystemic": true
     }
   ],
   "rejectedObservations": [],
-  "previousRound": ".factory/validation/decision-engine/scrutiny/synthesis.round1.json"
+  "previousRound": ".factory/validation/decision-engine/scrutiny/synthesis.round2.json"
 }

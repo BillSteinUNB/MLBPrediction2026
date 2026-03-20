@@ -1,0 +1,21 @@
+{
+  "featureId": "fix-t25-roster-turnover-gate",
+  "reviewedAt": "2026-03-20T06:35:01.845374Z",
+  "commitId": "54bcef2",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Reviewed the prior failed review, the prior and fix handoffs, the fix transcript skeleton, both relevant commit diffs, and the current implementation. The new fix directly closes the prior blocker in `src/model/data_builder.py`: `_build_roster_turnover_by_team()` now records which teams actually have lineup-player history before allowing turnover maps to be emitted (`src/model/data_builder.py:803-844,860-863`), and `_compute_feature_modules()` still threads those turnover maps into offense, pitching, and defense only when they exist (`src/model/data_builder.py:735-768`). That means historical rebuilds that still default to `_empty_lineups_fetcher()` now pass `None` into the feature modules instead of starter-only turnover maps (`src/model/data_builder.py:250,259-270`; `tests/test_data_builder.py:663-749`), while the live path continues to produce lineup-based turnover weights when lineups are available (`src/model/data_builder.py:332-390`; `tests/test_data_builder.py:852-967`). I did not find any new blocking or non-blocking issues in the reviewed scope.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The shared feature-worker guidance still does not tell Windows workers to prefer the platform-specific manifest commands that already exist in `.factory/services.yaml`, so workers keep making justified startup/validation deviations on Windows even when the repo has Windows-safe command entries.",
+      "evidence": "`C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\skills\\feature-worker\\SKILL.md:40-50` only documents generic `pytest` / `py_compile` commands; `C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\services.yaml:6-7,12` already defines `install_windows`, `init_windows`, and `test_windows`; and the fix handoff `C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\handoffs\\2026-03-20T06-22-00-025Z__fix-t25-roster-turnover-gate__23902730-eed4-4eb5-8148-9c920fe664b5.json` records a justified deviation after `bash \"...\\.factory\\init.sh\"` failed on Windows."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/decision-engine/scrutiny/reviews/fix-t25-first-year-roster-turnover.json",
+  "summary": "Pass. This fix adequately resolves the prior blocker by preventing historical rebuilds from inferring roster turnover from starter-only rosters when lineup history is unavailable, while preserving the live lineup-based turnover weighting path. No blocking code issues were found in the reviewed scope; the only shared-state note is that worker guidance still underspecifies how Windows workers should use the repo's platform-specific setup/validation commands."
+}
