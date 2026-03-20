@@ -32,11 +32,15 @@ from src.features.offense import compute_offensive_features
 from src.features.pitching import compute_pitching_features
 from src.model.data_builder import (
     _fill_missing_feature_values,
+    assert_training_data_is_complete,
     assert_training_data_is_leakage_free,
     build_training_dataset,
     resolve_training_years,
 )
 from src.models.weather import WeatherData
+
+
+_VALIDATION_FIXTURE_SEASONS = (2018, 2019, 2021, 2022, 2023, 2024, 2025)
 
 
 def _schedule_row(
@@ -299,6 +303,52 @@ def _fake_weather_fetcher(team_abbr: str, game_datetime, **_kwargs) -> WeatherDa
         forecast_time=datetime(2025, 4, 10, 18, 0, tzinfo=timezone.utc),
         fetched_at=datetime(2025, 4, 10, 16, 0, tzinfo=timezone.utc),
     )
+
+
+def _write_cached_training_validation_fixture(
+    output_path: Path,
+    *,
+    rows_per_season: int = 2430,
+) -> pd.DataFrame:
+    team_pairs = [
+        ("NYY", "BOS", "Yankee Stadium"),
+        ("LAD", "SF", "Dodger Stadium"),
+        ("ATL", "PHI", "Truist Park"),
+        ("CHC", "STL", "Wrigley Field"),
+        ("SEA", "HOU", "T-Mobile Park"),
+    ]
+    games_per_day = 15
+    rows: list[dict[str, object]] = []
+
+    for season in _VALIDATION_FIXTURE_SEASONS:
+        season_base = pd.Timestamp(f"{season}-03-20T18:05:00Z")
+        for game_offset in range(rows_per_season):
+            home_team, away_team, venue = team_pairs[game_offset % len(team_pairs)]
+            scheduled_start = season_base + pd.Timedelta(days=game_offset // games_per_day)
+            scheduled_start += pd.Timedelta(minutes=(game_offset % games_per_day) * 20)
+            rows.append(
+                {
+                    "game_pk": (season * 10_000) + game_offset,
+                    "season": season,
+                    "game_date": scheduled_start.date().isoformat(),
+                    "scheduled_start": scheduled_start.isoformat(),
+                    "as_of_timestamp": (
+                        scheduled_start.normalize() - pd.Timedelta(days=1)
+                    ).isoformat(),
+                    "home_team": home_team,
+                    "away_team": away_team,
+                    "venue": venue,
+                    "game_type": "R",
+                    "status": "final",
+                    "f5_ml_result": int(game_offset % 2 == 0),
+                    "f5_rl_result": int(game_offset % 3 == 0),
+                }
+            )
+
+    dataframe = pd.DataFrame(rows)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    dataframe.to_parquet(output_path, index=False)
+    return dataframe
 
 
 def _direct_module_feature_values(
@@ -739,3 +789,48 @@ def test_resolve_training_years_backfills_shortened_season_with_previous_full_ye
     )
 
     assert resolved_years == [2018, 2019, 2021, 2022, 2023, 2024, 2025]
+
+
+def test_assert_training_data_is_complete_accepts_cached_validation_parquet(
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "training_data_validation_fixture.parquet"
+    fixture = _write_cached_training_validation_fixture(output_path)
+
+    summary = assert_training_data_is_complete(output_path)
+
+    assert summary.row_count == len(fixture) == 17_010
+    assert summary.expected_row_range == (16_500, 17_500)
+    assert summary.row_count_in_expected_range is True
+    assert summary.target_null_counts == {"f5_ml_result": 0, "f5_rl_result": 0}
+    assert summary.game_type_counts == {"R": 17_010}
+    assert summary.non_regular_game_types == {}
+    assert summary.seasons == _VALIDATION_FIXTURE_SEASONS
+
+
+def test_assert_training_data_is_complete_rejects_unexpected_row_count(tmp_path: Path) -> None:
+    output_path = tmp_path / "too_small_training_data.parquet"
+    _write_cached_training_validation_fixture(output_path, rows_per_season=10)
+
+    with pytest.raises(AssertionError, match="Row count 70 outside expected range 16500-17500"):
+        assert_training_data_is_complete(output_path)
+
+
+def test_assert_training_data_is_complete_rejects_nan_targets(tmp_path: Path) -> None:
+    output_path = tmp_path / "training_data_with_nan_target.parquet"
+    fixture = _write_cached_training_validation_fixture(output_path)
+    fixture.loc[0, "f5_ml_result"] = pd.NA
+    fixture.to_parquet(output_path, index=False)
+
+    with pytest.raises(AssertionError, match="Target column f5_ml_result contains 1 NaN values"):
+        assert_training_data_is_complete(output_path)
+
+
+def test_assert_training_data_is_complete_rejects_non_regular_games(tmp_path: Path) -> None:
+    output_path = tmp_path / "training_data_with_postseason_row.parquet"
+    fixture = _write_cached_training_validation_fixture(output_path)
+    fixture.loc[0, "game_type"] = "F"
+    fixture.to_parquet(output_path, index=False)
+
+    with pytest.raises(AssertionError, match="Found non-regular game types: {'F': 1}"):
+        assert_training_data_is_complete(output_path)

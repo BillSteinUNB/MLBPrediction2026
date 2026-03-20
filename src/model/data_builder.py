@@ -144,6 +144,17 @@ class TrainingDataBuildResult:
     effective_years: tuple[int, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class TrainingDataCompletenessSummary:
+    row_count: int
+    expected_row_range: tuple[int, int]
+    row_count_in_expected_range: bool
+    target_null_counts: dict[str, int]
+    game_type_counts: dict[str, int]
+    non_regular_game_types: dict[str, int]
+    seasons: tuple[int, ...]
+
+
 def resolve_training_years(
     *,
     start_year: int,
@@ -316,6 +327,89 @@ def build_training_dataset(
         requested_years=requested_years,
         effective_years=effective_years,
     )
+
+
+def summarize_training_data_completeness(
+    source: pd.DataFrame | str | Path,
+    *,
+    min_rows: int = 16_500,
+    max_rows: int = 17_500,
+) -> TrainingDataCompletenessSummary:
+    """Summarize cached training-data completeness checks without rebuilding live data."""
+
+    if min_rows > max_rows:
+        raise ValueError("min_rows must be less than or equal to max_rows")
+
+    dataframe = _coerce_training_data_source(source)
+    required_columns = {"season", "game_type", "f5_ml_result", "f5_rl_result"}
+    missing_columns = sorted(required_columns.difference(dataframe.columns))
+    if missing_columns:
+        raise ValueError(
+            "Training data source is missing required columns: " + ", ".join(missing_columns)
+        )
+
+    row_count = int(len(dataframe))
+    target_null_counts = {
+        column: int(pd.to_numeric(dataframe[column], errors="coerce").isna().sum())
+        for column in ("f5_ml_result", "f5_rl_result")
+    }
+    game_type_counts = {
+        str(game_type): int(count)
+        for game_type, count in dataframe["game_type"].fillna("<missing>").value_counts().items()
+    }
+    non_regular_game_types = {
+        game_type: count for game_type, count in game_type_counts.items() if game_type != "R"
+    }
+    seasons = tuple(
+        sorted(
+            {
+                int(season)
+                for season in pd.to_numeric(dataframe["season"], errors="coerce").dropna().tolist()
+            }
+        )
+    )
+
+    return TrainingDataCompletenessSummary(
+        row_count=row_count,
+        expected_row_range=(min_rows, max_rows),
+        row_count_in_expected_range=min_rows <= row_count <= max_rows,
+        target_null_counts=target_null_counts,
+        game_type_counts=game_type_counts,
+        non_regular_game_types=non_regular_game_types,
+        seasons=seasons,
+    )
+
+
+def assert_training_data_is_complete(
+    source: pd.DataFrame | str | Path,
+    *,
+    min_rows: int = 16_500,
+    max_rows: int = 17_500,
+) -> TrainingDataCompletenessSummary:
+    """Assert cached training data satisfies the VAL-DATA-006 completeness contract."""
+
+    summary = summarize_training_data_completeness(
+        source,
+        min_rows=min_rows,
+        max_rows=max_rows,
+    )
+    errors: list[str] = []
+    if not summary.row_count_in_expected_range:
+        errors.append(
+            f"Row count {summary.row_count} outside expected range {min_rows}-{max_rows}"
+        )
+
+    for column, null_count in summary.target_null_counts.items():
+        if null_count:
+            errors.append(f"Target column {column} contains {null_count} NaN values")
+
+    if summary.non_regular_game_types:
+        errors.append(f"Found non-regular game types: {summary.non_regular_game_types}")
+
+    if errors:
+        raise AssertionError("; ".join(errors))
+
+    return summary
 
 
 def assert_training_data_is_leakage_free(dataframe: pd.DataFrame) -> None:
@@ -1004,6 +1098,14 @@ def _coerce_dataframe(value: Any) -> pd.DataFrame:
     if isinstance(value, pd.DataFrame):
         return value.copy()
     return pd.DataFrame()
+
+
+def _coerce_training_data_source(source: pd.DataFrame | str | Path) -> pd.DataFrame:
+    if isinstance(source, pd.DataFrame):
+        return source.copy()
+    if isinstance(source, (str, Path)):
+        return pd.read_parquet(Path(source))
+    raise TypeError("source must be a pandas DataFrame or parquet path")
 
 
 def _empty_lineups_fetcher(_game_date: str | date | datetime) -> list[Lineup]:
