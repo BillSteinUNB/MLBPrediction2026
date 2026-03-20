@@ -11,7 +11,11 @@ from src.db import init_db
 from src.models.lineup import Lineup, LineupPlayer
 from src.models.odds import OddsSnapshot
 from src.models.prediction import Prediction
-from src.pipeline.daily import PipelineDependencies, run_daily_pipeline
+from src.pipeline.daily import (
+    PipelineDependencies,
+    _default_feature_frame_builder,
+    run_daily_pipeline,
+)
 
 
 class _RecordingPredictionEngine:
@@ -427,3 +431,86 @@ def test_run_daily_pipeline_sends_drawdown_alert_when_kill_switch_is_active(tmp_
 
     assert stored_reason == "kill-switch active"
     assert bet_count == 0
+
+
+def test_default_feature_frame_builder_uses_live_feature_assembly_output(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db_path = init_db(tmp_path / "live_builder.db")
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO features (game_pk, feature_name, feature_value, window_size, as_of_timestamp)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (1001, "home_team_woba_7g", -999.0, 7, "2025-09-14T00:00:00+00:00"),
+        )
+        connection.commit()
+
+    schedule = _schedule_frame(game_pks=[1001])
+    historical_games = pd.DataFrame(
+        [
+            {
+                "game_pk": 999,
+                "season": 2025,
+                "game_date": "2025-09-14",
+                "scheduled_start": "2025-09-14T23:05:00+00:00",
+                "home_team": "NYY",
+                "away_team": "BOS",
+                "home_starter_id": 1999,
+                "away_starter_id": 2999,
+                "venue": "Stadium 0",
+                "is_dome": False,
+                "is_abs_active": True,
+                "park_runs_factor": 1.02,
+                "park_hr_factor": 1.01,
+                "game_type": "R",
+                "status": "final",
+                "f5_home_score": 2,
+                "f5_away_score": 1,
+                "final_home_score": 4,
+                "final_away_score": 3,
+            }
+        ]
+    )
+    fresh_frame = pd.DataFrame(
+        [
+            {
+                "game_pk": 1001,
+                "season": 2025,
+                "game_date": "2025-09-15",
+                "scheduled_start": "2025-09-15T18:05:00+00:00",
+                "as_of_timestamp": "2025-09-14T00:00:00+00:00",
+                "home_team": "NYY",
+                "away_team": "BOS",
+                "venue": "Stadium 1",
+                "game_type": "R",
+                "status": "scheduled",
+                "home_team_woba_7g": 0.612,
+                "weather_data_missing": 0.0,
+            }
+        ]
+    )
+    captured: dict[str, object] = {}
+
+    def _fake_build_live_feature_frame(**kwargs: object) -> pd.DataFrame:
+        captured.update(kwargs)
+        return fresh_frame.copy()
+
+    monkeypatch.setattr("src.pipeline.daily.build_live_feature_frame", _fake_build_live_feature_frame)
+
+    frame = _default_feature_frame_builder(
+        target_date=datetime(2025, 9, 15, tzinfo=UTC).date(),
+        schedule=schedule,
+        historical_games=historical_games,
+        lineups=_make_lineups([1001]),
+        db_path=db_path,
+        weather_fetcher=lambda *_args, **_kwargs: None,
+    )
+
+    assert frame["game_pk"].tolist() == [1001]
+    assert frame.iloc[0]["home_team_woba_7g"] == 0.612
+    assert frame.iloc[0]["home_team_woba_7g"] != -999.0
+    assert captured["historical_games"].equals(historical_games)
+    assert captured["lineups"] == _make_lineups([1001])

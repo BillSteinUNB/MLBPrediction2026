@@ -23,18 +23,14 @@ from src.engine.edge_calculator import calculate_edge
 from src.engine.settlement import settle_game_bets
 from src.features.adjustments.abs_adjustment import is_abs_active
 from src.features.adjustments.park_factors import get_park_factors
-from src.features.baselines import compute_baseline_features
 from src.model.calibration import CalibratedStackingModel
 from src.model.data_builder import (
     _default_feature_fill_value,
     _fetch_regular_season_schedule,
-    _fill_missing_feature_values,
-    _load_feature_frame,
     _normalize_game_status,
     _normalize_team_code,
     _prepare_schedule_frame,
-    _resolve_weather_features,
-    _schedule_adjustment_features,
+    build_live_feature_frame,
 )
 from src.model.xgboost_trainer import DEFAULT_MODEL_OUTPUT_DIR
 from src.models.bet import BetDecision
@@ -512,63 +508,15 @@ def _default_feature_frame_builder(
     db_path: str | Path,
     weather_fetcher: Callable[..., Any] | None,
 ) -> pd.DataFrame:
-    del historical_games
     database_path = Path(db_path)
-    del lineups
-
-    try:
-        compute_baseline_features(target_date.isoformat(), db_path=database_path)
-    except Exception:
-        logger.warning("baseline feature step failed; continuing with defaults", exc_info=True)
-
-    feature_frame = _load_feature_frame(database_path)
-    feature_lookup = (
-        feature_frame.set_index("game_pk")
-        if not feature_frame.empty and "game_pk" in feature_frame.columns
-        else pd.DataFrame(index=pd.Index([], name="game_pk"))
+    return build_live_feature_frame(
+        target_date=target_date,
+        schedule=schedule,
+        historical_games=historical_games,
+        db_path=database_path,
+        lineups=lineups,
+        weather_fetcher=weather_fetcher,
     )
-
-    rows: list[dict[str, Any]] = []
-    for game in schedule.to_dict(orient="records"):
-        game_pk = int(game["game_pk"])
-        scheduled_start = _coerce_timestamp(game["scheduled_start"]).isoformat()
-        row: dict[str, Any] = {
-            "game_pk": game_pk,
-            "season": int(game["season"]),
-            "game_date": str(game["game_date"]),
-            "scheduled_start": scheduled_start,
-            "as_of_timestamp": datetime.combine(
-                target_date - timedelta(days=1),
-                time.min,
-                tzinfo=UTC,
-            ).isoformat(),
-            "home_team": str(game["home_team"]),
-            "away_team": str(game["away_team"]),
-            "venue": str(game["venue"]),
-            "game_type": str(game.get("game_type", "R")),
-            "status": str(game.get("status", "scheduled")),
-        }
-        row.update(_schedule_adjustment_features(game))
-        row.update(
-            _resolve_weather_features(
-                game,
-                database_path=database_path,
-                weather_fetcher=weather_fetcher,
-            )
-        )
-
-        if game_pk in feature_lookup.index:
-            feature_values = feature_lookup.loc[game_pk]
-            if isinstance(feature_values, pd.DataFrame):
-                feature_values = feature_values.iloc[-1]
-            for feature_name, feature_value in feature_values.items():
-                if pd.notna(feature_value):
-                    row[str(feature_name)] = float(feature_value)
-
-        rows.append(row)
-
-    inference_frame = pd.DataFrame(rows)
-    return _fill_missing_feature_values(inference_frame)
 
 
 def _parse_schedule_game(game: dict[str, Any]) -> dict[str, Any] | None:

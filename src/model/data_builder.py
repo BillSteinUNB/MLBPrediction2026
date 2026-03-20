@@ -24,7 +24,7 @@ from src.clients.statcast_client import (
 )
 from src.clients.weather_client import _get_default_weather, fetch_game_weather
 from src.config import _load_settings_yaml
-from src.db import init_db
+from src.db import DEFAULT_DB_PATH, init_db
 from src.features.adjustments.abs_adjustment import (
     DEFAULT_STRIKEOUT_RATE_DELTA,
     DEFAULT_WALK_RATE_DELTA,
@@ -329,6 +329,81 @@ def build_training_dataset(
     )
 
 
+def build_live_feature_frame(
+    *,
+    target_date: str | date | datetime,
+    schedule: pd.DataFrame,
+    historical_games: pd.DataFrame,
+    db_path: str | Path = DEFAULT_DB_PATH,
+    lineups: Sequence[Lineup] = (),
+    refresh: bool = False,
+    batting_stats_fetcher: SeasonStatsFetcher = fetch_batting_stats,
+    team_logs_fetcher: TeamLogsFetcher = fetch_team_game_logs,
+    fielding_stats_fetcher: SeasonStatsFetcher = fetch_fielding_stats,
+    framing_stats_fetcher: SeasonStatsFetcher = fetch_catcher_framing,
+    start_metrics_fetcher: StartMetricsFetcher | None = None,
+    bullpen_metrics_fetcher: BullpenMetricsFetcher | None = None,
+    weather_fetcher: WeatherFetcher | None = None,
+) -> pd.DataFrame:
+    """Build fresh same-day inference features without relying on persisted feature rows."""
+
+    target_day = _coerce_date(target_date)
+    prepared_schedule = _prepare_schedule_frame(schedule, require_final_scores=False)
+    prepared_schedule = prepared_schedule.loc[
+        pd.to_datetime(prepared_schedule["scheduled_start"], utc=True).dt.date == target_day
+    ].reset_index(drop=True)
+    if prepared_schedule.empty:
+        return pd.DataFrame(columns=["game_pk"])
+
+    prepared_history = _prepare_schedule_frame(historical_games)
+    prepared_history = prepared_history.loc[
+        pd.to_datetime(prepared_history["scheduled_start"], utc=True).dt.date < target_day
+    ].reset_index(drop=True)
+
+    lineup_list = list(lineups)
+    lineup_player_ids = _lineup_player_ids_by_game_team(lineup_list)
+
+    temp_fd, temp_db_name = tempfile.mkstemp(prefix="live_inference_", suffix=".db")
+    os.close(temp_fd)
+    working_db_path = Path(temp_db_name)
+    try:
+        working_db_path = init_db(working_db_path)
+        combined_schedule = pd.concat(
+            [prepared_history, prepared_schedule],
+            ignore_index=True,
+        )
+        if not combined_schedule.empty:
+            _seed_games_table(working_db_path, combined_schedule)
+
+        _compute_feature_modules(
+            prepared_schedule,
+            database_path=working_db_path,
+            refresh=refresh,
+            batting_stats_fetcher=batting_stats_fetcher,
+            fielding_stats_fetcher=fielding_stats_fetcher,
+            framing_stats_fetcher=framing_stats_fetcher,
+            team_logs_fetcher=team_logs_fetcher,
+            lineup_fetcher=_static_lineup_fetcher(target_day, lineup_list),
+            start_metrics_fetcher=start_metrics_fetcher,
+            bullpen_metrics_fetcher=bullpen_metrics_fetcher,
+            lineup_player_ids_by_date={target_day.isoformat(): lineup_player_ids},
+        )
+
+        feature_frame = _load_feature_frame(working_db_path)
+    finally:
+        try:
+            working_db_path.unlink(missing_ok=True)
+        except PermissionError:
+            pass
+
+    return _assemble_inference_rows(
+        prepared_schedule,
+        feature_frame=feature_frame,
+        weather_database_path=Path(db_path),
+        weather_fetcher=weather_fetcher,
+    )
+
+
 def summarize_training_data_completeness(
     source: pd.DataFrame | str | Path,
     *,
@@ -515,7 +590,11 @@ def _schedule_game_to_row(game: Mapping[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def _prepare_schedule_frame(dataframe: pd.DataFrame) -> pd.DataFrame:
+def _prepare_schedule_frame(
+    dataframe: pd.DataFrame,
+    *,
+    require_final_scores: bool = True,
+) -> pd.DataFrame:
     if dataframe.empty:
         return pd.DataFrame(
             columns=[
@@ -596,23 +675,29 @@ def _prepare_schedule_frame(dataframe: pd.DataFrame) -> pd.DataFrame:
         "park_runs_factor",
         "park_hr_factor",
     ):
+        if column not in schedule.columns:
+            schedule[column] = pd.Series(pd.NA, index=schedule.index)
         schedule[column] = pd.to_numeric(schedule[column], errors="coerce")
 
     schedule["is_dome"] = schedule["is_dome"].astype(bool)
     schedule["is_abs_active"] = schedule["is_abs_active"].astype(bool)
-    schedule = schedule.dropna(
-        subset=[
-            "game_pk",
-            "season",
-            "scheduled_start",
-            "home_team",
-            "away_team",
-            "f5_home_score",
-            "f5_away_score",
-            "final_home_score",
-            "final_away_score",
-        ]
-    ).copy()
+    required_columns = [
+        "game_pk",
+        "season",
+        "scheduled_start",
+        "home_team",
+        "away_team",
+    ]
+    if require_final_scores:
+        required_columns.extend(
+            [
+                "f5_home_score",
+                "f5_away_score",
+                "final_home_score",
+                "final_away_score",
+            ]
+        )
+    schedule = schedule.dropna(subset=required_columns).copy()
     schedule["game_pk"] = schedule["game_pk"].astype(int)
     schedule["season"] = schedule["season"].astype(int)
     schedule["game_date"] = schedule["game_date"].dt.date.astype(str)
@@ -697,10 +782,10 @@ def _seed_games_table(database_path: Path, schedule: pd.DataFrame) -> None:
             str(game["venue"]),
             int(bool(game["is_dome"])),
             int(bool(game["is_abs_active"])),
-            int(game["f5_home_score"]),
-            int(game["f5_away_score"]),
-            int(game["final_home_score"]),
-            int(game["final_away_score"]),
+            _coerce_int(game.get("f5_home_score")),
+            _coerce_int(game.get("f5_away_score")),
+            _coerce_int(game.get("final_home_score")),
+            _coerce_int(game.get("final_away_score")),
             _normalize_game_status(game.get("status")),
         )
         for game in schedule.to_dict(orient="records")
@@ -829,6 +914,63 @@ def _assemble_training_rows(
 
     dataset = pd.DataFrame(rows).sort_values(["scheduled_start", "game_pk"]).reset_index(drop=True)
     return _fill_missing_feature_values(dataset)
+
+
+def _assemble_inference_rows(
+    schedule: pd.DataFrame,
+    *,
+    feature_frame: pd.DataFrame,
+    weather_database_path: Path,
+    weather_fetcher: WeatherFetcher | None,
+) -> pd.DataFrame:
+    feature_lookup = (
+        feature_frame.set_index("game_pk")
+        if not feature_frame.empty and "game_pk" in feature_frame.columns
+        else pd.DataFrame(index=pd.Index([], name="game_pk"))
+    )
+    rows: list[dict[str, Any]] = []
+
+    for game in schedule.to_dict(orient="records"):
+        game_pk = int(game["game_pk"])
+        game_start = pd.Timestamp(game["scheduled_start"])
+        if game_start.tzinfo is None:
+            game_start = game_start.tz_localize("UTC")
+        else:
+            game_start = game_start.tz_convert("UTC")
+
+        row: dict[str, Any] = {
+            "game_pk": game_pk,
+            "season": int(game["season"]),
+            "game_date": str(game["game_date"]),
+            "scheduled_start": game_start.isoformat(),
+            "as_of_timestamp": (game_start.normalize() - pd.Timedelta(days=1)).isoformat(),
+            "home_team": str(game["home_team"]),
+            "away_team": str(game["away_team"]),
+            "venue": str(game["venue"]),
+            "game_type": str(game.get("game_type", "R")),
+            "status": _normalize_game_status(game.get("status")),
+        }
+        row.update(_schedule_adjustment_features(game))
+        row.update(
+            _resolve_weather_features(
+                game,
+                database_path=weather_database_path,
+                weather_fetcher=weather_fetcher,
+            )
+        )
+
+        if game_pk in feature_lookup.index:
+            feature_values = feature_lookup.loc[game_pk]
+            if isinstance(feature_values, pd.DataFrame):
+                feature_values = feature_values.iloc[-1]
+            for feature_name, feature_value in feature_values.items():
+                if pd.notna(feature_value):
+                    row[str(feature_name)] = float(feature_value)
+
+        rows.append(row)
+
+    inference_frame = pd.DataFrame(rows).sort_values(["scheduled_start", "game_pk"]).reset_index(drop=True)
+    return _fill_missing_feature_values(inference_frame)
 
 
 def _schedule_adjustment_features(game: Mapping[str, Any]) -> dict[str, float]:
@@ -961,12 +1103,39 @@ def _normalize_lineup_player_ids_by_date(
     return normalized
 
 
+def _lineup_player_ids_by_game_team(lineups: Sequence[Lineup]) -> dict[tuple[int, str], list[int]]:
+    lookup: dict[tuple[int, str], list[int]] = {}
+    for lineup in lineups:
+        player_ids = [player.player_id for player in lineup.players]
+        lookup[(lineup.game_pk, lineup.team)] = player_ids
+    return lookup
+
+
+def _static_lineup_fetcher(target_day: date, lineups: Sequence[Lineup]) -> LineupFetcher:
+    cached_lineups = list(lineups)
+
+    def fetcher(game_date: str | date | datetime) -> list[Lineup]:
+        if _normalize_lookup_date(game_date) != target_day.isoformat():
+            return []
+        return list(cached_lineups)
+
+    return fetcher
+
+
 def _normalize_lookup_date(value: str | date | datetime) -> str:
     if isinstance(value, datetime):
         return value.date().isoformat()
     if isinstance(value, date):
         return value.isoformat()
     return str(value)
+
+
+def _coerce_date(value: str | date | datetime) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(value)
 
 
 def _normalize_scheduled_start_before(value: str | date | datetime) -> pd.Timestamp:

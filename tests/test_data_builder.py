@@ -34,6 +34,7 @@ from src.model.data_builder import (
     _fill_missing_feature_values,
     assert_training_data_is_complete,
     assert_training_data_is_leakage_free,
+    build_live_feature_frame,
     build_training_dataset,
     resolve_training_years,
 )
@@ -656,6 +657,106 @@ def test_build_training_dataset_uses_live_weather_fetcher_by_default(
     assert target_row["weather_rain_risk"] == pytest.approx(expected_weather.rain_risk)
     assert target_row["weather_composite"] == pytest.approx(expected_weather.weather_composite)
     assert target_row["weather_data_missing"] == 0.0
+
+
+def test_build_live_feature_frame_recomputes_same_day_features_and_ignores_stale_rows(
+    tmp_path: Path,
+) -> None:
+    current_schedule = pd.DataFrame(
+        [
+            _schedule_row(
+                4002,
+                "2025-04-10T23:05:00Z",
+                "NYY",
+                "BOS",
+                "Yankee Stadium",
+                status="scheduled",
+                f5_home_score=0,
+                f5_away_score=0,
+                final_home_score=0,
+                final_away_score=0,
+            )
+        ]
+    )
+    historical_games = pd.DataFrame(
+        [
+            _schedule_row(
+                4001,
+                "2025-04-08T23:05:00Z",
+                "NYY",
+                "BOS",
+                "Yankee Stadium",
+                f5_home_score=2,
+                f5_away_score=1,
+                final_home_score=5,
+                final_away_score=3,
+            )
+        ]
+    )
+    team_logs = _team_logs_by_season()
+    start_metrics = _start_metrics_by_season()
+    fielding = _fielding_by_season()
+    framing = _framing_by_season()
+    bullpen_metrics = _bullpen_metrics_by_season()
+
+    direct_db_path = tmp_path / "direct_live_modules.db"
+    _seed_schedule(
+        direct_db_path,
+        pd.concat([historical_games, current_schedule], ignore_index=True),
+    )
+    expected_feature_values = _direct_module_feature_values(
+        db_path=direct_db_path,
+        target_date="2025-04-10",
+        team_logs=team_logs,
+        start_metrics=start_metrics,
+        fielding=fielding,
+        framing=framing,
+        bullpen_metrics=bullpen_metrics,
+    )
+
+    live_db_path = init_db(tmp_path / "live_pipeline.db")
+    with sqlite3.connect(live_db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO features (game_pk, feature_name, feature_value, window_size, as_of_timestamp)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (4002, "home_team_woba_7g", -999.0, 7, "2025-04-01T00:00:00+00:00"),
+        )
+        connection.commit()
+
+    frame = build_live_feature_frame(
+        target_date="2025-04-10",
+        schedule=current_schedule,
+        historical_games=historical_games,
+        db_path=live_db_path,
+        lineups=[],
+        weather_fetcher=_fake_weather_fetcher,
+        batting_stats_fetcher=lambda *_args, **_kwargs: pd.DataFrame(),
+        team_logs_fetcher=_fake_team_logs_fetcher(team_logs),
+        fielding_stats_fetcher=_fake_fielding_fetcher(fielding),
+        framing_stats_fetcher=_fake_framing_fetcher(framing),
+        start_metrics_fetcher=_fake_start_metrics_fetcher(start_metrics),
+        bullpen_metrics_fetcher=_fake_bullpen_metrics_fetcher(bullpen_metrics),
+    )
+
+    assert frame["game_pk"].tolist() == [4002]
+    target_row = frame.iloc[0]
+    assert target_row["as_of_timestamp"] == "2025-04-09T00:00:00+00:00"
+    assert target_row["home_team_woba_7g"] == pytest.approx(expected_feature_values["home_team_woba_7g"])
+    assert target_row["home_team_woba_7g"] != -999.0
+    assert target_row["home_starter_xfip_7s"] == pytest.approx(
+        expected_feature_values["home_starter_xfip_7s"]
+    )
+    assert target_row["home_team_drs_season"] == pytest.approx(
+        expected_feature_values["home_team_drs_season"]
+    )
+    assert target_row["home_team_bullpen_xfip"] == pytest.approx(
+        expected_feature_values["home_team_bullpen_xfip"]
+    )
+    assert target_row["home_team_log5_30g"] == pytest.approx(
+        expected_feature_values["home_team_log5_30g"]
+    )
 
 
 def test_fill_missing_feature_values_uses_module_defaults_instead_of_dataset_means() -> None:
