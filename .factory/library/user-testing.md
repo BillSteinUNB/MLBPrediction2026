@@ -27,6 +27,13 @@ This is a batch processing system with no web UI. Validation is performed via:
 - On Windows, prefer the manifest's `init_windows` flow over invoking `bash .factory/init.sh` directly; the bash script can fail to find `pip` on PATH even when the repo virtualenv already exists.
 - Current repo snapshot does not include `src/pipeline/daily.py` or `src/backtest/run.py`, so `VAL-CROSS-004` cannot be exercised through a real backtest-vs-production CLI comparison during feature-engineering user testing.
 
+### ML-Pipeline Milestone Setup Notes
+
+- No long-running services are required for validation.
+- `tests/test_data_builder.py`, `tests/test_xgboost_trainer.py`, `tests/test_stacking.py`, `tests/test_calibration.py`, and `tests/test_walk_forward.py` are the primary targeted pytest surfaces for this milestone.
+- On 2026-03-20, a live `build_training_dataset(start_year=2025, end_year=2025)` probe failed at the external `pybaseball.team_game_logs` / Baseball Reference scrape boundary with `Table with expected id not found on scraped page`; when that boundary is down, anti-leakage can still be validated through the real builder import using fixture-backed fetchers, but full row-count/completeness validation remains blocked until the scrape recovers.
+- Model-training and walk-forward CLI validation can run fully isolated against deterministic synthetic training parquet inputs under `.factory/validation/ml-pipeline/user-testing/work/`.
+
 ### Validation Tools
 
 | Tool | Surface | Usage |

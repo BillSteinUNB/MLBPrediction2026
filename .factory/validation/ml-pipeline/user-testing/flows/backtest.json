@@ -1,0 +1,97 @@
+{
+  "groupId": "backtest",
+  "surface": "CLI",
+  "status": "pass",
+  "assertions": [
+    {
+      "id": "VAL-BACKTEST-001",
+      "status": "pass",
+      "reason": "The real CLI wrote a per-window metrics CSV for 3 monthly windows, and the window boundaries show a 6-month train span with a 1-month test span for each window.",
+      "evidence": [
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\backtest\\cli_window_metrics_excerpt.csv",
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\backtest\\cli_verification_summary.json",
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\backtest\\pytest_walk_forward_terminal.txt",
+        "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\backtest\\run_a\\walk_forward_windows_20220101_20220301.csv"
+      ]
+    },
+    {
+      "id": "VAL-BACKTEST-002",
+      "status": "pass",
+      "reason": "Both CLI runs reported aggregate_brier_score 0.13945811148529827, which is comfortably below the <0.25 threshold.",
+      "evidence": [
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\backtest\\cli_verification_summary.json",
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\backtest\\cli_run_a_terminal.txt",
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\backtest\\cli_run_b_terminal.txt",
+        "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\backtest\\run_a\\walk_forward_summary_20220101_20220301.json"
+      ]
+    },
+    {
+      "id": "VAL-BACKTEST-003",
+      "status": "pass",
+      "reason": "Repeated CLI runs with identical parameters produced the same output_fingerprint and byte-identical predictions/window-metrics CSV files.",
+      "evidence": [
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\backtest\\cli_verification_summary.json",
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\backtest\\cli_run_a_terminal.txt",
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\backtest\\cli_run_b_terminal.txt",
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\backtest\\pytest_walk_forward_terminal.txt"
+      ]
+    },
+    {
+      "id": "VAL-BACKTEST-004",
+      "status": "pass",
+      "reason": "The CLI predictions show every as_of_timestamp is before scheduled_start, the per-window cutoff timestamps are 2022-02-01/2022-03-01/2022-04-01, and targeted pytest coverage passed for the rebuild path that records those monthly feature-data cutoffs with action=rebuild.",
+      "evidence": [
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\backtest\\cli_prediction_leakage_excerpt.csv",
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\backtest\\cli_window_metrics_excerpt.csv",
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\backtest\\cli_verification_summary.json",
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\backtest\\pytest_walk_forward_terminal.txt"
+      ]
+    }
+  ],
+  "commandsRun": [
+    {
+      "command": "& \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe\" \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\backtest\\generate_synthetic_backtest_data.py\"",
+      "exitCode": 0,
+      "observation": "Created deterministic synthetic_training_data.parquet with 180 rows spanning 2021-07-01 through 2022-06-24; summary confirms every as_of_timestamp is before scheduled_start."
+    },
+    {
+      "command": "Set-Location \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\"; & \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe\" -m pytest \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\tests\\test_walk_forward.py\" -v --tb=short",
+      "exitCode": 0,
+      "observation": "All 5 targeted walk-forward tests passed, covering six-month/one-month windows, byte reproducibility, rebuild cutoffs, calibration default parity, and CLI default behavior."
+    },
+    {
+      "command": "Set-Location \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\"; & \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe\" -m src.backtest.run --start 2022-01-01 --end 2022-03-31 --training-data \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\backtest\\synthetic_training_data.parquet\" --output-dir \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\backtest\\run_a\" --calibration-fraction 0.15 --max-depth 1 --n-estimators 8 --learning-rate 0.2",
+      "exitCode": 0,
+      "observation": "Run A completed with window_count=3, aggregate_brier_score=0.13945811148529827, total_bets=45, and output_fingerprint=b75d41bc609e9d9f19d8f2746810dfb45792b723de8e58477362dcb2b3aafd51."
+    },
+    {
+      "command": "Set-Location \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\"; & \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe\" -m src.backtest.run --start 2022-01-01 --end 2022-03-31 --training-data \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\backtest\\synthetic_training_data.parquet\" --output-dir \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\backtest\\run_b\" --calibration-fraction 0.15 --max-depth 1 --n-estimators 8 --learning-rate 0.2",
+      "exitCode": 0,
+      "observation": "Run B matched Run A exactly on aggregate_brier_score, window_count, total_bets, and output_fingerprint."
+    },
+    {
+      "command": "& \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe\" \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\backtest\\summarize_backtest_validation.py\"",
+      "exitCode": 0,
+      "observation": "Generated concise verification snippets showing 6-month/1-month window shapes, aggregate Brier 0.13945811148529827, matching fingerprints, byte-identical CSV outputs, and all as_of_timestamp values preceding scheduled_start."
+    }
+  ],
+  "toolsUsed": [
+    "pytest",
+    "python"
+  ],
+  "frictions": [
+    {
+      "description": "The optional tuistory terminal-capture tool was not installed on PATH in this environment.",
+      "resolution": "Captured CLI evidence through PowerShell Tee-Object terminal logs under the assigned evidence directory instead."
+    }
+  ],
+  "blockers": [],
+  "artifacts": {
+    "trainingData": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\backtest\\synthetic_training_data.parquet",
+    "outputDirs": [
+      "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\backtest\\run_a",
+      "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\backtest\\run_b"
+    ],
+    "evidenceDir": "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\backtest"
+  }
+}

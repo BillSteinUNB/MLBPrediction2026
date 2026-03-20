@@ -1,0 +1,121 @@
+{
+  "groupId": "model-training",
+  "surface": "CLI",
+  "status": "pass",
+  "assertions": [
+    {
+      "id": "VAL-MODEL-001",
+      "status": "pass",
+      "reason": "Temporal CV uses sklearn TimeSeriesSplit and the targeted pytest verified every fold keeps train indices strictly before test indices.",
+      "evidence": [
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\model-training\\source_model_cv_oof_quality_snippets.txt",
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\model-training\\pytest_model_training_coverage.txt",
+        "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\model-training\\xgboost-cli-run\\training_run_20260320T022619Z_syntheti.json"
+      ]
+    },
+    {
+      "id": "VAL-MODEL-002",
+      "status": "pass",
+      "reason": "The XGBoost CLI trained separate versioned F5 ML and F5 RL joblib artifacts and recorded distinct target columns in the training summary.",
+      "evidence": [
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\model-training\\artifact_inventory.json",
+        "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\model-training\\xgboost-cli-run\\training_run_20260320T022619Z_syntheti.json",
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\model-training\\xgboost_cli_output.txt"
+      ]
+    },
+    {
+      "id": "VAL-MODEL-003",
+      "status": "pass",
+      "reason": "Stacking generates temporal out-of-fold probabilities with cross_val_predict, records that strategy in metadata, and the targeted pytest covering OOF stacking passed.",
+      "evidence": [
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\model-training\\source_model_cv_oof_quality_snippets.txt",
+        "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\model-training\\stacking-cli-run\\stacking_run_20260320T022627Z_syntheti.json",
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\model-training\\pytest_model_training_coverage.txt",
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\model-training\\stacking_cli_output.txt"
+      ]
+    },
+    {
+      "id": "VAL-MODEL-004",
+      "status": "pass",
+      "reason": "Isotonic calibration on the CLI holdout achieved calibrated_brier=0 for F5 ML and 9.60004e-10 for F5 RL, both well below 0.25.",
+      "evidence": [
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\model-training\\calibration_quality_summary.json",
+        "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\model-training\\calibration-cli-run\\f5_ml_calibrated_model_20260320T022638Z_syntheti.metadata.json",
+        "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\model-training\\calibration-cli-run\\f5_rl_calibrated_model_20260320T022638Z_syntheti.metadata.json"
+      ]
+    },
+    {
+      "id": "VAL-MODEL-005",
+      "status": "pass",
+      "reason": "CLI calibration holdout ECE was 0 for F5 ML and 6.92822e-06 for F5 RL, both below the 0.05 gate.",
+      "evidence": [
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\model-training\\calibration_quality_summary.json",
+        "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\model-training\\calibration-cli-run\\f5_ml_calibrated_model_20260320T022638Z_syntheti.metadata.json",
+        "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\model-training\\calibration-cli-run\\f5_rl_calibrated_model_20260320T022638Z_syntheti.metadata.json"
+      ]
+    },
+    {
+      "id": "VAL-MODEL-006",
+      "status": "pass",
+      "reason": "The reliability diagram data was recorded in calibration metadata and max_reliability_gap was 0 for F5 ML and 1.38564e-05 for F5 RL, satisfying the <= 0.05 gate.",
+      "evidence": [
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\model-training\\calibration_quality_summary.json",
+        "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\model-training\\calibration-cli-run\\f5_ml_calibrated_model_20260320T022638Z_syntheti.metadata.json",
+        "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\model-training\\calibration-cli-run\\f5_rl_calibrated_model_20260320T022638Z_syntheti.metadata.json"
+      ]
+    }
+  ],
+  "commandsRun": [
+    {
+      "command": "\"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe\" -m pytest tests/test_xgboost_trainer.py tests/test_stacking.py tests/test_calibration.py -v --tb=short --cov=src.model.xgboost_trainer --cov=src.model.stacking --cov=src.model.calibration --cov-report=term-missing",
+      "exitCode": 0,
+      "observation": "16 targeted model tests passed; combined coverage was 90% and the temporal CV, OOF stacking, and calibration gate tests all passed."
+    },
+    {
+      "command": "\"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe\" \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\model-training\\generate_synthetic_training_data.py\" --output \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\model-training\\synthetic_training_data.parquet\"",
+      "exitCode": 0,
+      "observation": "Generated deterministic synthetic parquet with 240 rows (180 train-season rows, 60 holdout-season rows)."
+    },
+    {
+      "command": "\"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe\" -m src.model.xgboost_trainer --training-data \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\model-training\\synthetic_training_data.parquet\" --output-dir \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\model-training\\xgboost-cli-run\" --holdout-season 2025 --time-series-splits 4 --search-iterations 1 --random-state 23",
+      "exitCode": 0,
+      "observation": "Saved versioned f5_ml_model and f5_rl_model joblib files with holdout accuracy=1.000/1.000 and log_loss=0.011177/0.011177."
+    },
+    {
+      "command": "\"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe\" -m src.model.stacking --training-data \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\model-training\\synthetic_training_data.parquet\" --output-dir \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\model-training\\stacking-cli-run\" --holdout-season 2025 --time-series-splits 4 --search-iterations 1 --random-state 23",
+      "exitCode": 0,
+      "observation": "Recorded oof_prediction_strategy=cross_val_predict with oof_row_count=144; standalone stacking CLI skipped persistence because the holdout Brier gate rejected regression relative to the base model."
+    },
+    {
+      "command": "\"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe\" -m src.model.calibration --training-data \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\model-training\\synthetic_training_data.parquet\" --output-dir \"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\model-training\\calibration-cli-run\" --holdout-season 2025 --calibration-fraction 0.1 --calibration-method isotonic --time-series-splits 4 --search-iterations 1 --random-state 23",
+      "exitCode": 0,
+      "observation": "Saved calibrated ML/RL bundles; calibrated_brier=0/9.60004e-10, calibrated_ece=0/6.92822e-06, max_reliability_gap=0/1.38564e-05."
+    }
+  ],
+  "toolsUsed": [
+    "pytest",
+    "python"
+  ],
+  "frictions": [
+    {
+      "description": "PowerShell prefixes Python logging emitted on stderr with a NativeCommandError banner even when the CLI itself exits 0.",
+      "resolved": true,
+      "resolution": "Captured command output to evidence logs and used the process exit code plus persisted artifacts/metadata as the source of truth.",
+      "affectedAssertions": [
+        "VAL-MODEL-002",
+        "VAL-MODEL-003",
+        "VAL-MODEL-004",
+        "VAL-MODEL-005",
+        "VAL-MODEL-006"
+      ]
+    }
+  ],
+  "blockers": [],
+  "artifacts": {
+    "trainingData": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\model-training\\synthetic_training_data.parquet",
+    "xgboostModelDir": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\model-training\\xgboost-cli-run",
+    "stackingModelDir": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\model-training\\stacking-cli-run",
+    "calibrationModelDir": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\model-training\\calibration-cli-run",
+    "evidenceDir": "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\model-training"
+  }
+}

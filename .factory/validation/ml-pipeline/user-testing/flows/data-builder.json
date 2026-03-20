@@ -1,0 +1,61 @@
+{
+  "groupId": "data-builder",
+  "surface": "CLI",
+  "status": "blocked",
+  "assertions": [
+    {
+      "id": "VAL-DATA-004",
+      "status": "pass",
+      "reason": "pytest passed, the live-data build was blocked by upstream Baseball Reference scraping, and the fallback real builder import produced 3 regular-season rows with all as_of_timestamp values strictly before scheduled_start and a prior-day snapshot shared across the same-day doubleheader group.",
+      "evidence": [
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\data-builder\\pytest_test_data_builder.txt",
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\data-builder\\fixture_backed_build_summary.json"
+      ]
+    },
+    {
+      "id": "VAL-DATA-006",
+      "status": "blocked",
+      "reason": "A full real 2019-2025 dataset could not be built because the live 2025 import failed at the Baseball Reference team_game_logs scrape boundary, so row-count and seasonal completeness could not be confirmed.",
+      "evidence": [
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\data-builder\\pytest_test_data_builder.txt",
+        "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\data-builder\\sample_build_error.txt"
+      ]
+    }
+  ],
+  "commandsRun": [
+    {
+      "command": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe -m pytest tests/test_data_builder.py -v --tb=short",
+      "exitCode": 0,
+      "observation": "5 data-builder tests passed in 3.2s, including the real-module anti-leakage and same-day doubleheader regression checks."
+    },
+    {
+      "command": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe -c \"from src.model.data_builder import build_training_dataset; build_training_dataset(start_year=2025, end_year=2025, output_path=r\"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\data-builder\\training_data_2025_sample.parquet\", ... )\"",
+      "exitCode": 1,
+      "observation": "2025 real build failed; see C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\data-builder\\sample_build_error.txt"
+    },
+    {
+      "command": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.venv\\Scripts\\python.exe -c \"from src.model.data_builder import build_training_dataset; build_training_dataset(start_year=2025, end_year=2025, output_path=r\"C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\data-builder\\training_data_doubleheader_fixture.parquet\", schedule_fetcher=<fixture>, ... )\"",
+      "exitCode": 0,
+      "observation": "Built fixture-backed import dataset with 3 rows; doubleheader groups=1 and game_type counts={'R': 3}."
+    }
+  ],
+  "toolsUsed": [
+    "pytest",
+    "python"
+  ],
+  "frictions": [],
+  "blockers": [
+    {
+      "description": "2025 real build failed: Table with expected id not found on scraped page.",
+      "affectedAssertions": [
+        "VAL-DATA-004",
+        "VAL-DATA-006"
+      ],
+      "quickFixAttempted": "Retried via the real builder with isolated raw-data wrappers and deterministic weather injection."
+    }
+  ],
+  "artifacts": {
+    "evidenceDir": "C:\\Users\\bills\\.factory\\missions\\83c0c194-72d1-4821-8b08-68a3497c3590\\evidence\\ml-pipeline\\data-builder",
+    "trainingData": "C:\\Users\\bills\\Documents\\Personal Projects\\MLBPrediction2026\\.factory\\validation\\ml-pipeline\\user-testing\\work\\data-builder\\training_data_doubleheader_fixture.parquet"
+  }
+}
