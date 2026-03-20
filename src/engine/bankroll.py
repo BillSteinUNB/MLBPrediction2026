@@ -13,6 +13,7 @@ from src.db import DEFAULT_DB_PATH, init_db
 from src.engine.edge_calculator import payout_for_american_odds
 from src.models._base import AmericanOdds, BetSide, MarketType, ModelBase, NonNegativeFloat, Probability
 from src.models.bet import BetDecision, BetResult
+from src.ops.performance_tracker import record_bet_placement, record_bet_settlement
 
 
 _SETTINGS_PAYLOAD = _load_settings_yaml()
@@ -273,8 +274,8 @@ def _bet_notes(decision: BetDecision, action: str, extra_notes: str | None) -> s
     return notes
 
 
-def _store_pending_bet(connection: sqlite3.Connection, decision: BetDecision) -> None:
-    connection.execute(
+def _store_pending_bet(connection: sqlite3.Connection, decision: BetDecision) -> int:
+    cursor = connection.execute(
         """
         INSERT INTO bets (game_pk, market_type, side, edge_pct, kelly_stake, odds_at_bet, result)
         VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -289,6 +290,7 @@ def _store_pending_bet(connection: sqlite3.Connection, decision: BetDecision) ->
             BetResult.PENDING.value,
         ),
     )
+    return int(cursor.lastrowid)
 
 
 def _settlement_delta(decision: BetDecision) -> tuple[float, float]:
@@ -313,7 +315,7 @@ def _upsert_settled_bet(
     *,
     decision: BetDecision,
     profit_loss: float,
-) -> None:
+) -> int:
     row = connection.execute(
         """
         SELECT id
@@ -332,7 +334,7 @@ def _upsert_settled_bet(
 
     settled_at = decision.settled_at.isoformat() if decision.settled_at else None
     if row is None:
-        connection.execute(
+        cursor = connection.execute(
             """
             INSERT INTO bets (
                 game_pk,
@@ -359,7 +361,7 @@ def _upsert_settled_bet(
                 profit_loss,
             ),
         )
-        return
+        return int(cursor.lastrowid)
 
     connection.execute(
         """
@@ -382,6 +384,7 @@ def _upsert_settled_bet(
             row[0],
         ),
     )
+    return int(row[0])
 
 
 def _maybe_log_kill_switch(
@@ -511,7 +514,7 @@ def update_bankroll(
             if decision.kelly_stake <= 0:
                 raise ValueError("Placed bets must have a positive kelly_stake")
 
-            _store_pending_bet(resolved_connection, decision)
+            bet_id = _store_pending_bet(resolved_connection, decision)
             updated_balance = max(0.0, current_bankroll - decision.kelly_stake)
             _insert_ledger_event(
                 resolved_connection,
@@ -521,9 +524,21 @@ def update_bankroll(
                 timestamp=normalized_timestamp,
                 notes=_bet_notes(decision, "bet_placed", notes),
             )
+            record_bet_placement(
+                bet_id=bet_id,
+                decision=decision,
+                placed_at=normalized_timestamp,
+                db_path=database_path,
+                connection=resolved_connection,
+                commit=False,
+            )
         else:
             settlement_amount, profit_loss = _settlement_delta(decision)
-            _upsert_settled_bet(resolved_connection, decision=decision, profit_loss=profit_loss)
+            bet_id = _upsert_settled_bet(
+                resolved_connection,
+                decision=decision,
+                profit_loss=profit_loss,
+            )
             updated_balance = current_bankroll + settlement_amount
             _insert_ledger_event(
                 resolved_connection,
@@ -532,6 +547,14 @@ def update_bankroll(
                 running_balance=updated_balance,
                 timestamp=normalized_timestamp,
                 notes=_bet_notes(decision, f"bet_settled:{decision.result.value}", notes),
+            )
+            record_bet_settlement(
+                bet_id=bet_id,
+                decision=decision,
+                profit_loss=profit_loss,
+                db_path=database_path,
+                connection=resolved_connection,
+                commit=False,
             )
 
         _maybe_log_kill_switch(

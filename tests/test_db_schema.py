@@ -38,6 +38,7 @@ def test_init_db_creates_all_required_tables(tmp_path: Path) -> None:
         "predictions",
         "odds_snapshots",
         "bets",
+        "bet_performance",
         "bankroll_ledger",
     }.issubset(tables)
 
@@ -90,6 +91,24 @@ def test_odds_snapshots_has_is_frozen_column(tmp_path: Path) -> None:
     assert is_frozen_default == "0"
 
 
+def test_bet_performance_tracks_market_probability_and_clv_columns(tmp_path: Path) -> None:
+    db_path = tmp_path / "schema.db"
+
+    init_db(db_path)
+
+    performance_columns = _table_columns(db_path, "bet_performance")
+
+    assert performance_columns["bet_id"][0].upper() == "INTEGER"
+    assert performance_columns["bet_id"][1] == 1
+    assert performance_columns["model_probability"][0].upper() == "REAL"
+    assert performance_columns["model_probability"][1] == 1
+    assert performance_columns["market_probability"][0].upper() == "REAL"
+    assert performance_columns["market_probability"][1] == 1
+    assert performance_columns["clv"][0].upper() == "REAL"
+    assert performance_columns["placed_at"][0].upper() == "TEXT"
+    assert performance_columns["placed_at"][1] == 1
+
+
 def test_init_db_tracks_schema_version(tmp_path: Path) -> None:
     db_path = tmp_path / "schema.db"
 
@@ -116,4 +135,4 @@ def test_init_db_is_idempotent(tmp_path: Path) -> None:
         ).fetchone()
 
     assert version_rows == (1,)
-    assert tables == (7,)
+    assert tables == (8,)

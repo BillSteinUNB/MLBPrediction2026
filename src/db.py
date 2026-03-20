@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DEFAULT_DB_PATH = Path("data") / "mlb.db"
 
 
@@ -105,10 +105,38 @@ SCHEMA_STATEMENTS = (
         notes TEXT
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS bet_performance (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bet_id INTEGER NOT NULL UNIQUE,
+        game_pk INTEGER NOT NULL,
+        market_type TEXT NOT NULL CHECK (market_type IN ('f5_ml', 'f5_rl')),
+        side TEXT NOT NULL CHECK (side IN ('home', 'away')),
+        model_probability REAL NOT NULL CHECK (model_probability BETWEEN 0 AND 1),
+        market_probability REAL NOT NULL CHECK (market_probability BETWEEN 0 AND 1),
+        edge_pct REAL NOT NULL,
+        odds_at_bet INTEGER NOT NULL,
+        stake REAL NOT NULL CHECK (stake >= 0),
+        result TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+            result IN ('WIN', 'LOSS', 'PUSH', 'NO_ACTION', 'PENDING')
+        ),
+        profit_loss REAL,
+        closing_odds INTEGER,
+        closing_probability REAL CHECK (
+            closing_probability IS NULL OR (closing_probability BETWEEN 0 AND 1)
+        ),
+        clv REAL,
+        placed_at TEXT NOT NULL,
+        settled_at TEXT,
+        FOREIGN KEY (bet_id) REFERENCES bets (id),
+        FOREIGN KEY (game_pk) REFERENCES games (game_pk)
+    )
+    """,
     "CREATE INDEX IF NOT EXISTS idx_features_game_pk ON features (game_pk)",
     "CREATE INDEX IF NOT EXISTS idx_predictions_game_pk ON predictions (game_pk)",
     "CREATE INDEX IF NOT EXISTS idx_odds_snapshots_game_pk ON odds_snapshots (game_pk)",
     "CREATE INDEX IF NOT EXISTS idx_bets_game_pk ON bets (game_pk)",
+    "CREATE INDEX IF NOT EXISTS idx_bet_performance_game_market ON bet_performance (game_pk, market_type)",
 )
 
 
