@@ -91,6 +91,30 @@ def test_create_walk_forward_windows_uses_six_month_train_and_one_month_test_str
     assert all(window.test_end > window.test_start for window in windows)
 
 
+def test_create_walk_forward_windows_supports_anchored_expanding_mode() -> None:
+    frame = _synthetic_training_frame()
+
+    windows = create_walk_forward_windows(
+        frame,
+        start_date="2022-01-01",
+        end_date="2022-03-31",
+        test_window_months=1,
+        window_mode="anchored_expanding",
+        anchored_train_start="2021-07-01",
+    )
+
+    assert [window.test_start.strftime("%Y-%m-%d") for window in windows] == [
+        "2022-01-01",
+        "2022-02-01",
+        "2022-03-01",
+    ]
+    assert [window.train_start.strftime("%Y-%m-%d") for window in windows] == [
+        "2021-07-01",
+        "2021-07-01",
+        "2021-07-01",
+    ]
+
+
 def test_run_walk_forward_backtest_writes_metrics_and_is_byte_reproducible(tmp_path) -> None:
     frame = _synthetic_training_frame()
 
@@ -126,6 +150,33 @@ def test_run_walk_forward_backtest_writes_metrics_and_is_byte_reproducible(tmp_p
     assert predictions["bet_side"].isin(["home", "away", "none"]).all()
     assert predictions["market_home_fair_prob"].between(0.0, 1.0).all()
     assert predictions["model_home_prob"].between(0.0, 1.0).all()
+
+
+def test_run_walk_forward_backtest_tracks_bankroll_for_flat_staking(tmp_path) -> None:
+    frame = _synthetic_training_frame()
+
+    result = run_walk_forward_backtest(
+        training_data=frame,
+        start_date="2022-01-01",
+        end_date="2022-03-31",
+        output_dir=tmp_path / "bankroll_flat",
+        calibration_fraction=0.15,
+        estimator_kwargs={"max_depth": 1, "n_estimators": 8, "learning_rate": 0.2},
+        window_mode="anchored_expanding",
+        anchored_train_start="2021-07-01",
+        starting_bankroll_units=100.0,
+        staking_mode="flat",
+        flat_bet_size_units=2.0,
+    )
+
+    predictions = result.predictions
+    assert {"bankroll_before_units", "bankroll_after_units", "bet_stake_units", "staking_mode"}.issubset(predictions.columns)
+    assert predictions["staking_mode"].eq("flat").all()
+    assert predictions["bankroll_before_units"].iloc[0] == 100.0
+    assert float(predictions["bet_stake_units"].max()) <= 2.0
+    assert result.ending_bankroll_units == float(predictions["bankroll_after_units"].iloc[-1])
+    assert "ending_bankroll_units" in result.window_metrics.columns
+    assert "max_drawdown_pct" in result.window_metrics.columns
 
 
 def test_run_walk_forward_backtest_rebuilds_window_data_and_records_build_log(

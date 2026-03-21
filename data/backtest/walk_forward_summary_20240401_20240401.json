@@ -1,0 +1,48 @@
+{
+  "aggregate_brier_score": 0.24641285179664268,
+  "aggregate_roi": -0.15583588840303486,
+  "calibration_fraction": 0.15,
+  "calibration_method": "identity",
+  "code_version_hash": "ebc4f46592a11393f4a34974731510c1862a6e77519026fe2e99df23591a29dd",
+  "data_version_hash": "b3922ce15fd811dbbc9875cc0ff5ee310a879f4b4cd043c1c28ab9503721fddc",
+  "edge_threshold": 0.03,
+  "end_date": "2024-04-01T00:00:00+00:00",
+  "estimator_kwargs": {
+    "colsample_bytree": 1.0,
+    "learning_rate": 0.05,
+    "max_depth": 3,
+    "n_estimators": 120,
+    "subsample": 1.0
+  },
+  "market_vig": 0.04,
+  "output_fingerprint": "a6627e128dd3ade84d71a280e76852ffd6e42f11f5ff25b3b4be2bbe6962a095",
+  "predictions_path": "data\\backtest\\walk_forward_predictions_20240401_20240401.csv",
+  "raw_meta_feature_columns": [
+    "home_team_f5_pythagorean_wp_30g",
+    "home_team_log5_30g",
+    "park_runs_factor"
+  ],
+  "seed": 2026,
+  "start_date": "2024-04-01T00:00:00+00:00",
+  "test_window_months": 1,
+  "time_series_splits": 3,
+  "total_bets": 293,
+  "total_profit_units": -45.65991530208922,
+  "total_staked_units": 293.0,
+  "train_window_months": 6,
+  "window_builds": [
+    {
+      "build_action": "provided",
+      "cache_path": "data\\training\\training_data_2018_2025.parquet",
+      "data_source": "explicit_training_data",
+      "data_version_hash": "b3922ce15fd811dbbc9875cc0ff5ee310a879f4b4cd043c1c28ab9503721fddc",
+      "row_count": 17035,
+      "scheduled_start_before": "2024-05-01T00:00:00+00:00",
+      "test_row_count": 390,
+      "train_row_count": 75,
+      "window_index": 1
+    }
+  ],
+  "window_count": 1,
+  "window_metrics_path": "data\\backtest\\walk_forward_windows_20240401_20240401.csv"
+}

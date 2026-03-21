@@ -5,7 +5,7 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence
 
 import pandas as pd
 
@@ -15,6 +15,7 @@ from src.models.odds import OddsSnapshot
 
 
 _COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
+    "game_pk": ("game_pk",),
     "commence_time": ("commence_time", "scheduled_start", "date", "game_date", "event_date"),
     "home_team": ("home_team", "home_team_name", "home", "team_home"),
     "away_team": ("away_team", "away_team_name", "away", "team_away"),
@@ -49,6 +50,7 @@ _MARKET_ALIASES = {
     "first five run line": "f5_rl",
     "spread_1st5": "f5_rl",
 }
+MarketTypeLiteral = Literal["f5_ml", "f5_rl"]
 
 
 def import_historical_odds(
@@ -65,18 +67,22 @@ def import_historical_odds(
         return 0
 
     commence_column = _resolve_column(frame, "commence_time")
+    game_pk_column = _resolve_column(frame, "game_pk")
     home_team_column = _resolve_column(frame, "home_team")
     away_team_column = _resolve_column(frame, "away_team")
     home_odds_column = _resolve_column(frame, "home_odds")
     away_odds_column = _resolve_column(frame, "away_odds")
-    if None in (
+    has_required_game_lookup_columns = None not in (
         commence_column,
         home_team_column,
         away_team_column,
-        home_odds_column,
-        away_odds_column,
-    ):
-        raise ValueError("Historical odds file is missing one or more required columns")
+    )
+    if not has_required_game_lookup_columns and game_pk_column is None:
+        raise ValueError(
+            "Historical odds file must include game_pk or all of commence_time, home_team, and away_team"
+        )
+    if None in (home_odds_column, away_odds_column):
+        raise ValueError("Historical odds file is missing one or more required odds columns")
 
     market_type_column = _resolve_column(frame, "market_type")
     book_name_column = _resolve_column(frame, "book_name")
@@ -87,18 +93,26 @@ def import_historical_odds(
     with sqlite3.connect(database_path) as connection:
         connection.execute("PRAGMA foreign_keys = ON")
         for row in frame.to_dict(orient="records"):
-            commence_time = _coerce_timestamp(row.get(commence_column))
-            home_team_name = str(row[home_team_column]).strip()
-            away_team_name = str(row[away_team_column]).strip()
-            game_pk = _ensure_game_row(
-                connection,
-                event_id=f"historical-{home_team_name}-{away_team_name}-{commence_time.isoformat()}",
-                home_team_name=home_team_name,
-                away_team_name=away_team_name,
-                commence_time=commence_time,
+            commence_time = _coerce_timestamp(row.get(commence_column)) if commence_column else None
+            game_pk_value = row.get(game_pk_column) if game_pk_column else None
+            parsed_game_pk = (
+                _coerce_nullable_int(game_pk_value) if game_pk_column is not None else None
             )
-            if game_pk is None:
-                continue
+            if parsed_game_pk is not None:
+                game_pk = parsed_game_pk
+            else:
+                assert commence_time is not None
+                home_team_name = str(row[home_team_column]).strip()
+                away_team_name = str(row[away_team_column]).strip()
+                game_pk = _ensure_game_row(
+                    connection,
+                    event_id=f"historical-{home_team_name}-{away_team_name}-{commence_time.isoformat()}",
+                    home_team_name=home_team_name,
+                    away_team_name=away_team_name,
+                    commence_time=commence_time,
+                )
+                if game_pk is None:
+                    continue
 
             market_type = _normalize_market_type(
                 row.get(market_type_column),
@@ -109,12 +123,17 @@ def import_historical_odds(
             fetched_at_value = row.get(fetched_at_column) if fetched_at_column else None
             fetched_at = (
                 _coerce_timestamp(fetched_at_value)
-                if fetched_at_column and fetched_at_value is not None and not pd.isna(fetched_at_value)
+                if fetched_at_column
+                and fetched_at_value is not None
+                and not pd.isna(fetched_at_value)
                 else commence_time
             )
+            if fetched_at is None:
+                raise ValueError("Historical odds file must include commence_time or fetched_at")
+            book_value = row.get(book_name_column) if book_name_column else None
             book_name = (
-                str(row.get(book_name_column)).strip()
-                if book_name_column and row.get(book_name_column)
+                str(book_value).strip()
+                if book_name_column and book_value is not None and not pd.isna(book_value)
                 else default_book_name
             )
             snapshots.append(
@@ -228,18 +247,45 @@ def _resolve_column(frame: pd.DataFrame, logical_name: str) -> str | None:
 
 def _coerce_timestamp(value: Any) -> datetime:
     parsed = pd.Timestamp(value)
+    if pd.isna(parsed):
+        raise ValueError(f"Unable to parse timestamp value: {value}")
     if parsed.tzinfo is None:
         parsed = parsed.tz_localize(timezone.utc)
     else:
         parsed = parsed.tz_convert(timezone.utc)
-    return parsed.to_pydatetime()
+    resolved = parsed.to_pydatetime()
+    if not isinstance(resolved, datetime):
+        raise ValueError(f"Unable to coerce timestamp value: {value}")
+    return resolved
 
 
-def _normalize_market_type(value: Any, *, default_market_type: str) -> str:
+def _normalize_market_type(value: Any, *, default_market_type: str) -> MarketTypeLiteral:
+    default_value = _coerce_market_type_literal(default_market_type)
     if value is None or (isinstance(value, float) and pd.isna(value)):
-        return default_market_type
+        return default_value
     normalized = str(value).strip().lower()
-    return _MARKET_ALIASES.get(normalized, default_market_type)
+    return _coerce_market_type_literal(_MARKET_ALIASES.get(normalized, default_value))
+
+
+def _coerce_market_type_literal(value: str) -> MarketTypeLiteral:
+    if value == "f5_ml":
+        return "f5_ml"
+    if value == "f5_rl":
+        return "f5_rl"
+    raise ValueError(f"Unsupported market type: {value}")
+
+
+def _has_scalar_value(value: Any) -> bool:
+    return value is not None and not bool(pd.isna(value))
+
+
+def _coerce_nullable_int(value: Any) -> int | None:
+    if not _has_scalar_value(value):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ import random
 from dataclasses import asdict, dataclass
 from math import ceil
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Literal, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -20,6 +20,12 @@ from xgboost import XGBClassifier
 from src.clients.historical_odds_client import load_historical_odds_for_games
 from src.clients.odds_client import devig_probabilities
 from src.clients.weather_client import fetch_game_weather
+from src.engine.bankroll import (
+    DEFAULT_KELLY_FRACTION,
+    DEFAULT_MAX_DRAWDOWN,
+    MAX_BET_FRACTION,
+    calculate_kelly_stake,
+)
 from src.model.calibration import (
     CalibratedStackingModel,
     DEFAULT_CALIBRATION_METHOD,
@@ -55,12 +61,18 @@ DEFAULT_BACKTEST_OUTPUT_DIR = Path("data") / "backtest"
 DEFAULT_BACKTEST_CACHE_DIR = Path("data") / "training"
 DEFAULT_TRAIN_WINDOW_MONTHS = 6
 DEFAULT_TEST_WINDOW_MONTHS = 1
+DEFAULT_WINDOW_MODE = "rolling"
+SUPPORTED_WINDOW_MODES = ("rolling", "anchored_expanding")
+DEFAULT_STAKING_MODE = "flat"
+SUPPORTED_STAKING_MODES = ("flat", "kelly")
 DEFAULT_CALIBRATION_FRACTION = 0.15
 DEFAULT_WALK_FORWARD_CALIBRATION_METHOD = DEFAULT_CALIBRATION_METHOD
 DEFAULT_EDGE_THRESHOLD = 0.03
 DEFAULT_MARKET_VIG = 0.04
 DEFAULT_TIME_SERIES_SPLITS = 3
 DEFAULT_FLOAT_FORMAT = "%.10f"
+DEFAULT_STARTING_BANKROLL_UNITS = 100.0
+DEFAULT_FLAT_BET_SIZE_UNITS = 1.0
 DEFAULT_ESTIMATOR_KWARGS: dict[str, Any] = {
     "max_depth": 3,
     "n_estimators": 120,
@@ -88,6 +100,14 @@ class WalkForwardWindow:
 
 
 @dataclass(frozen=True, slots=True)
+class _BankrollState:
+    current_bankroll: float
+    peak_bankroll: float
+    max_drawdown_pct: float
+    longest_losing_streak: int
+
+
+@dataclass(frozen=True, slots=True)
 class WalkForwardBacktestResult:
     predictions: pd.DataFrame
     window_metrics: pd.DataFrame
@@ -97,6 +117,11 @@ class WalkForwardBacktestResult:
     output_fingerprint: str
     aggregate_brier_score: float
     aggregate_roi: float
+    bankroll_return_pct: float
+    ending_bankroll_units: float
+    peak_bankroll_units: float
+    max_drawdown_pct: float
+    longest_losing_streak: int
     total_bets: int
     window_count: int
     data_version_hash: str
@@ -132,6 +157,8 @@ def create_walk_forward_windows(
     end_date: str,
     train_window_months: int = DEFAULT_TRAIN_WINDOW_MONTHS,
     test_window_months: int = DEFAULT_TEST_WINDOW_MONTHS,
+    window_mode: Literal["rolling", "anchored_expanding"] = DEFAULT_WINDOW_MODE,
+    anchored_train_start: str | pd.Timestamp | None = None,
 ) -> list[WalkForwardWindow]:
     """Create monthly walk-forward windows with a 6-month train and 1-month test stride."""
 
@@ -139,17 +166,28 @@ def create_walk_forward_windows(
         raise ValueError("train_window_months must be at least 1")
     if test_window_months < 1:
         raise ValueError("test_window_months must be at least 1")
+    if window_mode not in SUPPORTED_WINDOW_MODES:
+        raise ValueError(f"window_mode must be one of {SUPPORTED_WINDOW_MODES}")
 
     dataframe = _load_backtest_dataframe(training_data)
     requested_start = _month_floor(start_date)
     requested_end = _month_floor(end_date)
+    anchored_start = (
+        _month_floor(anchored_train_start)
+        if anchored_train_start is not None
+        else _month_floor(pd.to_datetime(dataframe["scheduled_start"], utc=True).min())
+    )
 
     windows: list[WalkForwardWindow] = []
     test_start = requested_start
     window_index = 1
     while test_start <= requested_end:
         test_end = test_start + pd.DateOffset(months=test_window_months)
-        train_start = test_start - pd.DateOffset(months=train_window_months)
+        train_start = (
+            anchored_start
+            if window_mode == "anchored_expanding"
+            else test_start - pd.DateOffset(months=train_window_months)
+        )
         train_end = test_start
 
         train_frame = _slice_time_range(dataframe, start=train_start, end=train_end)
@@ -182,6 +220,8 @@ def run_walk_forward_backtest(
     seed: int = DEFAULT_RANDOM_STATE,
     train_window_months: int = DEFAULT_TRAIN_WINDOW_MONTHS,
     test_window_months: int = DEFAULT_TEST_WINDOW_MONTHS,
+    window_mode: Literal["rolling", "anchored_expanding"] = DEFAULT_WINDOW_MODE,
+    anchored_train_start: str | pd.Timestamp | None = None,
     calibration_fraction: float = DEFAULT_CALIBRATION_FRACTION,
     calibration_method: str = DEFAULT_WALK_FORWARD_CALIBRATION_METHOD,
     edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
@@ -193,6 +233,12 @@ def run_walk_forward_backtest(
     weather_fetcher: WeatherFetcher = fetch_game_weather,
     historical_odds_db_path: str | Path | None = None,
     historical_odds_book_name: str | None = None,
+    starting_bankroll_units: float = DEFAULT_STARTING_BANKROLL_UNITS,
+    staking_mode: Literal["flat", "kelly"] = DEFAULT_STAKING_MODE,
+    flat_bet_size_units: float = DEFAULT_FLAT_BET_SIZE_UNITS,
+    kelly_fraction: float = DEFAULT_KELLY_FRACTION,
+    max_bet_fraction: float = MAX_BET_FRACTION,
+    max_drawdown: float = DEFAULT_MAX_DRAWDOWN,
 ) -> WalkForwardBacktestResult:
     """Run a deterministic walk-forward backtest and persist predictions plus window metrics."""
 
@@ -218,6 +264,8 @@ def run_walk_forward_backtest(
             end_date=end_date,
             train_window_months=train_window_months,
             test_window_months=test_window_months,
+            window_mode=window_mode,
+            anchored_train_start=anchored_train_start,
         )
         if not windows:
             raise ValueError("No walk-forward windows matched the requested date range")
@@ -230,6 +278,12 @@ def run_walk_forward_backtest(
         )
         data_version_hash = _resolve_data_version_hash(dataframe)
         cache_path = str(Path(training_data)) if isinstance(training_data, str | Path) else None
+        bankroll_state = _BankrollState(
+            current_bankroll=float(starting_bankroll_units),
+            peak_bankroll=float(starting_bankroll_units),
+            max_drawdown_pct=0.0,
+            longest_losing_streak=0,
+        )
 
         for window in windows:
             build = WalkForwardWindowBuild(
@@ -260,19 +314,39 @@ def run_walk_forward_backtest(
                 code_version_hash=code_version_hash,
                 historical_odds_db_path=historical_odds_db_path,
                 historical_odds_book_name=historical_odds_book_name,
+                bankroll_state=bankroll_state,
+                staking_mode=staking_mode,
+                flat_bet_size_units=flat_bet_size_units,
+                kelly_fraction=kelly_fraction,
+                max_bet_fraction=max_bet_fraction,
+                max_drawdown=max_drawdown,
             )
             metrics.update(_window_build_to_metric_fields(build))
             prediction_frames.append(predictions)
             window_metric_rows.append(metrics)
             window_builds.append(build)
+            bankroll_state = _BankrollState(
+                current_bankroll=float(metrics["ending_bankroll_units"]),
+                peak_bankroll=float(metrics["peak_bankroll_units"]),
+                max_drawdown_pct=float(metrics["max_drawdown_pct"]),
+                longest_losing_streak=int(metrics["longest_losing_streak"]),
+            )
     else:
         windows = _create_requested_windows(
             start_date=start_date,
             end_date=end_date,
             train_window_months=train_window_months,
             test_window_months=test_window_months,
+            window_mode=window_mode,
+            anchored_train_start=anchored_train_start,
         )
         logger.info("[backtest] Prepared %s requested windows", len(windows))
+        bankroll_state = _BankrollState(
+            current_bankroll=float(starting_bankroll_units),
+            peak_bankroll=float(starting_bankroll_units),
+            max_drawdown_pct=0.0,
+            longest_losing_streak=0,
+        )
 
         for window in windows:
             logger.info(
@@ -322,17 +396,30 @@ def run_walk_forward_backtest(
                 code_version_hash=code_version_hash,
                 historical_odds_db_path=historical_odds_db_path,
                 historical_odds_book_name=historical_odds_book_name,
+                bankroll_state=bankroll_state,
+                staking_mode=staking_mode,
+                flat_bet_size_units=flat_bet_size_units,
+                kelly_fraction=kelly_fraction,
+                max_bet_fraction=max_bet_fraction,
+                max_drawdown=max_drawdown,
             )
             metrics.update(_window_build_to_metric_fields(build))
             prediction_frames.append(predictions)
             window_metric_rows.append(metrics)
             window_builds.append(build)
+            bankroll_state = _BankrollState(
+                current_bankroll=float(metrics["ending_bankroll_units"]),
+                peak_bankroll=float(metrics["peak_bankroll_units"]),
+                max_drawdown_pct=float(metrics["max_drawdown_pct"]),
+                longest_losing_streak=int(metrics["longest_losing_streak"]),
+            )
             logger.info(
-                "[backtest %s/%s] complete brier=%.4f roi=%.4f bets=%s",
+                "[backtest %s/%s] complete brier=%.4f roi=%.4f bankroll=%.2f bets=%s",
                 window.window_index,
                 len(windows),
                 metrics["brier_score"],
                 metrics["roi"],
+                metrics["ending_bankroll_units"],
                 metrics["bet_count"],
             )
 
@@ -355,6 +442,15 @@ def run_walk_forward_backtest(
     total_staked = float(predictions["bet_stake_units"].sum())
     total_profit = float(predictions["bet_profit_units"].sum())
     aggregate_roi = float(total_profit / total_staked) if total_staked else 0.0
+    ending_bankroll_units = float(predictions["bankroll_after_units"].iloc[-1])
+    peak_bankroll_units = float(predictions["peak_bankroll_units"].max())
+    max_drawdown_pct = float(predictions["bankroll_drawdown_pct"].max())
+    bankroll_return_pct = (
+        float((ending_bankroll_units - float(starting_bankroll_units)) / float(starting_bankroll_units))
+        if starting_bankroll_units
+        else 0.0
+    )
+    longest_losing_streak = int(predictions["losing_streak"].max())
 
     resolved_output_dir = Path(output_dir)
     resolved_output_dir.mkdir(parents=True, exist_ok=True)
@@ -375,16 +471,31 @@ def run_walk_forward_backtest(
         "seed": seed,
         "train_window_months": train_window_months,
         "test_window_months": test_window_months,
+        "window_mode": window_mode,
+        "anchored_train_start": (
+            None if anchored_train_start is None else _month_floor(anchored_train_start).isoformat()
+        ),
         "calibration_fraction": calibration_fraction,
         "calibration_method": calibration_method,
         "edge_threshold": edge_threshold,
         "market_vig": market_vig,
         "time_series_splits": time_series_splits,
+        "starting_bankroll_units": float(starting_bankroll_units),
+        "staking_mode": staking_mode,
+        "flat_bet_size_units": float(flat_bet_size_units),
+        "kelly_fraction": float(kelly_fraction),
+        "max_bet_fraction": float(max_bet_fraction),
+        "max_drawdown": float(max_drawdown),
         "estimator_kwargs": resolved_estimator_kwargs,
         "raw_meta_feature_columns": list(raw_meta_feature_columns),
         "window_count": int(len(window_metrics)),
         "aggregate_brier_score": aggregate_brier,
         "aggregate_roi": aggregate_roi,
+        "bankroll_return_pct": bankroll_return_pct,
+        "ending_bankroll_units": ending_bankroll_units,
+        "peak_bankroll_units": peak_bankroll_units,
+        "max_drawdown_pct": max_drawdown_pct,
+        "longest_losing_streak": longest_losing_streak,
         "total_bets": int(predictions["is_bet"].sum()),
         "total_profit_units": total_profit,
         "total_staked_units": total_staked,
@@ -409,6 +520,11 @@ def run_walk_forward_backtest(
         output_fingerprint=output_fingerprint,
         aggregate_brier_score=aggregate_brier,
         aggregate_roi=aggregate_roi,
+        bankroll_return_pct=bankroll_return_pct,
+        ending_bankroll_units=ending_bankroll_units,
+        peak_bankroll_units=peak_bankroll_units,
+        max_drawdown_pct=max_drawdown_pct,
+        longest_losing_streak=longest_losing_streak,
         total_bets=int(predictions["is_bet"].sum()),
         window_count=len(window_metrics),
         data_version_hash=data_version_hash,
@@ -430,6 +546,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=DEFAULT_RANDOM_STATE)
     parser.add_argument("--train-window-months", type=int, default=DEFAULT_TRAIN_WINDOW_MONTHS)
     parser.add_argument("--test-window-months", type=int, default=DEFAULT_TEST_WINDOW_MONTHS)
+    parser.add_argument("--window-mode", default=DEFAULT_WINDOW_MODE, choices=SUPPORTED_WINDOW_MODES)
+    parser.add_argument("--anchored-train-start")
     parser.add_argument(
         "--calibration-fraction",
         type=float,
@@ -456,6 +574,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--historical-odds-db")
     parser.add_argument("--historical-odds-book")
+    parser.add_argument(
+        "--starting-bankroll-units",
+        type=float,
+        default=DEFAULT_STARTING_BANKROLL_UNITS,
+    )
+    parser.add_argument("--staking-mode", default=DEFAULT_STAKING_MODE, choices=SUPPORTED_STAKING_MODES)
+    parser.add_argument("--flat-bet-size-units", type=float, default=DEFAULT_FLAT_BET_SIZE_UNITS)
+    parser.add_argument("--kelly-fraction", type=float, default=DEFAULT_KELLY_FRACTION)
+    parser.add_argument("--max-bet-fraction", type=float, default=MAX_BET_FRACTION)
+    parser.add_argument("--max-drawdown", type=float, default=DEFAULT_MAX_DRAWDOWN)
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -471,6 +599,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         seed=args.seed,
         train_window_months=args.train_window_months,
         test_window_months=args.test_window_months,
+        window_mode=args.window_mode,
+        anchored_train_start=args.anchored_train_start,
         calibration_fraction=args.calibration_fraction,
         calibration_method=args.calibration_method,
         edge_threshold=args.edge_threshold,
@@ -483,6 +613,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         },
         historical_odds_db_path=args.historical_odds_db,
         historical_odds_book_name=args.historical_odds_book,
+        starting_bankroll_units=args.starting_bankroll_units,
+        staking_mode=args.staking_mode,
+        flat_bet_size_units=args.flat_bet_size_units,
+        kelly_fraction=args.kelly_fraction,
+        max_bet_fraction=args.max_bet_fraction,
+        max_drawdown=args.max_drawdown,
     )
     log_walk_forward_run(
         result,
@@ -492,12 +628,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         end_date=args.end_date,
         train_window_months=args.train_window_months,
         test_window_months=args.test_window_months,
+        window_mode=args.window_mode,
+        anchored_train_start=args.anchored_train_start,
         calibration_method=args.calibration_method,
         calibration_fraction=args.calibration_fraction,
         edge_threshold=args.edge_threshold,
         market_vig=args.market_vig,
         historical_odds_db_path=args.historical_odds_db,
         historical_odds_book_name=args.historical_odds_book,
+        starting_bankroll_units=args.starting_bankroll_units,
+        staking_mode=args.staking_mode,
+        flat_bet_size_units=args.flat_bet_size_units,
+        kelly_fraction=args.kelly_fraction,
+        max_bet_fraction=args.max_bet_fraction,
+        max_drawdown=args.max_drawdown,
     )
     print(
         json.dumps(
@@ -507,6 +651,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "summary_path": str(result.summary_path),
                 "aggregate_brier_score": result.aggregate_brier_score,
                 "aggregate_roi": result.aggregate_roi,
+                "bankroll_return_pct": result.bankroll_return_pct,
+                "ending_bankroll_units": result.ending_bankroll_units,
+                "peak_bankroll_units": result.peak_bankroll_units,
+                "max_drawdown_pct": result.max_drawdown_pct,
+                "longest_losing_streak": result.longest_losing_streak,
                 "total_bets": result.total_bets,
                 "window_count": result.window_count,
                 "data_version_hash": result.data_version_hash,
@@ -543,6 +692,12 @@ def _evaluate_window(
     code_version_hash: str,
     historical_odds_db_path: str | Path | None,
     historical_odds_book_name: str | None,
+    bankroll_state: _BankrollState,
+    staking_mode: Literal["flat", "kelly"],
+    flat_bet_size_units: float,
+    kelly_fraction: float,
+    max_bet_fraction: float,
+    max_drawdown: float,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     train_frame = _slice_time_range(dataframe, start=window.train_start, end=window.train_end)
     test_frame = _slice_time_range(dataframe, start=window.test_start, end=window.test_end)
@@ -592,7 +747,6 @@ def _evaluate_window(
 
     bet_side = np.where(edge_home >= edge_threshold, "home", "none")
     bet_side = np.where(edge_away >= edge_threshold, "away", bet_side)
-    bet_stake_units = np.where(bet_side == "none", 0.0, 1.0)
     bet_edge = np.where(
         bet_side == "home",
         edge_home,
@@ -665,14 +819,23 @@ def _evaluate_window(
             "bet_odds": bet_odds,
             "bet_model_prob": bet_model_prob,
             "bet_expected_value": bet_expected_value,
-            "bet_stake_units": bet_stake_units,
-            "bet_profit_units": bet_profit_units,
             "bet_result": bet_result,
             "is_bet": (bet_side != "none").astype(int),
             "calibration_method": model_bundle.calibration_method,
             "data_version_hash": data_version_hash,
             "code_version_hash": code_version_hash,
         }
+    )
+    predictions = _apply_bankroll_strategy(
+        predictions=predictions,
+        starting_bankroll=bankroll_state.current_bankroll,
+        peak_bankroll=bankroll_state.peak_bankroll,
+        prior_longest_losing_streak=bankroll_state.longest_losing_streak,
+        staking_mode=staking_mode,
+        flat_bet_size_units=flat_bet_size_units,
+        kelly_fraction=kelly_fraction,
+        max_bet_fraction=max_bet_fraction,
+        max_drawdown=max_drawdown,
     )
 
     scored_mask = predictions["is_push"] == 0
@@ -703,6 +866,19 @@ def _evaluate_window(
         "roi": roi,
         "total_profit_units": total_profit,
         "total_staked_units": total_staked,
+        "starting_bankroll_units": float(predictions["bankroll_before_units"].iloc[0]),
+        "ending_bankroll_units": float(predictions["bankroll_after_units"].iloc[-1]),
+        "peak_bankroll_units": float(predictions["peak_bankroll_units"].max()),
+        "max_drawdown_pct": float(predictions["bankroll_drawdown_pct"].max()),
+        "win_rate": float(
+            predictions["bet_result"].eq("WIN").sum()
+            / max(1, int(predictions["bet_result"].isin(["WIN", "LOSS"]).sum()))
+        ),
+        "average_stake_units": float(predictions.loc[predictions["is_bet"] == 1, "bet_stake_units"].mean())
+        if int(predictions["is_bet"].sum()) > 0
+        else 0.0,
+        "longest_losing_streak": int(predictions["losing_streak"].max()),
+        "staking_mode": staking_mode,
         "mean_model_home_prob": float(predictions["model_home_prob"].mean()),
         "mean_market_home_fair_prob": float(predictions["market_home_fair_prob"].mean()),
         "historical_odds_coverage": float((predictions["market_source"] == "historical").mean()),
@@ -910,9 +1086,16 @@ def _create_requested_windows(
     end_date: str,
     train_window_months: int,
     test_window_months: int,
+    window_mode: Literal["rolling", "anchored_expanding"],
+    anchored_train_start: str | pd.Timestamp | None,
 ) -> list[WalkForwardWindow]:
     start_timestamp = _month_floor(start_date)
     end_timestamp = _month_floor(end_date)
+    anchored_start = (
+        _month_floor(anchored_train_start)
+        if anchored_train_start is not None
+        else start_timestamp - pd.DateOffset(months=train_window_months)
+    )
 
     windows: list[WalkForwardWindow] = []
     window_index = 1
@@ -922,7 +1105,11 @@ def _create_requested_windows(
         windows.append(
             WalkForwardWindow(
                 window_index=window_index,
-                train_start=test_start - pd.DateOffset(months=train_window_months),
+                train_start=(
+                    anchored_start
+                    if window_mode == "anchored_expanding"
+                    else test_start - pd.DateOffset(months=train_window_months)
+                ),
                 train_end=test_start,
                 test_start=test_start,
                 test_end=test_end,
@@ -1076,6 +1263,113 @@ def _compute_window_version_hash(
         sort_keys=True,
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _apply_bankroll_strategy(
+    *,
+    predictions: pd.DataFrame,
+    starting_bankroll: float,
+    peak_bankroll: float,
+    prior_longest_losing_streak: int,
+    staking_mode: Literal["flat", "kelly"],
+    flat_bet_size_units: float,
+    kelly_fraction: float,
+    max_bet_fraction: float,
+    max_drawdown: float,
+) -> pd.DataFrame:
+    if staking_mode not in SUPPORTED_STAKING_MODES:
+        raise ValueError(f"staking_mode must be one of {SUPPORTED_STAKING_MODES}")
+    if flat_bet_size_units < 0:
+        raise ValueError("flat_bet_size_units must be non-negative")
+
+    enriched = predictions.copy()
+    current_bankroll = float(starting_bankroll)
+    running_peak = max(float(peak_bankroll), current_bankroll)
+    current_losing_streak = 0
+    longest_losing_streak = int(prior_longest_losing_streak)
+
+    bankroll_before: list[float] = []
+    bankroll_after: list[float] = []
+    peak_bankrolls: list[float] = []
+    drawdown_pcts: list[float] = []
+    stake_units: list[float] = []
+    stake_fractions: list[float] = []
+    full_kelly_fractions: list[float] = []
+    kill_switch_flags: list[int] = []
+    losing_streaks: list[int] = []
+    profit_units: list[float] = []
+
+    for row in enriched.itertuples(index=False):
+        bankroll_before.append(current_bankroll)
+        kill_switch_active = int(_calculate_drawdown_pct(current_bankroll, running_peak) >= max_drawdown)
+        stake = 0.0
+        stake_fraction = 0.0
+        full_kelly_fraction = 0.0
+
+        if row.bet_side != "none" and current_bankroll > 0 and not kill_switch_active:
+            if staking_mode == "flat":
+                stake = min(float(flat_bet_size_units), current_bankroll)
+                stake_fraction = float(stake / current_bankroll) if current_bankroll else 0.0
+            else:
+                sizing = calculate_kelly_stake(
+                    bankroll=current_bankroll,
+                    model_probability=float(row.bet_model_prob),
+                    odds=int(row.bet_odds),
+                    peak_bankroll=running_peak,
+                    fraction=kelly_fraction,
+                    max_bet_fraction=max_bet_fraction,
+                    max_drawdown=max_drawdown,
+                )
+                stake = min(float(sizing.stake), current_bankroll)
+                stake_fraction = float(sizing.stake_fraction)
+                full_kelly_fraction = float(sizing.full_kelly_fraction)
+                kill_switch_active = int(sizing.kill_switch_active)
+
+        if row.bet_result == "WIN" and stake > 0:
+            profit = _payout_for_american_odds(int(row.bet_odds)) * stake
+        elif row.bet_result == "LOSS" and stake > 0:
+            profit = -stake
+        else:
+            profit = 0.0
+
+        current_bankroll = max(0.0, current_bankroll + profit)
+        running_peak = max(running_peak, current_bankroll)
+
+        if row.bet_result == "LOSS" and stake > 0:
+            current_losing_streak += 1
+            longest_losing_streak = max(longest_losing_streak, current_losing_streak)
+        elif row.bet_result in {"WIN", "PUSH"} or row.bet_side == "none":
+            current_losing_streak = 0
+
+        stake_units.append(stake)
+        stake_fractions.append(stake_fraction)
+        full_kelly_fractions.append(full_kelly_fraction)
+        profit_units.append(profit)
+        bankroll_after.append(current_bankroll)
+        peak_bankrolls.append(running_peak)
+        drawdown_pcts.append(_calculate_drawdown_pct(current_bankroll, running_peak))
+        kill_switch_flags.append(kill_switch_active)
+        losing_streaks.append(current_losing_streak)
+
+    enriched["bet_stake_units"] = np.asarray(stake_units, dtype=float)
+    enriched["bet_profit_units"] = np.asarray(profit_units, dtype=float)
+    enriched["bankroll_before_units"] = np.asarray(bankroll_before, dtype=float)
+    enriched["bankroll_after_units"] = np.asarray(bankroll_after, dtype=float)
+    enriched["peak_bankroll_units"] = np.asarray(peak_bankrolls, dtype=float)
+    enriched["bankroll_drawdown_pct"] = np.asarray(drawdown_pcts, dtype=float)
+    enriched["bet_stake_fraction"] = np.asarray(stake_fractions, dtype=float)
+    enriched["bet_full_kelly_fraction"] = np.asarray(full_kelly_fractions, dtype=float)
+    enriched["kill_switch_active"] = np.asarray(kill_switch_flags, dtype=int)
+    enriched["losing_streak"] = np.asarray(losing_streaks, dtype=int)
+    enriched["staking_mode"] = staking_mode
+    enriched["longest_losing_streak"] = int(longest_losing_streak)
+    return enriched
+
+
+def _calculate_drawdown_pct(current_bankroll: float, peak_bankroll: float) -> float:
+    if peak_bankroll <= 0:
+        return 0.0
+    return float((peak_bankroll - current_bankroll) / peak_bankroll)
 
 
 def _resolve_calibration_split_index(row_count: int, calibration_fraction: float) -> int:

@@ -29,6 +29,11 @@ dev = [
   "pytest-cov",
   "ruff",
 ]
+dashboard = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "python-multipart",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

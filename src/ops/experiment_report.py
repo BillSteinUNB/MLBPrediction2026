@@ -24,7 +24,9 @@ def build_experiment_metrics_dataframe(models_dir: str | Path = DEFAULT_MODELS_D
         run_kind = _classify_summary(summary_name)
         holdout_season = payload.get("holdout_season")
         feature_column_count = len(payload.get("feature_columns", [])) or None
-        run_timestamp = _extract_model_timestamp(model_version, fallback=summary_path.stat().st_mtime)
+        run_timestamp = _extract_model_timestamp(
+            model_version, fallback=summary_path.stat().st_mtime
+        )
 
         for model_name, model_payload in payload.get("models", {}).items():
             target_column = model_payload.get("target_column")
@@ -50,9 +52,9 @@ def build_experiment_metrics_dataframe(models_dir: str | Path = DEFAULT_MODELS_D
                         "accuracy": metrics.get("accuracy"),
                         "log_loss": metrics.get("log_loss"),
                         "roc_auc": metrics.get("roc_auc"),
-                        "brier": None,
-                        "ece": None,
-                        "reliability_gap": None,
+                        "brier": metrics.get("brier"),
+                        "ece": metrics.get("ece"),
+                        "reliability_gap": metrics.get("reliability_gap"),
                         "comparison_brier_delta": None,
                         "comparison_log_loss_delta": None,
                         "comparison_roc_auc_delta": None,
@@ -91,7 +93,11 @@ def build_experiment_metrics_dataframe(models_dir: str | Path = DEFAULT_MODELS_D
                 rows.append(
                     {
                         **common,
-                        "variant": str(model_payload.get("calibration_method") or payload.get("calibration_method") or "calibrated"),
+                        "variant": str(
+                            model_payload.get("calibration_method")
+                            or payload.get("calibration_method")
+                            or "calibrated"
+                        ),
                         "accuracy": metrics.get("calibrated_accuracy"),
                         "log_loss": metrics.get("calibrated_log_loss"),
                         "roc_auc": metrics.get("calibrated_roc_auc"),
@@ -173,10 +179,9 @@ def build_leaderboard_dataframe(metrics: pd.DataFrame) -> pd.DataFrame:
         return metrics.copy()
 
     leaderboard = metrics.copy()
-    leaderboard["score_rank"] = (
-        leaderboard.groupby(["holdout_season", "target_column", "variant"], dropna=False)["roc_auc"]
-        .rank(method="dense", ascending=False)
-    )
+    leaderboard["score_rank"] = leaderboard.groupby(
+        ["holdout_season", "target_column", "variant"], dropna=False
+    )["roc_auc"].rank(method="dense", ascending=False)
     leaderboard = leaderboard.sort_values(
         by=["holdout_season", "target_column", "variant", "score_rank", "log_loss"],
         kind="stable",
@@ -327,13 +332,21 @@ def _build_summary_cards(metrics: pd.DataFrame) -> str:
         return _panel_card("No Experiments", "0", "No saved experiments found.")
 
     latest_run = metrics.sort_values("run_timestamp", kind="stable").iloc[-1]
-    best_auc = metrics.loc[metrics["roc_auc"].notna()].sort_values("roc_auc", ascending=False).iloc[0]
-    best_log_loss = metrics.loc[metrics["log_loss"].notna()].sort_values("log_loss", ascending=True).iloc[0]
+    best_auc = (
+        metrics.loc[metrics["roc_auc"].notna()].sort_values("roc_auc", ascending=False).iloc[0]
+    )
+    best_log_loss = (
+        metrics.loc[metrics["log_loss"].notna()].sort_values("log_loss", ascending=True).iloc[0]
+    )
     latest_improvement = metrics.loc[metrics["delta_vs_prev_roc_auc"].notna()].sort_values(
         "run_timestamp",
         kind="stable",
     )
-    latest_delta = latest_improvement.iloc[-1]["delta_vs_prev_roc_auc"] if not latest_improvement.empty else None
+    latest_delta = (
+        latest_improvement.iloc[-1]["delta_vs_prev_roc_auc"]
+        if not latest_improvement.empty
+        else None
+    )
 
     cards = [
         _panel_card(
@@ -366,7 +379,9 @@ def _build_trend_sections(metrics: pd.DataFrame) -> str:
         return '<div class="panel">No metrics available.</div>'
 
     sections: list[str] = []
-    grouped = metrics.groupby(["holdout_season", "target_column", "variant"], dropna=False, sort=True)
+    grouped = metrics.groupby(
+        ["holdout_season", "target_column", "variant"], dropna=False, sort=True
+    )
     for (holdout_season, target_column, variant), group in grouped:
         ordered = group.sort_values("run_timestamp", kind="stable")
         charts = []
@@ -394,7 +409,7 @@ def _build_trend_sections(metrics: pd.DataFrame) -> str:
               <h3>{holdout_season} | {target_column} | {variant}</h3>
               <p class="muted">{len(ordered)} saved runs in this comparison lane.</p>
               <div class="chart-grid">
-                {''.join(charts)}
+                {"".join(charts)}
               </div>
             </div>
             """
@@ -418,7 +433,11 @@ def _build_delta_table(metrics: pd.DataFrame) -> str:
         "brier",
         "delta_vs_prev_brier",
     ]
-    latest = metrics.sort_values("run_timestamp", ascending=False, kind="stable")[delta_columns].head(20).copy()
+    latest = (
+        metrics.sort_values("run_timestamp", ascending=False, kind="stable")[delta_columns]
+        .head(20)
+        .copy()
+    )
     for column in (
         "roc_auc",
         "delta_vs_prev_roc_auc",
@@ -487,8 +506,8 @@ def _render_metric_svg(frame: pd.DataFrame, metric_name: str, *, higher_is_bette
       <line x1="{padding_left:.1f}" y1="{padding_top:.1f}" x2="{padding_left:.1f}" y2="{height - padding_bottom:.1f}" stroke="#d1d5db" />
       <line x1="{padding_left:.1f}" y1="{height - padding_bottom:.1f}" x2="{width - padding_right:.1f}" y2="{height - padding_bottom:.1f}" stroke="#d1d5db" />
       <polyline fill="none" stroke="{color}" stroke-width="2.5" points="{polyline}" />
-      {''.join(point_markup)}
-      {''.join(x_label_markup)}
+      {"".join(point_markup)}
+      {"".join(x_label_markup)}
       <text x="{padding_left:.1f}" y="10" font-size="11" fill="#6b7280">min {_fmt(min_value)}</text>
       <text x="{width - padding_right:.1f}" y="10" font-size="11" text-anchor="end" fill="#6b7280">max {_fmt(max_value)}</text>
       <text x="{width - padding_right:.1f}" y="24" font-size="12" text-anchor="end" fill="{delta_fill}" font-weight="700">latest {_fmt(last_value)} ({_fmt_signed(delta_value)})</text>
@@ -530,7 +549,9 @@ def _delta_class(value: Any, *, higher_is_better: bool) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Generate experiment comparison reports from saved run artifacts")
+    parser = argparse.ArgumentParser(
+        description="Generate experiment comparison reports from saved run artifacts"
+    )
     parser.add_argument("--models-dir", default=str(DEFAULT_MODELS_DIR))
     parser.add_argument("--output-dir", default=str(DEFAULT_REPORT_DIR))
     args = parser.parse_args()

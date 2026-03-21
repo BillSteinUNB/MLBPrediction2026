@@ -1,0 +1,1 @@
+- 2026-03-21: Overview schema currently lacks explicit improvement/regression fields, so adapter surfaces top movers via `OverviewResponse.recent_runs` (combined top improvements and regressions).

@@ -5,7 +5,10 @@ import sqlite3
 
 import pandas as pd
 
-from src.clients.historical_odds_client import import_historical_odds, load_historical_odds_for_games
+from src.clients.historical_odds_client import (
+    import_historical_odds,
+    load_historical_odds_for_games,
+)
 
 
 def test_import_historical_odds_and_load_latest_snapshot(tmp_path: Path) -> None:
@@ -53,3 +56,76 @@ def test_import_historical_odds_and_load_latest_snapshot(tmp_path: Path) -> None
     assert len(snapshots) == 1
     assert int(snapshots.iloc[0]["home_odds"]) == -125
     assert int(snapshots.iloc[0]["away_odds"]) == 115
+
+
+def test_import_historical_odds_uses_game_pk_when_present(tmp_path: Path) -> None:
+    source_path = tmp_path / "historical_odds.csv"
+    pd.DataFrame(
+        [
+            {
+                "game_pk": 777,
+                "home_odds": -105,
+                "away_odds": -115,
+                "fetched_at": "2024-04-01T19:05:00Z",
+                "book_name": "archive-book",
+            }
+        ]
+    ).to_csv(source_path, index=False)
+
+    db_path = tmp_path / "historical_odds.db"
+    with sqlite3.connect(db_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS schema_version (
+                singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+                version INTEGER NOT NULL,
+                applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS games (
+                game_pk INTEGER PRIMARY KEY,
+                date TEXT NOT NULL,
+                home_team TEXT NOT NULL,
+                away_team TEXT NOT NULL,
+                home_starter_id INTEGER,
+                away_starter_id INTEGER,
+                venue TEXT NOT NULL,
+                is_dome INTEGER NOT NULL DEFAULT 0,
+                is_abs_active INTEGER NOT NULL DEFAULT 1,
+                f5_home_score INTEGER,
+                f5_away_score INTEGER,
+                final_home_score INTEGER,
+                final_away_score INTEGER,
+                status TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS odds_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_pk INTEGER NOT NULL,
+                book_name TEXT NOT NULL,
+                market_type TEXT NOT NULL,
+                home_odds INTEGER NOT NULL,
+                away_odds INTEGER NOT NULL,
+                fetched_at TEXT NOT NULL,
+                is_frozen INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (game_pk) REFERENCES games (game_pk)
+            );
+            INSERT INTO games (game_pk, date, home_team, away_team, venue, is_dome, is_abs_active, status)
+            VALUES (777, '2024-04-01T19:05:00+00:00', 'NYY', 'BOS', 'Yankee Stadium', 0, 1, 'scheduled');
+            """
+        )
+        connection.commit()
+
+    imported_row_count = import_historical_odds(
+        source_path=source_path,
+        db_path=db_path,
+        default_market_type="f5_ml",
+    )
+
+    assert imported_row_count == 1
+    snapshots = load_historical_odds_for_games(
+        db_path=db_path,
+        game_pks=[777],
+        market_type="f5_ml",
+        book_name="archive-book",
+    )
+    assert len(snapshots) == 1
+    assert int(snapshots.iloc[0]["home_odds"]) == -105

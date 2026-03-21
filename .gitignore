@@ -20,3 +20,8 @@ temp_log_rotation_validation/
 *.csv
 temp_backtest_*/
 tmp_*
+
+# Dashboard frontend
+dashboard/node_modules/
+dashboard/dist/
+dashboard/.vite/

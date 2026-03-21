@@ -1527,8 +1527,9 @@ def test_resolve_training_years_backfills_shortened_season_with_previous_full_ye
         start_year=2019,
         end_year=2025,
         full_regular_seasons_target=7,
-        season_row_counts={2019: 2430, 2020: 898, 2021: 2430, 2022: 2430, 2023: 2430, 2024: 2430, 2025: 2430},
+        season_row_counts={2018: 2430, 2019: 2430, 2020: 898, 2021: 2430, 2022: 2430, 2023: 2430, 2024: 2430, 2025: 2430},
         shortened_season_game_threshold=2000,
+        allow_backfill_years=True,
     )
 
     assert resolved_years == [2018, 2019, 2021, 2022, 2023, 2024, 2025]
@@ -1544,6 +1545,18 @@ def test_resolve_training_years_does_not_backfill_unknown_years() -> None:
     )
 
     assert resolved_years == [2023, 2024, 2025]
+
+
+def test_resolve_training_years_respects_strict_start_year_by_default() -> None:
+    resolved_years = resolve_training_years(
+        start_year=2021,
+        end_year=2025,
+        full_regular_seasons_target=7,
+        season_row_counts={2018: 2430, 2019: 2430, 2020: 898, 2021: 2430, 2022: 2430, 2023: 2430, 2024: 2430, 2025: 2430},
+        shortened_season_game_threshold=2000,
+    )
+
+    assert resolved_years == [2021, 2022, 2023, 2024, 2025]
 
 
 def test_assert_training_data_is_complete_accepts_cached_validation_parquet(

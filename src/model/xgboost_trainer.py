@@ -184,6 +184,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--start-year", type=int, default=2019)
     parser.add_argument("--end-year", type=int, default=2025)
     parser.add_argument("--refresh-training-data", action="store_true")
+    parser.add_argument("--allow-backfill-years", action="store_true")
     parser.add_argument("--time-series-splits", type=int, default=DEFAULT_TIME_SERIES_SPLITS)
     parser.add_argument("--search-iterations", type=int, default=DEFAULT_SEARCH_ITERATIONS)
     parser.add_argument("--random-state", type=int, default=DEFAULT_RANDOM_STATE)
@@ -198,6 +199,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             start_year=args.start_year,
             end_year=args.end_year,
             output_path=training_path,
+            allow_backfill_years=args.allow_backfill_years,
             refresh=args.refresh_training_data,
             weather_fetcher=fetch_game_weather,
         )
@@ -220,6 +222,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         start_year=args.start_year,
         end_year=args.end_year,
         refresh_training_data=args.refresh_training_data,
+        allow_backfill_years=args.allow_backfill_years,
         search_iterations=args.search_iterations,
         time_series_splits=args.time_series_splits,
     )

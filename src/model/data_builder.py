@@ -218,8 +218,13 @@ def resolve_training_years(
     full_regular_seasons_target: int = DEFAULT_FULL_REGULAR_SEASONS_TARGET,
     season_row_counts: Mapping[int, int] | None = None,
     shortened_season_game_threshold: int = SHORTENED_SEASON_GAME_THRESHOLD,
+    allow_backfill_years: bool = False,
 ) -> list[int]:
-    """Resolve effective training years, replacing shortened seasons with earlier full years."""
+    """Resolve effective training years.
+
+    By default, the requested ``start_year`` is treated as a strict floor.
+    Earlier seasons are only added when ``allow_backfill_years`` is explicitly enabled.
+    """
 
     if end_year < start_year:
         raise ValueError("end_year must be greater than or equal to start_year")
@@ -231,14 +236,15 @@ def resolve_training_years(
         year for year in requested_years if row_counts.get(year, 0) >= shortened_season_game_threshold
     ]
 
-    backfill_year = start_year - 1
-    while len(effective_years) < full_regular_seasons_target and backfill_year in row_counts:
-        if (
-            backfill_year not in effective_years
-            and row_counts.get(backfill_year, 0) >= shortened_season_game_threshold
-        ):
-            effective_years.insert(0, backfill_year)
-        backfill_year -= 1
+    if allow_backfill_years:
+        backfill_year = start_year - 1
+        while len(effective_years) < full_regular_seasons_target and backfill_year in row_counts:
+            if (
+                backfill_year not in effective_years
+                and row_counts.get(backfill_year, 0) >= shortened_season_game_threshold
+            ):
+                effective_years.insert(0, backfill_year)
+            backfill_year -= 1
 
     return sorted(effective_years)
 
@@ -250,6 +256,7 @@ def build_training_dataset(
     output_path: str | Path = DEFAULT_OUTPUT_PATH,
     full_regular_seasons_target: int = DEFAULT_FULL_REGULAR_SEASONS_TARGET,
     shortened_season_game_threshold: int = SHORTENED_SEASON_GAME_THRESHOLD,
+    allow_backfill_years: bool = False,
     scheduled_start_before: str | date | datetime | None = None,
     refresh: bool = False,
     refresh_raw_data: bool = False,
@@ -282,21 +289,23 @@ def build_training_dataset(
     for year in requested_years:
         schedules_by_year[year] = _prepare_schedule_frame(resolved_schedule_fetcher(year))
 
-    backfill_year = start_year - 1
-    while backfill_year >= 1900:
-        effective_years = resolve_training_years(
-            start_year=start_year,
-            end_year=end_year,
-            full_regular_seasons_target=full_regular_seasons_target,
-            season_row_counts={year: len(frame) for year, frame in schedules_by_year.items()},
-            shortened_season_game_threshold=shortened_season_game_threshold,
-        )
-        if len(effective_years) >= full_regular_seasons_target:
-            break
-        schedules_by_year[backfill_year] = _prepare_schedule_frame(
-            resolved_schedule_fetcher(backfill_year)
-        )
-        backfill_year -= 1
+    if allow_backfill_years:
+        backfill_year = start_year - 1
+        while backfill_year >= 1900:
+            effective_years = resolve_training_years(
+                start_year=start_year,
+                end_year=end_year,
+                full_regular_seasons_target=full_regular_seasons_target,
+                season_row_counts={year: len(frame) for year, frame in schedules_by_year.items()},
+                shortened_season_game_threshold=shortened_season_game_threshold,
+                allow_backfill_years=allow_backfill_years,
+            )
+            if len(effective_years) >= full_regular_seasons_target:
+                break
+            schedules_by_year[backfill_year] = _prepare_schedule_frame(
+                resolved_schedule_fetcher(backfill_year)
+            )
+            backfill_year -= 1
 
     effective_years = tuple(
         resolve_training_years(
@@ -305,6 +314,7 @@ def build_training_dataset(
             full_regular_seasons_target=full_regular_seasons_target,
             season_row_counts={year: len(frame) for year, frame in schedules_by_year.items()},
             shortened_season_game_threshold=shortened_season_game_threshold,
+            allow_backfill_years=allow_backfill_years,
         )
     )
 

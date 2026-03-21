@@ -1,0 +1,403 @@
+{
+  "model_name": "f5_ml_model",
+  "target_column": "f5_ml_result",
+  "model_version": "20260321T163829Z_b3922ce1",
+  "data_version_hash": "b3922ce15fd811dbbc9875cc0ff5ee310a879f4b4cd043c1c28ab9503721fddc",
+  "holdout_season": 2024,
+  "train_row_count": 10289,
+  "holdout_row_count": 2088,
+  "feature_columns": [
+    "park_runs_factor",
+    "park_hr_factor",
+    "abs_active",
+    "abs_walk_rate_delta",
+    "abs_strikeout_rate_delta",
+    "weather_wind_factor",
+    "away_lineup_babip_14g",
+    "away_lineup_babip_30g",
+    "away_lineup_babip_60g",
+    "away_lineup_babip_7g",
+    "away_lineup_bb_pct_14g",
+    "away_lineup_bb_pct_30g",
+    "away_lineup_bb_pct_60g",
+    "away_lineup_bb_pct_7g",
+    "away_lineup_iso_14g",
+    "away_lineup_iso_30g",
+    "away_lineup_iso_60g",
+    "away_lineup_iso_7g",
+    "away_lineup_k_pct_14g",
+    "away_lineup_k_pct_30g",
+    "away_lineup_k_pct_60g",
+    "away_lineup_k_pct_7g",
+    "away_lineup_woba_14g",
+    "away_lineup_woba_30g",
+    "away_lineup_woba_60g",
+    "away_lineup_woba_7g",
+    "away_lineup_wrc_plus_14g",
+    "away_lineup_wrc_plus_30g",
+    "away_lineup_wrc_plus_60g",
+    "away_lineup_wrc_plus_7g",
+    "away_starter_avg_fastball_velocity_14s",
+    "away_starter_avg_fastball_velocity_30s",
+    "away_starter_avg_fastball_velocity_60s",
+    "away_starter_avg_fastball_velocity_7s",
+    "away_starter_bb_pct_14s",
+    "away_starter_bb_pct_30s",
+    "away_starter_bb_pct_60s",
+    "away_starter_bb_pct_7s",
+    "away_starter_gb_pct_14s",
+    "away_starter_gb_pct_30s",
+    "away_starter_gb_pct_60s",
+    "away_starter_gb_pct_7s",
+    "away_starter_hr_fb_pct_14s",
+    "away_starter_hr_fb_pct_30s",
+    "away_starter_hr_fb_pct_60s",
+    "away_starter_hr_fb_pct_7s",
+    "away_starter_is_opener",
+    "away_starter_k_pct_14s",
+    "away_starter_k_pct_30s",
+    "away_starter_k_pct_60s",
+    "away_starter_k_pct_7s",
+    "away_starter_pitch_mix_entropy_14s",
+    "away_starter_pitch_mix_entropy_30s",
+    "away_starter_pitch_mix_entropy_60s",
+    "away_starter_pitch_mix_entropy_7s",
+    "away_starter_uses_team_composite",
+    "away_starter_xera_14s",
+    "away_starter_xera_30s",
+    "away_starter_xera_60s",
+    "away_starter_xera_7s",
+    "away_starter_xfip_14s",
+    "away_starter_xfip_30s",
+    "away_starter_xfip_60s",
+    "away_starter_xfip_7s",
+    "away_team_babip_14g",
+    "away_team_babip_30g",
+    "away_team_babip_60g",
+    "away_team_babip_7g",
+    "away_team_bb_pct_14g",
+    "away_team_bb_pct_30g",
+    "away_team_bb_pct_60g",
+    "away_team_bb_pct_7g",
+    "away_team_bullpen_avg_rest_days_top5",
+    "away_team_bullpen_high_leverage_available_count",
+    "away_team_bullpen_pitch_count_3d",
+    "away_team_bullpen_pitch_count_5d",
+    "away_team_bullpen_xfip",
+    "away_team_defensive_efficiency_30g",
+    "away_team_defensive_efficiency_60g",
+    "away_team_defensive_efficiency_season",
+    "away_team_drs_30g",
+    "away_team_drs_60g",
+    "away_team_drs_season",
+    "away_team_f5_pythagorean_wp_30g",
+    "away_team_f5_pythagorean_wp_60g",
+    "away_team_iso_14g",
+    "away_team_iso_30g",
+    "away_team_iso_60g",
+    "away_team_iso_7g",
+    "away_team_k_pct_14g",
+    "away_team_k_pct_30g",
+    "away_team_k_pct_60g",
+    "away_team_k_pct_7g",
+    "away_team_log5_30g",
+    "away_team_log5_60g",
+    "away_team_oaa_30g",
+    "away_team_oaa_60g",
+    "away_team_oaa_season",
+    "away_team_pythagorean_wp_30g",
+    "away_team_pythagorean_wp_60g",
+    "away_team_woba_14g",
+    "away_team_woba_30g",
+    "away_team_woba_60g",
+    "away_team_woba_7g",
+    "away_team_wrc_plus_14g",
+    "away_team_wrc_plus_30g",
+    "away_team_wrc_plus_60g",
+    "away_team_wrc_plus_7g",
+    "home_lineup_babip_14g",
+    "home_lineup_babip_30g",
+    "home_lineup_babip_60g",
+    "home_lineup_babip_7g",
+    "home_lineup_bb_pct_14g",
+    "home_lineup_bb_pct_30g",
+    "home_lineup_bb_pct_60g",
+    "home_lineup_bb_pct_7g",
+    "home_lineup_iso_14g",
+    "home_lineup_iso_30g",
+    "home_lineup_iso_60g",
+    "home_lineup_iso_7g",
+    "home_lineup_k_pct_14g",
+    "home_lineup_k_pct_30g",
+    "home_lineup_k_pct_60g",
+    "home_lineup_k_pct_7g",
+    "home_lineup_woba_14g",
+    "home_lineup_woba_30g",
+    "home_lineup_woba_60g",
+    "home_lineup_woba_7g",
+    "home_lineup_wrc_plus_14g",
+    "home_lineup_wrc_plus_30g",
+    "home_lineup_wrc_plus_60g",
+    "home_lineup_wrc_plus_7g",
+    "home_starter_avg_fastball_velocity_14s",
+    "home_starter_avg_fastball_velocity_30s",
+    "home_starter_avg_fastball_velocity_60s",
+    "home_starter_avg_fastball_velocity_7s",
+    "home_starter_bb_pct_14s",
+    "home_starter_bb_pct_30s",
+    "home_starter_bb_pct_60s",
+    "home_starter_bb_pct_7s",
+    "home_starter_gb_pct_14s",
+    "home_starter_gb_pct_30s",
+    "home_starter_gb_pct_60s",
+    "home_starter_gb_pct_7s",
+    "home_starter_hr_fb_pct_14s",
+    "home_starter_hr_fb_pct_30s",
+    "home_starter_hr_fb_pct_60s",
+    "home_starter_hr_fb_pct_7s",
+    "home_starter_is_opener",
+    "home_starter_k_pct_14s",
+    "home_starter_k_pct_30s",
+    "home_starter_k_pct_60s",
+    "home_starter_k_pct_7s",
+    "home_starter_pitch_mix_entropy_14s",
+    "home_starter_pitch_mix_entropy_30s",
+    "home_starter_pitch_mix_entropy_60s",
+    "home_starter_pitch_mix_entropy_7s",
+    "home_starter_uses_team_composite",
+    "home_starter_xera_14s",
+    "home_starter_xera_30s",
+    "home_starter_xera_60s",
+    "home_starter_xera_7s",
+    "home_starter_xfip_14s",
+    "home_starter_xfip_30s",
+    "home_starter_xfip_60s",
+    "home_starter_xfip_7s",
+    "home_team_babip_14g",
+    "home_team_babip_30g",
+    "home_team_babip_60g",
+    "home_team_babip_7g",
+    "home_team_bb_pct_14g",
+    "home_team_bb_pct_30g",
+    "home_team_bb_pct_60g",
+    "home_team_bb_pct_7g",
+    "home_team_bullpen_avg_rest_days_top5",
+    "home_team_bullpen_high_leverage_available_count",
+    "home_team_bullpen_pitch_count_3d",
+    "home_team_bullpen_pitch_count_5d",
+    "home_team_bullpen_xfip",
+    "home_team_defensive_efficiency_30g",
+    "home_team_defensive_efficiency_60g",
+    "home_team_defensive_efficiency_season",
+    "home_team_drs_30g",
+    "home_team_drs_60g",
+    "home_team_drs_season",
+    "home_team_f5_pythagorean_wp_30g",
+    "home_team_f5_pythagorean_wp_60g",
+    "home_team_iso_14g",
+    "home_team_iso_30g",
+    "home_team_iso_60g",
+    "home_team_iso_7g",
+    "home_team_k_pct_14g",
+    "home_team_k_pct_30g",
+    "home_team_k_pct_60g",
+    "home_team_k_pct_7g",
+    "home_team_log5_30g",
+    "home_team_log5_60g",
+    "home_team_oaa_30g",
+    "home_team_oaa_60g",
+    "home_team_oaa_season",
+    "home_team_pythagorean_wp_30g",
+    "home_team_pythagorean_wp_60g",
+    "home_team_woba_14g",
+    "home_team_woba_30g",
+    "home_team_woba_60g",
+    "home_team_woba_7g",
+    "home_team_wrc_plus_14g",
+    "home_team_wrc_plus_30g",
+    "home_team_wrc_plus_60g",
+    "home_team_wrc_plus_7g"
+  ],
+  "best_params": {
+    "subsample": 0.8,
+    "reg_lambda": 2.0,
+    "reg_alpha": 0.1,
+    "n_estimators": 300,
+    "min_child_weight": 7,
+    "max_depth": 4,
+    "learning_rate": 0.01,
+    "gamma": 0.0,
+    "colsample_bytree": 0.6
+  },
+  "cv_best_log_loss": 0.6695211057838979,
+  "holdout_metrics": {
+    "accuracy": 0.5814176245210728,
+    "log_loss": 0.6749375125642091,
+    "roc_auc": 0.6099365808823529
+  },
+  "feature_importance_rankings": [
+    {
+      "feature": "away_team_log5_60g",
+      "importance": 0.02058872953057289
+    },
+    {
+      "feature": "home_team_log5_60g",
+      "importance": 0.020343966782093048
+    },
+    {
+      "feature": "home_team_log5_30g",
+      "importance": 0.01505978498607874
+    },
+    {
+      "feature": "away_team_log5_30g",
+      "importance": 0.014197091571986675
+    },
+    {
+      "feature": "home_starter_k_pct_60s",
+      "importance": 0.008069663308560848
+    },
+    {
+      "feature": "home_starter_k_pct_7s",
+      "importance": 0.008006731979548931
+    },
+    {
+      "feature": "home_starter_xera_60s",
+      "importance": 0.007883957587182522
+    },
+    {
+      "feature": "home_lineup_wrc_plus_7g",
+      "importance": 0.007626501843333244
+    },
+    {
+      "feature": "home_team_wrc_plus_60g",
+      "importance": 0.007445814553648233
+    },
+    {
+      "feature": "away_starter_k_pct_60s",
+      "importance": 0.007341139018535614
+    },
+    {
+      "feature": "home_team_wrc_plus_7g",
+      "importance": 0.0071471319533884525
+    },
+    {
+      "feature": "away_starter_xera_30s",
+      "importance": 0.006873929873108864
+    },
+    {
+      "feature": "away_team_woba_14g",
+      "importance": 0.00680293794721365
+    },
+    {
+      "feature": "home_starter_k_pct_30s",
+      "importance": 0.006730454973876476
+    },
+    {
+      "feature": "away_starter_k_pct_30s",
+      "importance": 0.006622024811804295
+    },
+    {
+      "feature": "home_starter_k_pct_14s",
+      "importance": 0.006562201306223869
+    },
+    {
+      "feature": "away_team_wrc_plus_14g",
+      "importance": 0.006484279874712229
+    },
+    {
+      "feature": "home_lineup_iso_7g",
+      "importance": 0.006447081919759512
+    },
+    {
+      "feature": "home_starter_xera_30s",
+      "importance": 0.006361133418977261
+    },
+    {
+      "feature": "home_starter_xera_7s",
+      "importance": 0.006245172116905451
+    },
+    {
+      "feature": "home_team_woba_7g",
+      "importance": 0.006243793293833733
+    },
+    {
+      "feature": "away_team_wrc_plus_30g",
+      "importance": 0.00619414821267128
+    },
+    {
+      "feature": "home_team_iso_7g",
+      "importance": 0.006154791451990604
+    },
+    {
+      "feature": "home_lineup_woba_7g",
+      "importance": 0.0061265891417860985
+    },
+    {
+      "feature": "home_lineup_wrc_plus_60g",
+      "importance": 0.0060882861725986
+    }
+  ],
+  "search_space": {
+    "max_depth": [
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "n_estimators": [
+      100,
+      200,
+      300,
+      400,
+      500
+    ],
+    "learning_rate": [
+      0.01,
+      0.03,
+      0.05,
+      0.07,
+      0.1
+    ],
+    "subsample": [
+      0.7,
+      0.8,
+      0.9,
+      1.0
+    ],
+    "colsample_bytree": [
+      0.6,
+      0.7,
+      0.8,
+      0.9,
+      1.0
+    ],
+    "min_child_weight": [
+      1,
+      3,
+      5,
+      7
+    ],
+    "gamma": [
+      0.0,
+      0.1,
+      0.3,
+      0.5
+    ],
+    "reg_alpha": [
+      0.0,
+      0.01,
+      0.1,
+      1.0
+    ],
+    "reg_lambda": [
+      0.5,
+      1.0,
+      2.0,
+      4.0
+    ]
+  },
+  "time_series_splits": 5,
+  "trained_at": "2026-03-21T16:42:35.063324+00:00"
+}
