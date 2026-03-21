@@ -60,6 +60,45 @@ def test_fetch_statcast_range_saves_daily_parquet_and_only_fetches_missing_dates
     ]
 
 
+def test_fetch_statcast_range_falls_back_to_direct_csv_when_pybaseball_parse_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from src.clients import statcast_client
+
+    def broken_statcast(
+        start_dt: str,
+        end_dt: str,
+        team: str | None = None,
+        verbose: bool = True,
+        parallel: bool = True,
+    ) -> pd.DataFrame:
+        raise pd.errors.ParserError("malformed csv")
+
+    def fallback_day(query_date):
+        assert query_date.isoformat() == "2025-09-01"
+        return pd.DataFrame(
+            {
+                "game_date": ["2025-09-01"],
+                "game_pk": [20250901],
+                "launch_speed": [101.2],
+            }
+        )
+
+    monkeypatch.setattr(statcast_client, "statcast", broken_statcast)
+    monkeypatch.setattr(statcast_client, "_fetch_statcast_day_direct", fallback_day)
+
+    result = statcast_client.fetch_statcast_range(
+        "2025-09-01",
+        "2025-09-01",
+        raw_data_root=tmp_path,
+    )
+
+    assert len(result) == 1
+    assert result.loc[0, "game_pk"] == 20250901
+    assert (tmp_path / "statcast" / "statcast_2025-09-01.parquet").exists()
+
+
 def test_fetch_batting_and_pitching_stats_persist_parquet_with_advanced_metrics(
     tmp_path: Path,
     monkeypatch,
@@ -316,6 +355,40 @@ def test_fetch_team_game_logs_falls_back_to_pandas3_safe_postprocess(
     assert team_logs_df["Home"].tolist() == [True]
     assert team_logs_df["Offense_R"].tolist() == [5]
     assert (tmp_path / "team_game_logs" / "TBR_2025.parquet").exists()
+
+
+def test_fetch_team_game_logs_uses_season_appropriate_athletics_code(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from src.clients import statcast_client
+
+    requested: list[tuple[int, str, str]] = []
+
+    def fake_team_game_logs(season: int, team: str, log_type: str = "batting") -> pd.DataFrame:
+        requested.append((season, team, log_type))
+        return pd.DataFrame(
+            [["2024-09-01", 5, True]],
+            columns=pd.MultiIndex.from_tuples(
+                [
+                    ("Offense", "Date"),
+                    ("Offense", "R"),
+                    ("Unnamed: 0_level_0", "Home"),
+                ]
+            ),
+        )
+
+    monkeypatch.setattr(statcast_client, "team_game_logs", fake_team_game_logs)
+
+    statcast_client.fetch_team_game_logs(2024, "OAK", raw_data_root=tmp_path)
+    statcast_client.fetch_team_game_logs(2025, "OAK", raw_data_root=tmp_path, refresh=True)
+
+    assert requested == [
+        (2024, "OAK", "batting"),
+        (2025, "ATH", "batting"),
+    ]
+    assert (tmp_path / "team_game_logs" / "OAK_2024.parquet").exists()
+    assert (tmp_path / "team_game_logs" / "ATH_2025.parquet").exists()
 
 
 def test_fetch_catcher_framing_regenerates_stale_cache_when_metadata_changes(

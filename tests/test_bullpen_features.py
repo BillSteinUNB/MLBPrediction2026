@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -321,17 +322,101 @@ def test_compute_bullpen_features_returns_defaults_for_first_three_days(
     assert by_name["home_team_bullpen_xfip"] == pytest.approx(4.2)
     assert by_name["home_team_bullpen_high_leverage_available_count"] == 5.0
 
-    with sqlite3.connect(db_path) as connection:
-        stored = connection.execute(
-            """
-            SELECT as_of_timestamp, window_size
-            FROM features
-            WHERE game_pk = ? AND feature_name = ?
-            """,
-            (7101, "home_team_bullpen_pitch_count_3d"),
-        ).fetchone()
 
-    assert stored == ("2025-04-01T00:00:00+00:00", 3)
+def test_fetch_season_bullpen_metrics_reuses_persisted_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.features import bullpen as bullpen_module
+
+    db_path = tmp_path / "bullpen_cache.db"
+    init_db(db_path)
+    _seed_game(
+        db_path,
+        game_pk=7201,
+        game_date="2025-04-10T20:05:00+00:00",
+        home_team="NYY",
+        away_team="BOS",
+        home_starter_id=100,
+        away_starter_id=400,
+    )
+
+    cached_metrics = pd.DataFrame(
+        [
+            {
+                "game_pk": 7201,
+                "game_date": "2025-04-10",
+                "team": "NYY",
+                "pitcher_id": 15,
+                "pitch_count": 18,
+                "innings_pitched": 1.0,
+                "xfip": 3.6,
+                "inherited_runners": 1.0,
+                "inherited_runners_scored": 0.0,
+            },
+            {
+                "game_pk": 7201,
+                "game_date": "2025-04-10",
+                "team": "BOS",
+                "pitcher_id": 25,
+                "pitch_count": 16,
+                "innings_pitched": 1.0,
+                "xfip": 4.1,
+                "inherited_runners": 2.0,
+                "inherited_runners_scored": 1.0,
+            },
+        ]
+    )
+    fetch_calls: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(bullpen_module, "DERIVED_CACHE_ROOT", tmp_path / "derived_bullpen")
+
+    def _fake_fetch_statcast_range(start_date, end_date, refresh=False):
+        _ = refresh
+        fetch_calls.append((str(start_date), str(end_date)))
+        return pd.DataFrame({"placeholder": []})
+
+    monkeypatch.setattr(bullpen_module, "fetch_statcast_range", _fake_fetch_statcast_range)
+    monkeypatch.setattr(
+        bullpen_module,
+        "_build_relief_metrics_from_statcast",
+        lambda games, statcast_frame: cached_metrics.loc[
+            :, ["game_pk", "game_date", "team", "pitcher_id", "pitch_count", "innings_pitched", "xfip"]
+        ].copy(),
+    )
+    monkeypatch.setattr(
+        bullpen_module,
+        "_build_inherited_runner_lookup",
+        lambda games, season, refresh, team_logs_fetcher: cached_metrics.loc[
+            :, ["game_pk", "game_date", "team", "inherited_runners", "inherited_runners_scored"]
+        ].copy(),
+    )
+
+    first = bullpen_module._fetch_season_bullpen_metrics(
+        2025,
+        db_path=db_path,
+        end_date=date(2025, 4, 10),
+        refresh=False,
+        team_logs_fetcher=lambda *_args, **_kwargs: pd.DataFrame(),
+    )
+
+    assert fetch_calls == [("2025-04-10", "2025-04-10")]
+    assert first.equals(cached_metrics)
+
+    def _unexpected_fetch(*_args, **_kwargs):
+        raise AssertionError("statcast fetch should not run when cache is present")
+
+    monkeypatch.setattr(bullpen_module, "fetch_statcast_range", _unexpected_fetch)
+
+    second = bullpen_module._fetch_season_bullpen_metrics(
+        2025,
+        db_path=db_path,
+        end_date=date(2025, 4, 10),
+        refresh=False,
+        team_logs_fetcher=lambda *_args, **_kwargs: pd.DataFrame(),
+    )
+
+    assert second.equals(cached_metrics)
 
 
 def test_compute_bullpen_features_handles_empty_metrics_without_dt_accessor_failure(

@@ -39,6 +39,7 @@ from src.model.stacking import (
 )
 from src.model.xgboost_trainer import (
     DEFAULT_RANDOM_STATE,
+    DEFAULT_XGBOOST_N_JOBS,
     _load_training_dataframe,
     _resolve_numeric_feature_columns,
 )
@@ -447,6 +448,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    _configure_cli_logging()
 
     result = run_walk_forward_backtest(
         training_data=args.training_data,
@@ -488,6 +490,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     )
     return 0
+
+
+def _configure_cli_logging() -> None:
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 def _evaluate_window(
@@ -950,7 +957,7 @@ def _build_estimator(*, seed: int, estimator_kwargs: Mapping[str, Any]) -> XGBCl
         eval_metric="logloss",
         random_state=seed,
         tree_method="hist",
-        n_jobs=1,
+        n_jobs=DEFAULT_XGBOOST_N_JOBS,
         verbosity=0,
         **dict(estimator_kwargs),
     )

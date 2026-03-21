@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
+import re
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from math import prod
@@ -40,6 +42,21 @@ _MODEL_SPECS = (
     {"model_name": "f5_ml_model", "target_column": "f5_ml_result", "drop_ties": True},
     {"model_name": "f5_rl_model", "target_column": "f5_rl_result", "drop_ties": False},
 )
+
+
+def _resolve_xgboost_n_jobs() -> int:
+    configured = os.getenv("MLB_XGBOOST_N_JOBS")
+    if configured is not None:
+        try:
+            return max(1, int(configured))
+        except ValueError:
+            logger.warning("Ignoring invalid MLB_XGBOOST_N_JOBS value: %s", configured)
+
+    detected_cpu_count = os.cpu_count() or 1
+    return max(1, detected_cpu_count - 1)
+
+
+DEFAULT_XGBOOST_N_JOBS = _resolve_xgboost_n_jobs()
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +172,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Train F5 XGBoost models with temporal CV")
     parser.add_argument("--training-data", default=str(DEFAULT_OUTPUT_PATH))
     parser.add_argument("--output-dir", default=str(DEFAULT_MODEL_OUTPUT_DIR))
+    parser.add_argument("--experiment-name")
     parser.add_argument("--holdout-season", type=int, default=2025)
     parser.add_argument("--start-year", type=int, default=2019)
     parser.add_argument("--end-year", type=int, default=2025)
@@ -177,9 +195,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             weather_fetcher=fetch_game_weather,
         )
 
+    resolved_output_dir = _resolve_experiment_output_dir(args.output_dir, args.experiment_name)
+
     result = train_f5_models(
         training_data=training_path,
-        output_dir=args.output_dir,
+        output_dir=resolved_output_dir,
         holdout_season=args.holdout_season,
         time_series_splits=args.time_series_splits,
         search_iterations=args.search_iterations,
@@ -294,7 +314,7 @@ def _build_estimator(*, random_state: int) -> XGBClassifier:
         eval_metric="logloss",
         random_state=random_state,
         tree_method="hist",
-        n_jobs=1,
+        n_jobs=DEFAULT_XGBOOST_N_JOBS,
         verbosity=0,
     )
 
@@ -319,6 +339,7 @@ def _resolve_numeric_feature_columns(dataframe: pd.DataFrame) -> list[str]:
         column
         for column in _feature_columns(dataframe)
         if pd.api.types.is_numeric_dtype(dataframe[column])
+        and dataframe[column].nunique(dropna=False) > 1
     ]
 
 
@@ -360,6 +381,20 @@ def _resolve_data_version_hash(dataframe: pd.DataFrame) -> str:
 def _build_model_version(data_version_hash: str) -> str:
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     return f"{timestamp}_{data_version_hash[:8]}"
+
+
+def _resolve_experiment_output_dir(
+    output_dir: str | Path,
+    experiment_name: str | None,
+) -> Path:
+    resolved_output_dir = Path(output_dir)
+    if not experiment_name:
+        return resolved_output_dir
+
+    slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", experiment_name.strip().lower()).strip("-.")
+    if not slug:
+        raise ValueError("experiment_name must contain at least one alphanumeric character")
+    return resolved_output_dir / slug
 
 
 def _resolve_search_iterations(

@@ -24,6 +24,7 @@ OPENWEATHER_API_BASE_URL = "https://api.openweathermap.org"
 OPENWEATHER_FORECAST_PATH = "/data/2.5/forecast"
 HTTP_TIMEOUT = 30.0
 WEATHER_CACHE_HOURS = 6
+OPENWEATHER_FORECAST_LOOKAHEAD = timedelta(days=5)
 DEFAULT_AIR_DENSITY = 1.225
 R_DRY_AIR = 287.05
 R_WATER_VAPOR = 461.495
@@ -390,6 +391,12 @@ def _build_weather_data(
     )
 
 
+def _can_fetch_forecast_for_game_time(game_datetime: datetime | str) -> bool:
+    normalized_game_time = _normalize_datetime(game_datetime)
+    current_time = datetime.now(timezone.utc)
+    return current_time <= normalized_game_time <= (current_time + OPENWEATHER_FORECAST_LOOKAHEAD)
+
+
 def fetch_game_weather(
     team_abbr: str,
     game_datetime: datetime | str,
@@ -410,6 +417,14 @@ def fetch_game_weather(
     if cached_weather is not None:
         return cached_weather
 
+    if not _can_fetch_forecast_for_game_time(normalized_game_time):
+        logger.debug(
+            "Skipping weather API lookup for %s at %s because the forecast API cannot cover that timestamp",
+            team_abbr.upper(),
+            normalized_game_time.isoformat(),
+        )
+        return _get_default_weather(is_dome=False)
+
     resolved_api_key = _resolve_api_key(api_key)
 
     try:
@@ -426,7 +441,7 @@ def fetch_game_weather(
 
         closest_forecast = _find_closest_forecast(forecasts, normalized_game_time)
         if closest_forecast is None:
-            logger.warning(
+            logger.debug(
                 "No forecast within %s hours for %s at %s",
                 WEATHER_CACHE_HOURS,
                 team_abbr.upper(),

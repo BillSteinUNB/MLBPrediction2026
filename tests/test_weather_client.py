@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from src.clients.weather_client import (
     _cache_weather,
+    _can_fetch_forecast_for_game_time,
     _calculate_air_density,
     _calculate_wind_factor,
     _find_closest_forecast,
@@ -86,6 +87,14 @@ def test_find_closest_forecast_respects_time_window() -> None:
     assert match["dt"] == int(GAME_TIME.timestamp())
 
 
+def test_can_fetch_forecast_for_game_time_only_allows_openweather_future_window() -> None:
+    now = datetime.now(UTC)
+
+    assert _can_fetch_forecast_for_game_time(now + timedelta(hours=1)) is True
+    assert _can_fetch_forecast_for_game_time(now - timedelta(minutes=1)) is False
+    assert _can_fetch_forecast_for_game_time(now + timedelta(days=6)) is False
+
+
 def test_get_default_weather_sets_neutral_values() -> None:
     weather = _get_default_weather(is_dome=True)
 
@@ -140,6 +149,10 @@ def test_fetch_game_weather_uses_retrieval_time_for_cache_ttl(
 ) -> None:
     db_path = tmp_path / "weather.db"
     monkeypatch.setattr("src.clients.weather_client._load_settings_yaml", _stadium_settings)
+    monkeypatch.setattr(
+        "src.clients.weather_client._can_fetch_forecast_for_game_time",
+        lambda _value: True,
+    )
 
     forecast_time = GAME_TIME + timedelta(hours=3)
     payload = {
@@ -207,12 +220,36 @@ def test_fetch_game_weather_skips_dome_without_api_call(
     assert calls["count"] == 0
 
 
+def test_fetch_game_weather_skips_historical_open_air_without_api_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("src.clients.weather_client._load_settings_yaml", _stadium_settings)
+
+    calls = {"count": 0}
+
+    def _unexpected_fetch(**_kwargs: object) -> dict[str, object]:
+        calls["count"] += 1
+        raise AssertionError("historical weather lookup should not hit forecast API")
+
+    monkeypatch.setattr("src.clients.weather_client._fetch_from_api", _unexpected_fetch)
+
+    historical_game_time = datetime.now(UTC) - timedelta(days=30)
+    weather = fetch_game_weather("NYY", historical_game_time)
+
+    assert weather == _get_default_weather(is_dome=False)
+    assert calls["count"] == 0
+
+
 def test_fetch_game_weather_fetches_open_air_and_then_uses_cache(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     db_path = tmp_path / "weather.db"
     monkeypatch.setattr("src.clients.weather_client._load_settings_yaml", _stadium_settings)
+    monkeypatch.setattr(
+        "src.clients.weather_client._can_fetch_forecast_for_game_time",
+        lambda _value: True,
+    )
 
     payload = {
         "list": [
@@ -265,6 +302,24 @@ def test_fetch_game_weather_returns_default_on_api_failure(
     weather = fetch_game_weather("LAD", GAME_TIME, api_key="test-key", db_path=tmp_path / "x.db")
 
     assert weather == _get_default_weather(is_dome=False)
+
+
+def test_fetch_game_weather_logs_forecast_miss_at_debug(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr("src.clients.weather_client._load_settings_yaml", _stadium_settings)
+    monkeypatch.setattr(
+        "src.clients.weather_client._fetch_from_api",
+        lambda **_kwargs: {"list": []},
+    )
+
+    with caplog.at_level("WARNING"):
+        weather = fetch_game_weather("LAD", GAME_TIME, api_key="test-key", db_path=tmp_path / "x.db")
+
+    assert weather == _get_default_weather(is_dome=False)
+    assert "No forecast within" not in caplog.text
 
 
 def test_fetch_game_weather_invalid_team_raises(monkeypatch: pytest.MonkeyPatch) -> None:

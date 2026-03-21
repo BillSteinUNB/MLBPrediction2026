@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import hashlib
 import logging
-import sqlite3
 from collections.abc import Callable, Sequence
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
@@ -10,7 +10,7 @@ from typing import Any
 import pandas as pd
 
 from src.clients.statcast_client import fetch_statcast_range, fetch_team_game_logs
-from src.db import DEFAULT_DB_PATH, init_db
+from src.db import DEFAULT_DB_PATH, init_db, sqlite_connection
 from src.models.features import GameFeatures
 
 
@@ -23,6 +23,9 @@ DEFAULT_AVG_REST_DAYS = float(DEFAULT_MIN_SEASON_DAYS)
 AVAILABLE_REST_DAYS_THRESHOLD = 2
 LEAGUE_HR_FB_RATE = 0.11
 FIP_CONSTANT = 3.2
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DERIVED_CACHE_ROOT = REPO_ROOT / "data" / "raw" / "derived" / "bullpen"
+BULLPEN_METRICS_CACHE_VERSION = 1
 
 _BullpenMetricsFetcher = Callable[..., pd.DataFrame]
 _TeamLogsFetcher = Callable[..., pd.DataFrame]
@@ -278,7 +281,7 @@ def _coerce_date(value: str | date | datetime) -> date:
 
 
 def _load_games_for_date(db_path: Path, target_day: date) -> pd.DataFrame:
-    with sqlite3.connect(db_path) as connection:
+    with sqlite_connection(db_path, builder_optimized=True) as connection:
         return pd.read_sql_query(
             """
             SELECT game_pk, date, home_team, away_team
@@ -294,7 +297,7 @@ def _load_games_for_date(db_path: Path, target_day: date) -> pd.DataFrame:
 def _resolve_season_day(db_path: Path, target_day: date, bullpen_metrics: pd.DataFrame) -> int:
     season_start_candidates: list[date] = []
 
-    with sqlite3.connect(db_path) as connection:
+    with sqlite_connection(db_path, builder_optimized=True) as connection:
         row = connection.execute(
             """
             SELECT MIN(substr(date, 1, 10))
@@ -405,6 +408,10 @@ def _fetch_season_bullpen_metrics(
     if games.empty:
         return _empty_bullpen_metrics()
 
+    cache_path = _bullpen_metrics_cache_path(season, games)
+    if cache_path.exists() and not refresh:
+        return pd.read_parquet(cache_path)
+
     min_day = pd.Timestamp(games["game_date"].min()).date()
     max_day = pd.Timestamp(games["game_date"].max()).date()
     statcast_frame = fetch_statcast_range(min_day.isoformat(), max_day.isoformat(), refresh=refresh)
@@ -436,11 +443,13 @@ def _fetch_season_bullpen_metrics(
         merged["inherited_runners_scored"],
         errors="coerce",
     ).fillna(0.0)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    merged.to_parquet(cache_path, index=False)
     return merged
 
 
 def _load_season_games(db_path: Path, *, season: int, end_date: date) -> pd.DataFrame:
-    with sqlite3.connect(db_path) as connection:
+    with sqlite_connection(db_path, builder_optimized=True) as connection:
         games = pd.read_sql_query(
             """
             SELECT game_pk, date, home_team, away_team, home_starter_id, away_starter_id
@@ -464,6 +473,32 @@ def _load_season_games(db_path: Path, *, season: int, end_date: date) -> pd.Data
     for starter_column in ("home_starter_id", "away_starter_id"):
         games[starter_column] = pd.to_numeric(games[starter_column], errors="coerce").astype("Int64")
     return games.dropna(subset=["game_pk", "game_date"]).reset_index(drop=True)
+
+
+def _bullpen_metrics_cache_path(season: int, games: pd.DataFrame) -> Path:
+    normalized = games.loc[
+        :,
+        ["game_pk", "game_date", "home_team", "away_team", "home_starter_id", "away_starter_id"],
+    ].copy()
+    normalized["game_pk"] = pd.to_numeric(normalized["game_pk"], errors="coerce").astype("Int64")
+    normalized["game_date"] = pd.to_datetime(normalized["game_date"], errors="coerce").dt.strftime(
+        "%Y-%m-%d"
+    )
+    for team_column in ("home_team", "away_team"):
+        normalized[team_column] = normalized[team_column].astype(str).str.strip().str.upper()
+    for starter_column in ("home_starter_id", "away_starter_id"):
+        normalized[starter_column] = pd.to_numeric(
+            normalized[starter_column],
+            errors="coerce",
+        ).astype("Int64")
+    normalized = normalized.sort_values(["game_date", "game_pk"]).reset_index(drop=True)
+
+    digest = hashlib.sha256(
+        pd.util.hash_pandas_object(normalized, index=False).values.tobytes()
+    ).hexdigest()[:16]
+    return DERIVED_CACHE_ROOT / (
+        f"bullpen_metrics_v{BULLPEN_METRICS_CACHE_VERSION}_{season}_{digest}.parquet"
+    )
 
 
 def _build_relief_metrics_from_statcast(games: pd.DataFrame, statcast_frame: pd.DataFrame) -> pd.DataFrame:
@@ -822,7 +857,7 @@ def _persist_features(db_path: Path, features: Sequence[GameFeatures]) -> None:
         for feature in features
     ]
 
-    with sqlite3.connect(db_path) as connection:
+    with sqlite_connection(db_path, builder_optimized=True) as connection:
         connection.executemany(
             """
             DELETE FROM features

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
@@ -10,7 +9,7 @@ from typing import Any, Callable
 import pandas as pd
 
 from src.clients.statcast_client import fetch_batting_stats, fetch_team_game_logs
-from src.db import DEFAULT_DB_PATH, init_db
+from src.db import DEFAULT_DB_PATH, init_db, sqlite_connection
 from src.features.marcel_blend import blend_value, get_regression_weight
 from src.models.features import GameFeatures
 
@@ -192,7 +191,7 @@ def _coerce_date(value: str | date | datetime) -> date:
 
 
 def _load_games_for_date(db_path: Path, target_day: date) -> pd.DataFrame:
-    with sqlite3.connect(db_path) as connection:
+    with sqlite_connection(db_path, builder_optimized=True) as connection:
         return pd.read_sql_query(
             """
             SELECT game_pk, date AS game_date, home_team, away_team
@@ -559,16 +558,23 @@ def _compute_game_level_metrics(raw_logs: pd.DataFrame) -> pd.DataFrame:
             ]
         )
 
-    ab = _extract_numeric(raw_logs, "AB", "Offense_AB")
-    hits = _extract_numeric(raw_logs, "H", "Offense_H")
-    doubles = _extract_numeric(raw_logs, "2B", "Offense_2B")
-    triples = _extract_numeric(raw_logs, "3B", "Offense_3B")
-    home_runs = _extract_numeric(raw_logs, "HR", "Offense_HR")
-    walks = _extract_numeric(raw_logs, "BB", "Offense_BB")
-    strikeouts = _extract_numeric(raw_logs, "SO", "K", "Offense_SO", "Offense_K")
-    hit_by_pitch = _extract_numeric(raw_logs, "HBP", "Offense_HBP")
-    sacrifice_flies = _extract_numeric(raw_logs, "SF", "Offense_SF")
-    sacrifice_hits = _extract_numeric(raw_logs, "SH", "Offense_SH")
+    ab = _extract_numeric(raw_logs, "AB", "Offense_AB", "Batting Stats_AB")
+    hits = _extract_numeric(raw_logs, "H", "Offense_H", "Batting Stats_H")
+    doubles = _extract_numeric(raw_logs, "2B", "Offense_2B", "Batting Stats_2B")
+    triples = _extract_numeric(raw_logs, "3B", "Offense_3B", "Batting Stats_3B")
+    home_runs = _extract_numeric(raw_logs, "HR", "Offense_HR", "Batting Stats_HR")
+    walks = _extract_numeric(raw_logs, "BB", "Offense_BB", "Batting Stats_BB")
+    strikeouts = _extract_numeric(
+        raw_logs,
+        "SO",
+        "K",
+        "Offense_SO",
+        "Offense_K",
+        "Batting Stats_SO",
+    )
+    hit_by_pitch = _extract_numeric(raw_logs, "HBP", "Offense_HBP", "Batting Stats_HBP")
+    sacrifice_flies = _extract_numeric(raw_logs, "SF", "Offense_SF", "Batting Stats_SF")
+    sacrifice_hits = _extract_numeric(raw_logs, "SH", "Offense_SH", "Batting Stats_SH")
 
     singles = (hits - doubles - triples - home_runs).clip(lower=0)
     woba_numerator = (
@@ -649,7 +655,7 @@ def _persist_features(db_path: Path, features: Sequence[GameFeatures]) -> None:
     if not features:
         return
 
-    with sqlite3.connect(db_path) as connection:
+    with sqlite_connection(db_path, builder_optimized=True) as connection:
         connection.executemany(
             """
             INSERT INTO features (game_pk, feature_name, feature_value, window_size, as_of_timestamp)

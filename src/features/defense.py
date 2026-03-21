@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
@@ -15,7 +14,7 @@ from src.clients.statcast_client import (
     fetch_team_game_logs,
 )
 from src.config import _load_settings_yaml
-from src.db import DEFAULT_DB_PATH, init_db
+from src.db import DEFAULT_DB_PATH, init_db, sqlite_connection
 from src.features.adjustments.abs_adjustment import (
     DEFAULT_ABS_RETENTION_FACTOR,
     adjust_framing_for_abs,
@@ -314,7 +313,7 @@ def _coerce_date(value: str | date | datetime) -> date:
 
 
 def _load_games_for_date(db_path: Path, target_day: date) -> pd.DataFrame:
-    with sqlite3.connect(db_path) as connection:
+    with sqlite_connection(db_path, builder_optimized=True) as connection:
         return pd.read_sql_query(
             """
             SELECT game_pk, date, home_team, away_team, is_abs_active
@@ -430,11 +429,18 @@ def _normalize_offensive_game_logs(dataframe: pd.DataFrame) -> pd.DataFrame:
             errors="coerce",
         )
     else:
-        ab = _extract_numeric(dataframe, "AB", "Offense_AB")
-        hits = _extract_numeric(dataframe, "H", "Offense_H")
-        home_runs = _extract_numeric(dataframe, "HR", "Offense_HR")
-        strikeouts = _extract_numeric(dataframe, "SO", "K", "Offense_SO", "Offense_K")
-        sacrifice_flies = _extract_numeric(dataframe, "SF", "Offense_SF")
+        ab = _extract_numeric(dataframe, "AB", "Offense_AB", "Batting Stats_AB")
+        hits = _extract_numeric(dataframe, "H", "Offense_H", "Batting Stats_H")
+        home_runs = _extract_numeric(dataframe, "HR", "Offense_HR", "Batting Stats_HR")
+        strikeouts = _extract_numeric(
+            dataframe,
+            "SO",
+            "K",
+            "Offense_SO",
+            "Offense_K",
+            "Batting Stats_SO",
+        )
+        sacrifice_flies = _extract_numeric(dataframe, "SF", "Offense_SF", "Batting Stats_SF")
         balls_in_play = ab - strikeouts - home_runs + sacrifice_flies
         hits_in_play = (hits - home_runs).clip(lower=0)
         result["defensive_efficiency"] = _safe_ratio(
@@ -759,7 +765,7 @@ def _persist_features(db_path: Path, features: Sequence[GameFeatures]) -> None:
         for feature in features
     ]
 
-    with sqlite3.connect(db_path) as connection:
+    with sqlite_connection(db_path, builder_optimized=True) as connection:
         connection.executemany(
             """
             DELETE FROM features

@@ -642,6 +642,164 @@ def test_build_training_dataset_integrates_real_feature_modules_and_matches_infe
     assert dataset["data_version_hash"].nunique() == 1
 
 
+@pytest.mark.parametrize(
+    ("refresh_raw_data", "expected_refresh"),
+    [(False, False), (True, True)],
+)
+def test_build_training_dataset_separates_training_refresh_from_raw_data_refresh(
+    tmp_path: Path,
+    refresh_raw_data: bool,
+    expected_refresh: bool,
+) -> None:
+    schedule = pd.DataFrame(
+        [
+            _schedule_row(
+                4002,
+                "2025-04-10T23:05:00Z",
+                "NYY",
+                "BOS",
+                "Yankee Stadium",
+                f5_home_score=3,
+                f5_away_score=1,
+                final_home_score=4,
+                final_away_score=2,
+            )
+        ]
+    )
+    team_logs = _team_logs_by_season()
+    start_metrics = _start_metrics_by_season()
+    fielding = _fielding_by_season()
+    framing = _framing_by_season()
+    bullpen_metrics = _bullpen_metrics_by_season()
+    refresh_calls: dict[str, list[bool]] = {
+        "batting": [],
+        "team_logs": [],
+        "fielding": [],
+        "framing": [],
+        "start_metrics": [],
+        "bullpen": [],
+    }
+
+    def _batting_fetcher(season: int, **kwargs) -> pd.DataFrame:
+        refresh_calls["batting"].append(bool(kwargs.get("refresh", False)))
+        if season == 2024:
+            return pd.DataFrame(
+                {
+                    "player_id": [1, 2, 3, 4, 5, 201, 202, 203, 204, 205],
+                    "Team": ["NYY"] * 5 + ["BOS"] * 5,
+                    "PA": [200] * 10,
+                    "wRC+": [100.0] * 10,
+                    "wOBA": [0.320] * 10,
+                    "ISO": [0.170] * 10,
+                    "BABIP": [0.300] * 10,
+                    "K%": [22.0] * 10,
+                    "BB%": [8.0] * 10,
+                }
+            )
+        return pd.DataFrame()
+
+    def _team_logs_fetcher(season: int, team: str, **kwargs) -> pd.DataFrame:
+        refresh_calls["team_logs"].append(bool(kwargs.get("refresh", False)))
+        return team_logs.get((season, team), pd.DataFrame()).copy()
+
+    def _fielding_fetcher(season: int, **kwargs) -> pd.DataFrame:
+        refresh_calls["fielding"].append(bool(kwargs.get("refresh", False)))
+        return fielding.get(season, pd.DataFrame()).copy()
+
+    def _framing_fetcher(season: int, **kwargs) -> pd.DataFrame:
+        refresh_calls["framing"].append(bool(kwargs.get("refresh", False)))
+        return framing.get(season, pd.DataFrame()).copy()
+
+    def _start_metrics_fetcher(
+        season: int,
+        *,
+        db_path: Path,
+        end_date,
+        refresh: bool = False,
+    ) -> pd.DataFrame:
+        _ = db_path
+        refresh_calls["start_metrics"].append(bool(refresh))
+        dataframe = start_metrics.get(season, pd.DataFrame()).copy()
+        if dataframe.empty or end_date is None:
+            return dataframe
+        return dataframe.loc[
+            pd.to_datetime(dataframe["game_date"]).dt.date <= end_date
+        ].reset_index(drop=True)
+
+    def _bullpen_metrics_fetcher(
+        season: int,
+        *,
+        db_path: Path,
+        end_date,
+        refresh: bool = False,
+    ) -> pd.DataFrame:
+        _ = db_path
+        refresh_calls["bullpen"].append(bool(refresh))
+        dataframe = bullpen_metrics.get(season, pd.DataFrame()).copy()
+        if dataframe.empty or end_date is None:
+            return dataframe
+        return dataframe.loc[
+            pd.to_datetime(dataframe["game_date"]).dt.date <= end_date
+        ].reset_index(drop=True)
+
+    result = build_training_dataset(
+        start_year=2025,
+        end_year=2025,
+        output_path=tmp_path / f"refresh_behavior_{refresh_raw_data}.parquet",
+        full_regular_seasons_target=1,
+        shortened_season_game_threshold=0,
+        refresh=True,
+        refresh_raw_data=refresh_raw_data,
+        schedule_fetcher=lambda _year: schedule.copy(),
+        batting_stats_fetcher=_batting_fetcher,
+        team_logs_fetcher=_team_logs_fetcher,
+        fielding_stats_fetcher=_fielding_fetcher,
+        framing_stats_fetcher=_framing_fetcher,
+        start_metrics_fetcher=_start_metrics_fetcher,
+        bullpen_metrics_fetcher=_bullpen_metrics_fetcher,
+        lineup_fetcher=lambda *_args, **_kwargs: [
+            Lineup(
+                game_pk=4002,
+                team="NYY",
+                source="test",
+                confirmed=True,
+                as_of_timestamp=datetime(2025, 4, 10, 18, 0, tzinfo=timezone.utc),
+                players=[
+                    LineupPlayer(
+                        batting_order=index + 1,
+                        player_id=value,
+                        player_name=f"NYY {value}",
+                    )
+                    for index, value in enumerate((1, 2, 3, 4, 5))
+                ],
+                starting_pitcher_id=100,
+            ),
+            Lineup(
+                game_pk=4002,
+                team="BOS",
+                source="test",
+                confirmed=True,
+                as_of_timestamp=datetime(2025, 4, 10, 18, 0, tzinfo=timezone.utc),
+                players=[
+                    LineupPlayer(
+                        batting_order=index + 1,
+                        player_id=value,
+                        player_name=f"BOS {value}",
+                    )
+                    for index, value in enumerate((201, 202, 203, 204, 205))
+                ],
+                starting_pitcher_id=200,
+            ),
+        ],
+        weather_fetcher=_fake_weather_fetcher,
+    )
+
+    assert result.dataframe["game_pk"].tolist() == [4002]
+    for fetcher_name, calls in refresh_calls.items():
+        assert calls, f"{fetcher_name} fetcher was not exercised"
+        assert set(calls) == {expected_refresh}
+
+
 def test_build_training_dataset_keeps_same_day_doubleheaders_on_prior_day_feature_snapshot(
     tmp_path: Path,
 ) -> None:
@@ -869,6 +1027,160 @@ def test_build_training_dataset_skips_roster_turnover_without_lineup_history(
     assert captured["offense"] is None
     assert captured["pitching"] is None
     assert captured["defense"] is None
+
+
+def test_build_training_dataset_uses_retrosheet_lineup_ids_when_no_history_is_provided(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_lineup_ids: dict[tuple[int, str], list[int]] | None = None
+
+    def _capture_offense(*_args, **kwargs):
+        nonlocal captured_lineup_ids
+        lineup_ids = kwargs.get("lineup_player_ids")
+        if lineup_ids:
+            captured_lineup_ids = {
+                key: [int(player_id) for player_id in player_ids]
+                for key, player_ids in lineup_ids.items()
+            }
+        return []
+
+    monkeypatch.setattr("src.model.data_builder.compute_offensive_features", _capture_offense)
+    monkeypatch.setattr("src.model.data_builder.compute_pitching_features", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr("src.model.data_builder.compute_defense_features", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr("src.model.data_builder.compute_bullpen_features", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr("src.model.data_builder.compute_baseline_features", lambda *_args, **_kwargs: [])
+
+    retrosheet_lineups = pd.DataFrame(
+        [
+            {
+                "gid": "NYA202504100",
+                "team": "NYA",
+                "opp": "BOS",
+                "date": 20250410,
+                "number": 0,
+                "vishome": "h",
+                "season": 2025,
+                "start_l1": "judga001",
+                "start_l2": "sotoj001",
+                "start_l3": "stant001",
+                "start_l4": "rizzo001",
+                "start_l5": "volpa001",
+                "start_l6": "torrg001",
+                "start_l7": "wells001",
+                "start_l8": "verdu001",
+                "start_l9": "chisb001",
+            },
+            {
+                "gid": "NYA202504100",
+                "team": "BOS",
+                "opp": "NYA",
+                "date": 20250410,
+                "number": 0,
+                "vishome": "v",
+                "season": 2025,
+                "start_l1": "duran001",
+                "start_l2": "dever001",
+                "start_l3": "story001",
+                "start_l4": "casas001",
+                "start_l5": "abreu001",
+                "start_l6": "wonge001",
+                "start_l7": "refoe001",
+                "start_l8": "hamil001",
+                "start_l9": "wongc001",
+            },
+        ]
+    )
+    register = pd.DataFrame(
+        {
+            "key_retro": [
+                "judga001",
+                "sotoj001",
+                "stant001",
+                "rizzo001",
+                "volpa001",
+                "torrg001",
+                "wells001",
+                "verdu001",
+                "chisb001",
+                "duran001",
+                "dever001",
+                "story001",
+                "casas001",
+                "abreu001",
+                "wonge001",
+                "refoe001",
+                "hamil001",
+                "wongc001",
+            ],
+            "key_mlbam": [
+                "592450",
+                "665742",
+                "519317",
+                "519203",
+                "683011",
+                "686223",
+                "669224",
+                "657557",
+                "664702",
+                "677649",
+                "646240",
+                "596115",
+                "671213",
+                "677800",
+                "657136",
+                "676789",
+                "671218",
+                "543939",
+            ],
+        }
+    )
+
+    monkeypatch.setattr(
+        "src.model.data_builder.fetch_retrosheet_starting_lineups",
+        lambda **_kwargs: retrosheet_lineups.copy(),
+    )
+    monkeypatch.setattr(
+        "src.model.data_builder.fetch_chadwick_register",
+        lambda **_kwargs: register.copy(),
+    )
+
+    schedule = pd.DataFrame(
+        [
+            _schedule_row(
+                5001,
+                "2025-04-10T23:05:00Z",
+                "NYY",
+                "BOS",
+                "Yankee Stadium",
+                f5_home_score=3,
+                f5_away_score=1,
+                final_home_score=4,
+                final_away_score=2,
+            )
+        ]
+    )
+
+    result = build_training_dataset(
+        start_year=2025,
+        end_year=2025,
+        output_path=tmp_path / "retrosheet_lineups.parquet",
+        full_regular_seasons_target=1,
+        shortened_season_game_threshold=0,
+        schedule_fetcher=lambda _year: schedule.copy(),
+        team_logs_fetcher=_fake_team_logs_fetcher({}),
+        fielding_stats_fetcher=_fake_fielding_fetcher({}),
+        framing_stats_fetcher=_fake_framing_fetcher({}),
+        start_metrics_fetcher=_fake_start_metrics_fetcher({}),
+        bullpen_metrics_fetcher=_fake_bullpen_metrics_fetcher({}),
+        weather_fetcher=_fake_weather_fetcher,
+    )
+
+    assert result.dataframe["game_pk"].tolist() == [5001]
+    assert captured_lineup_ids is not None
+    assert captured_lineup_ids[(5001, "NYY")][:3] == [592450, 665742, 519317]
+    assert len(captured_lineup_ids[(5001, "NYY")]) == 9
+    assert len(captured_lineup_ids[(5001, "BOS")]) == 9
 
 
 def test_build_live_feature_frame_recomputes_same_day_features_and_ignores_stale_rows(

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Sequence
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
 
-from src.db import DEFAULT_DB_PATH, init_db
+from src.db import DEFAULT_DB_PATH, init_db, sqlite_connection
 from src.models.features import GameFeatures
 
 
@@ -156,7 +155,7 @@ def _coerce_date(value: str | date | datetime) -> date:
 
 
 def _load_games_for_date(db_path: Path, target_day: date) -> pd.DataFrame:
-    with sqlite3.connect(db_path) as connection:
+    with sqlite_connection(db_path, builder_optimized=True) as connection:
         return pd.read_sql_query(
             """
             SELECT game_pk, home_team, away_team
@@ -170,7 +169,7 @@ def _load_games_for_date(db_path: Path, target_day: date) -> pd.DataFrame:
 
 
 def _load_team_histories_before_date(db_path: Path, target_day: date) -> dict[str, pd.DataFrame]:
-    with sqlite3.connect(db_path) as connection:
+    with sqlite_connection(db_path, builder_optimized=True) as connection:
         games = pd.read_sql_query(
             """
             SELECT
@@ -281,7 +280,7 @@ def _persist_features(db_path: Path, features: Sequence[GameFeatures]) -> None:
     if not features:
         return
 
-    with sqlite3.connect(db_path) as connection:
+    with sqlite_connection(db_path, builder_optimized=True) as connection:
         connection.executemany(
             """
             INSERT INTO features (game_pk, feature_name, feature_value, window_size, as_of_timestamp)

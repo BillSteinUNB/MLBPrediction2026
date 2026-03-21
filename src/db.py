@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import sqlite3
 from pathlib import Path
 
 
 SCHEMA_VERSION = 3
 DEFAULT_DB_PATH = Path("data") / "mlb.db"
+BUILDER_SQLITE_CACHE_SIZE_KB = 64_000
 
 
 SCHEMA_STATEMENTS = (
@@ -195,3 +197,34 @@ def init_db(db_path: str | Path = DEFAULT_DB_PATH) -> Path:
         connection.commit()
 
     return database_path
+
+
+def configure_sqlite_connection(
+    connection: sqlite3.Connection,
+    *,
+    builder_optimized: bool = False,
+) -> sqlite3.Connection:
+    """Apply standard SQLite pragmas and optional builder-focused performance tuning."""
+
+    connection.execute("PRAGMA foreign_keys = ON")
+    if builder_optimized:
+        connection.execute("PRAGMA journal_mode = MEMORY")
+        connection.execute("PRAGMA synchronous = OFF")
+        connection.execute("PRAGMA temp_store = MEMORY")
+        connection.execute(f"PRAGMA cache_size = {-BUILDER_SQLITE_CACHE_SIZE_KB}")
+    return connection
+
+
+@contextmanager
+def sqlite_connection(
+    db_path: str | Path,
+    *,
+    builder_optimized: bool = False,
+):
+    """Open a SQLite connection with standard repo pragmas applied."""
+
+    connection = sqlite3.connect(db_path)
+    try:
+        yield configure_sqlite_connection(connection, builder_optimized=builder_optimized)
+    finally:
+        connection.close()

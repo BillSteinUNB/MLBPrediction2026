@@ -546,3 +546,99 @@ def test_compute_offensive_features_uses_league_average_prior_for_first_year_lin
     by_name = {row.feature_name: row.feature_value for row in rows}
     assert by_name["home_lineup_woba_1g"] == pytest.approx(expected_lineup_woba)
     assert by_name["home_lineup_woba_1g"] != pytest.approx(team_prior_blend)
+
+
+def test_compute_offensive_features_supports_current_team_log_schema(
+    tmp_path: Path,
+) -> None:
+    from src.features.offense import compute_offensive_features
+
+    db_path = tmp_path / "offense_current_schema.db"
+    init_db(db_path)
+    _seed_game(
+        db_path,
+        game_pk=560,
+        game_date="2025-04-03T20:05:00+00:00",
+        home_team="NYY",
+        away_team="BOS",
+    )
+
+    team_logs = {
+        (2025, "NYY"): pd.DataFrame(
+            {
+                "Date": ["2025-04-01", "2025-04-02"],
+                "Batting Stats_AB": [30, 32],
+                "Batting Stats_H": [10, 8],
+                "Batting Stats_2B": [2, 1],
+                "Batting Stats_3B": [0, 0],
+                "Batting Stats_HR": [1, 1],
+                "Batting Stats_BB": [3, 2],
+                "Batting Stats_SO": [6, 7],
+                "Batting Stats_HBP": [1, 1],
+                "Batting Stats_SF": [1, 1],
+                "Batting Stats_SH": [0, 0],
+            }
+        ),
+        (2025, "BOS"): pd.DataFrame(
+            {
+                "Date": ["2025-04-01", "2025-04-02"],
+                "Batting Stats_AB": [31, 30],
+                "Batting Stats_H": [7, 9],
+                "Batting Stats_2B": [1, 2],
+                "Batting Stats_3B": [0, 0],
+                "Batting Stats_HR": [1, 1],
+                "Batting Stats_BB": [2, 3],
+                "Batting Stats_SO": [9, 8],
+                "Batting Stats_HBP": [0, 1],
+                "Batting Stats_SF": [1, 0],
+                "Batting Stats_SH": [0, 0],
+            }
+        ),
+        (2024, "NYY"): pd.DataFrame(
+            {
+                "Date": ["2024-08-01"],
+                "Batting Stats_AB": [30],
+                "Batting Stats_H": [12],
+                "Batting Stats_2B": [3],
+                "Batting Stats_3B": [0],
+                "Batting Stats_HR": [5],
+                "Batting Stats_BB": [5],
+                "Batting Stats_SO": [6],
+                "Batting Stats_HBP": [1],
+                "Batting Stats_SF": [1],
+                "Batting Stats_SH": [0],
+            }
+        ),
+        (2024, "BOS"): pd.DataFrame(
+            {
+                "Date": ["2024-08-01"],
+                "Batting Stats_AB": [31],
+                "Batting Stats_H": [11],
+                "Batting Stats_2B": [2],
+                "Batting Stats_3B": [0],
+                "Batting Stats_HR": [2],
+                "Batting Stats_BB": [4],
+                "Batting Stats_SO": [7],
+                "Batting Stats_HBP": [0],
+                "Batting Stats_SF": [0],
+                "Batting Stats_SH": [0],
+            }
+        ),
+    }
+
+    def fake_team_logs_fetcher(season: int, team: str, refresh: bool = False) -> pd.DataFrame:
+        _ = refresh
+        return team_logs[(season, team)].copy()
+
+    rows = compute_offensive_features(
+        "2025-04-03",
+        db_path=db_path,
+        windows=(7,),
+        regression_weight=0,
+        team_logs_fetcher=fake_team_logs_fetcher,
+        batting_stats_fetcher=lambda *_args, **_kwargs: pd.DataFrame(),
+    )
+
+    by_name = {row.feature_name: row.feature_value for row in rows}
+    assert by_name["home_team_woba_7g"] > 0.32
+    assert by_name["away_team_woba_7g"] > 0.30

@@ -34,6 +34,7 @@ from src.model.xgboost_trainer import (
     _load_training_dataframe,
     _prepare_training_frame,
     _resolve_holdout_season,
+    _resolve_experiment_output_dir,
 )
 
 
@@ -408,6 +409,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Train F5 isotonic calibration bundles")
     parser.add_argument("--training-data", default=str(DEFAULT_OUTPUT_PATH))
     parser.add_argument("--output-dir", default=str(DEFAULT_MODEL_OUTPUT_DIR))
+    parser.add_argument("--experiment-name")
     parser.add_argument("--holdout-season", type=int, default=2025)
     parser.add_argument("--start-year", type=int, default=2019)
     parser.add_argument("--end-year", type=int, default=2025)
@@ -436,9 +438,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             weather_fetcher=fetch_game_weather,
         )
 
+    resolved_output_dir = _resolve_experiment_output_dir(args.output_dir, args.experiment_name)
+
     result = train_calibrated_models(
         training_data=training_path,
-        output_dir=args.output_dir,
+        output_dir=resolved_output_dir,
         holdout_season=args.holdout_season,
         calibration_fraction=args.calibration_fraction,
         calibration_method=args.calibration_method,

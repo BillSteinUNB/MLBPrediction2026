@@ -454,3 +454,56 @@ def test_compute_defense_features_falls_back_to_league_averages_without_team_his
     assert by_name["home_team_defensive_efficiency_season"] == pytest.approx(0.700)
     assert by_name["home_team_drs_30g"] == pytest.approx(0.0)
     assert by_name["home_team_drs_60g"] == pytest.approx(0.0)
+
+
+def test_compute_defense_features_supports_current_team_log_schema(tmp_path: Path) -> None:
+    from src.features.defense import compute_defense_features
+
+    db_path = tmp_path / "defense.db"
+    init_db(db_path)
+    _seed_game(
+        db_path,
+        game_pk=805,
+        game_date="2025-04-03T20:05:00+00:00",
+        home_team="NYY",
+        away_team="BOS",
+    )
+
+    team_logs = {
+        (2025, "NYY"): pd.DataFrame(
+            {
+                "Date": ["2025-04-01", "2025-04-02"],
+                "Opp": ["BOS", "BOS"],
+                "Batting Stats_AB": [31, 30],
+                "Batting Stats_H": [9, 7],
+                "Batting Stats_HR": [1, 0],
+                "Batting Stats_SO": [8, 6],
+                "Batting Stats_SF": [1, 1],
+            }
+        ),
+        (2025, "BOS"): pd.DataFrame(
+            {
+                "Date": ["2025-04-01", "2025-04-02"],
+                "Opp": ["NYY", "NYY"],
+                "Batting Stats_AB": [30, 31],
+                "Batting Stats_H": [6, 8],
+                "Batting Stats_HR": [1, 1],
+                "Batting Stats_SO": [9, 7],
+                "Batting Stats_SF": [1, 0],
+            }
+        ),
+    }
+
+    rows = compute_defense_features(
+        "2025-04-03",
+        db_path=db_path,
+        windows=(30,),
+        fielding_fetcher=_fake_fielding_fetcher({}),
+        framing_fetcher=_fake_framing_fetcher({}),
+        team_logs_fetcher=_fake_team_logs_fetcher(team_logs),
+    )
+
+    by_name = {row.feature_name: row.feature_value for row in rows}
+
+    assert by_name["home_team_defensive_efficiency_season"] != pytest.approx(0.700)
+    assert by_name["away_team_defensive_efficiency_season"] != pytest.approx(0.700)

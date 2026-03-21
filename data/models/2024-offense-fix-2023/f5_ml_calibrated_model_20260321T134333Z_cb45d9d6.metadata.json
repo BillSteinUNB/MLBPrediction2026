@@ -1,0 +1,219 @@
+{
+  "model_name": "f5_ml_calibrated_model",
+  "stacking_model_name": "f5_ml_stacking_model",
+  "target_column": "f5_ml_result",
+  "calibration_method": "platt",
+  "model_version": "20260321T134333Z_cb45d9d6",
+  "stacking_model_path": "data\\models\\2024-offense-fix-2023\\f5_ml_stacking_model_20260321T134333Z_cb45d9d6.joblib",
+  "train_row_count": 8099,
+  "calibration_row_count": 915,
+  "holdout_row_count": 2088,
+  "calibration_fraction": 0.1,
+  "calibration_window_start": "2023-07-15T18:10:00+00:00",
+  "calibration_window_end": "2023-10-01T19:15:00+00:00",
+  "calibrator_threshold_count": 0,
+  "holdout_metrics": {
+    "stacked_brier": 0.24414232195164748,
+    "calibrated_brier": 0.24691083056926272,
+    "brier_improvement": -0.0027685086176152396,
+    "stacked_ece": 0.02140955280892652,
+    "calibrated_ece": 0.043741179269018896,
+    "stacked_accuracy": 0.5617816091954023,
+    "calibrated_accuracy": 0.5632183908045977,
+    "stacked_log_loss": 0.6812455126506117,
+    "calibrated_log_loss": 0.6869580212631244,
+    "stacked_roc_auc": 0.5878207720588235,
+    "calibrated_roc_auc": 0.5878207720588235,
+    "stacked_reliability_diagram": [
+      {
+        "bin_index": 0,
+        "bin_lower": 0.0,
+        "bin_upper": 0.1,
+        "count": 0,
+        "mean_predicted_probability": null,
+        "empirical_positive_rate": null,
+        "absolute_gap": null
+      },
+      {
+        "bin_index": 1,
+        "bin_lower": 0.1,
+        "bin_upper": 0.2,
+        "count": 0,
+        "mean_predicted_probability": null,
+        "empirical_positive_rate": null,
+        "absolute_gap": null
+      },
+      {
+        "bin_index": 2,
+        "bin_lower": 0.2,
+        "bin_upper": 0.30000000000000004,
+        "count": 0,
+        "mean_predicted_probability": null,
+        "empirical_positive_rate": null,
+        "absolute_gap": null
+      },
+      {
+        "bin_index": 3,
+        "bin_lower": 0.30000000000000004,
+        "bin_upper": 0.4,
+        "count": 66,
+        "mean_predicted_probability": 0.3747105131501988,
+        "empirical_positive_rate": 0.45454545454545453,
+        "absolute_gap": 0.07983494139525571
+      },
+      {
+        "bin_index": 4,
+        "bin_lower": 0.4,
+        "bin_upper": 0.5,
+        "count": 629,
+        "mean_predicted_probability": 0.4572993680153172,
+        "empirical_positive_rate": 0.43720190779014306,
+        "absolute_gap": 0.020097460225174113
+      },
+      {
+        "bin_index": 5,
+        "bin_lower": 0.5,
+        "bin_upper": 0.6000000000000001,
+        "count": 938,
+        "mean_predicted_probability": 0.5513128456399581,
+        "empirical_positive_rate": 0.5287846481876333,
+        "absolute_gap": 0.022528197452324816
+      },
+      {
+        "bin_index": 6,
+        "bin_lower": 0.6000000000000001,
+        "bin_upper": 0.7000000000000001,
+        "count": 450,
+        "mean_predicted_probability": 0.6360370203853658,
+        "empirical_positive_rate": 0.6266666666666667,
+        "absolute_gap": 0.009370353718699098
+      },
+      {
+        "bin_index": 7,
+        "bin_lower": 0.7000000000000001,
+        "bin_upper": 0.8,
+        "count": 5,
+        "mean_predicted_probability": 0.7110741464756188,
+        "empirical_positive_rate": 1.0,
+        "absolute_gap": 0.28892585352438116
+      },
+      {
+        "bin_index": 8,
+        "bin_lower": 0.8,
+        "bin_upper": 0.9,
+        "count": 0,
+        "mean_predicted_probability": null,
+        "empirical_positive_rate": null,
+        "absolute_gap": null
+      },
+      {
+        "bin_index": 9,
+        "bin_lower": 0.9,
+        "bin_upper": 1.0,
+        "count": 0,
+        "mean_predicted_probability": null,
+        "empirical_positive_rate": null,
+        "absolute_gap": null
+      }
+    ],
+    "reliability_diagram": [
+      {
+        "bin_index": 0,
+        "bin_lower": 0.0,
+        "bin_upper": 0.1,
+        "count": 0,
+        "mean_predicted_probability": null,
+        "empirical_positive_rate": null,
+        "absolute_gap": null
+      },
+      {
+        "bin_index": 1,
+        "bin_lower": 0.1,
+        "bin_upper": 0.2,
+        "count": 0,
+        "mean_predicted_probability": null,
+        "empirical_positive_rate": null,
+        "absolute_gap": null
+      },
+      {
+        "bin_index": 2,
+        "bin_lower": 0.2,
+        "bin_upper": 0.30000000000000004,
+        "count": 0,
+        "mean_predicted_probability": null,
+        "empirical_positive_rate": null,
+        "absolute_gap": null
+      },
+      {
+        "bin_index": 3,
+        "bin_lower": 0.30000000000000004,
+        "bin_upper": 0.4,
+        "count": 0,
+        "mean_predicted_probability": null,
+        "empirical_positive_rate": null,
+        "absolute_gap": null
+      },
+      {
+        "bin_index": 4,
+        "bin_lower": 0.4,
+        "bin_upper": 0.5,
+        "count": 750,
+        "mean_predicted_probability": 0.484447098712974,
+        "empirical_positive_rate": 0.44133333333333336,
+        "absolute_gap": 0.04311376537964062
+      },
+      {
+        "bin_index": 5,
+        "bin_lower": 0.5,
+        "bin_upper": 0.6000000000000001,
+        "count": 1338,
+        "mean_predicted_probability": 0.521676937011225,
+        "empirical_positive_rate": 0.5657698056801196,
+        "absolute_gap": 0.044092868668894614
+      },
+      {
+        "bin_index": 6,
+        "bin_lower": 0.6000000000000001,
+        "bin_upper": 0.7000000000000001,
+        "count": 0,
+        "mean_predicted_probability": null,
+        "empirical_positive_rate": null,
+        "absolute_gap": null
+      },
+      {
+        "bin_index": 7,
+        "bin_lower": 0.7000000000000001,
+        "bin_upper": 0.8,
+        "count": 0,
+        "mean_predicted_probability": null,
+        "empirical_positive_rate": null,
+        "absolute_gap": null
+      },
+      {
+        "bin_index": 8,
+        "bin_lower": 0.8,
+        "bin_upper": 0.9,
+        "count": 0,
+        "mean_predicted_probability": null,
+        "empirical_positive_rate": null,
+        "absolute_gap": null
+      },
+      {
+        "bin_index": 9,
+        "bin_lower": 0.9,
+        "bin_upper": 1.0,
+        "count": 0,
+        "mean_predicted_probability": null,
+        "empirical_positive_rate": null,
+        "absolute_gap": null
+      }
+    ],
+    "max_reliability_gap": 0.044092868668894614,
+    "quality_gates": {
+      "brier_lt_0_25": true,
+      "ece_lt_0_05": true,
+      "reliability_gap_le_0_05": true
+    }
+  },
+  "trained_at": "2026-03-21T13:47:00.694014+00:00"
+}

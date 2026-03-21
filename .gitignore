@@ -13,3 +13,10 @@ data/logs/
 data/raw/
 temp_backtest_probe/
 temp_log_rotation_validation/
+
+# Large data artifacts
+*.parquet
+*.joblib
+*.csv
+temp_backtest_*/
+tmp_*

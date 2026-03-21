@@ -10,7 +10,11 @@ from sklearn.model_selection import TimeSeriesSplit
 
 from src.clients.weather_client import fetch_game_weather
 import src.model.xgboost_trainer as xgboost_trainer_module
-from src.model.xgboost_trainer import create_time_series_split, train_f5_models
+from src.model.xgboost_trainer import (
+    DEFAULT_XGBOOST_N_JOBS,
+    create_time_series_split,
+    train_f5_models,
+)
 
 
 def _training_frame() -> pd.DataFrame:
@@ -153,3 +157,31 @@ def test_main_rebuilds_training_data_with_live_weather_fetcher(
         )
 
     assert captured["weather_fetcher"] is fetch_game_weather
+
+
+def test_xgboost_defaults_use_more_than_one_cpu_thread_when_available() -> None:
+    estimator = xgboost_trainer_module._build_estimator(random_state=7)
+
+    assert estimator.get_params()["n_jobs"] == DEFAULT_XGBOOST_N_JOBS
+    assert DEFAULT_XGBOOST_N_JOBS >= 1
+
+
+def test_resolve_numeric_feature_columns_excludes_constant_numeric_columns() -> None:
+    frame = _training_frame().assign(
+        live_feature=lambda df: df["home_team_log5"],
+        constant_feature=1.0,
+    )
+
+    feature_columns = xgboost_trainer_module._resolve_numeric_feature_columns(frame)
+
+    assert "live_feature" in feature_columns
+    assert "constant_feature" not in feature_columns
+
+
+def test_resolve_experiment_output_dir_creates_slugged_subdirectory() -> None:
+    resolved = xgboost_trainer_module._resolve_experiment_output_dir(
+        "data/models",
+        "2024 Offense Fix",
+    )
+
+    assert resolved == xgboost_trainer_module.Path("data/models/2024-offense-fix")

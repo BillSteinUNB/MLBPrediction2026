@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import hashlib
 import math
-import sqlite3
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
@@ -12,7 +12,7 @@ import pandas as pd
 
 from src.clients.lineup_client import fetch_confirmed_lineups
 from src.clients.statcast_client import fetch_statcast_range
-from src.db import DEFAULT_DB_PATH, init_db
+from src.db import DEFAULT_DB_PATH, init_db, sqlite_connection
 from src.features.marcel_blend import blend_value, get_regression_weight
 from src.models.features import GameFeatures
 from src.models.lineup import Lineup
@@ -27,6 +27,9 @@ FIP_CONSTANT = 3.2
 LEAGUE_HR_FB_RATE = 0.11
 FASTBALL_PITCH_TYPES = {"FA", "FC", "FF", "FI", "FO", "FS", "FT", "SI", "SF"}
 FASTBALL_NAME_TOKENS = ("FASTBALL", "SINKER", "CUTTER", "SPLITTER")
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DERIVED_CACHE_ROOT = REPO_ROOT / "data" / "raw" / "derived" / "pitching"
+START_METRICS_CACHE_VERSION = 1
 METRIC_CANDIDATES: dict[str, tuple[str, ...]] = {
     "xfip": ("xfip", "xFIP"),
     "xera": ("xera", "xERA"),
@@ -210,7 +213,7 @@ def _coerce_date(value: str | date | datetime) -> date:
 
 
 def _load_games_for_date(db_path: Path, target_day: date) -> pd.DataFrame:
-    with sqlite3.connect(db_path) as connection:
+    with sqlite_connection(db_path, builder_optimized=True) as connection:
         return pd.read_sql_query(
             """
             SELECT game_pk, date, home_team, away_team, home_starter_id, away_starter_id
@@ -407,10 +410,17 @@ def _fetch_season_start_metrics(
     if start_rows.empty:
         return _empty_start_metrics()
 
+    cache_path = _start_metrics_cache_path(season, start_rows)
+    if cache_path.exists() and not refresh:
+        return pd.read_parquet(cache_path)
+
     min_day = start_rows["game_date"].min().date()
     max_day = start_rows["game_date"].max().date()
     statcast_frame = fetch_statcast_range(min_day.isoformat(), max_day.isoformat(), refresh=refresh)
-    return _build_start_metrics_from_statcast(start_rows, statcast_frame)
+    metrics = _build_start_metrics_from_statcast(start_rows, statcast_frame)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    metrics.to_parquet(cache_path, index=False)
+    return metrics
 
 
 def _load_start_rows(
@@ -429,7 +439,7 @@ def _load_start_rows(
         query += " AND substr(date, 1, 10) <= ?"
         params.append(end_date.isoformat())
 
-    with sqlite3.connect(db_path) as connection:
+    with sqlite_connection(db_path, builder_optimized=True) as connection:
         games = pd.read_sql_query(query, connection, params=params)
 
     if games.empty:
@@ -457,6 +467,26 @@ def _load_start_rows(
             )
 
     return pd.DataFrame(start_rows)
+
+
+def _start_metrics_cache_path(season: int, start_rows: pd.DataFrame) -> Path:
+    normalized = start_rows.loc[:, ["game_pk", "game_date", "team", "pitcher_id"]].copy()
+    normalized["game_pk"] = pd.to_numeric(normalized["game_pk"], errors="coerce").astype("Int64")
+    normalized["game_date"] = pd.to_datetime(normalized["game_date"], errors="coerce").dt.strftime(
+        "%Y-%m-%d"
+    )
+    normalized["team"] = normalized["team"].astype(str).str.strip().str.upper()
+    normalized["pitcher_id"] = pd.to_numeric(normalized["pitcher_id"], errors="coerce").astype("Int64")
+    normalized = normalized.sort_values(["game_date", "game_pk", "team", "pitcher_id"]).reset_index(
+        drop=True
+    )
+
+    digest = hashlib.sha256(
+        pd.util.hash_pandas_object(normalized, index=False).values.tobytes()
+    ).hexdigest()[:16]
+    return DERIVED_CACHE_ROOT / (
+        f"start_metrics_v{START_METRICS_CACHE_VERSION}_{season}_{digest}.parquet"
+    )
 
 
 def _build_start_metrics_from_statcast(
@@ -702,7 +732,7 @@ def _persist_features(db_path: Path, features: Sequence[GameFeatures]) -> None:
         for feature in features
     ]
 
-    with sqlite3.connect(db_path) as connection:
+    with sqlite_connection(db_path, builder_optimized=True) as connection:
         connection.executemany(
             """
             DELETE FROM features

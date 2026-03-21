@@ -295,3 +295,33 @@ def test_main_rebuilds_training_data_with_live_weather_fetcher(
         )
 
     assert captured["weather_fetcher"] is fetch_game_weather
+
+
+def test_main_passes_slugged_experiment_output_dir_to_training(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_train_calibrated_models(**kwargs):
+        captured.update(kwargs)
+        raise RuntimeError("stop-after-capture")
+
+    monkeypatch.setattr(calibration_module, "train_calibrated_models", _fake_train_calibrated_models)
+
+    training_path = tmp_path / "training_data.parquet"
+    _training_frame().to_parquet(training_path, index=False)
+
+    with pytest.raises(RuntimeError, match="stop-after-capture"):
+        calibration_module.main(
+            [
+                "--training-data",
+                str(training_path),
+                "--output-dir",
+                str(tmp_path / "models"),
+                "--experiment-name",
+                "2024 Offense Fix",
+            ]
+        )
+
+    assert captured["output_dir"] == tmp_path / "models" / "2024-offense-fix"

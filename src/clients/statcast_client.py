@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 from datetime import date, datetime, timedelta
@@ -7,6 +8,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 import pandas as pd
+import requests
 from pybaseball import (
     batting_stats,
     cache as pybaseball_cache,
@@ -26,6 +28,15 @@ from src.config import _load_settings_yaml
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RAW_DATA_ROOT = REPO_ROOT / "data" / "raw"
 DEFAULT_PYBASEBALL_CACHE_DIR = DEFAULT_RAW_DATA_ROOT / "pybaseball_cache"
+STATCAST_CSV_URL_TEMPLATE = (
+    "https://baseballsavant.mlb.com/statcast_search/csv"
+    "?all=true&hfPT=&hfAB=&hfBBT=&hfPR=&hfZ=&stadium=&hfBBL=&hfNewZones=&hfGT=R%7CPO%7CS%7C="
+    "&hfSea=&hfSit=&player_type=pitcher&hfOuts=&opponent=&pitcher_throws=&batter_stands=&hfSA="
+    "&game_date_gt={start_dt}&game_date_lt={end_dt}&team=&position=&hfRO=&home_road=&hfFlag=&metric_1="
+    "&hfInn=&min_pitches=0&min_results=0&group_by=name&sort_col=pitches&player_event_sort=h_launch_speed"
+    "&sort_order=desc&min_abs=0&type=details&"
+)
+STATCAST_DIRECT_FETCH_ATTEMPTS = 3
 UNQUALIFIED_LEADERBOARD_MINIMUM = 0
 FIELDING_CACHE_VERSION = 2
 CATCHER_FRAMING_CACHE_VERSION = 2
@@ -118,18 +129,51 @@ def fetch_statcast_range(
         if parquet_path.exists() and not refresh:
             daily_frame = pd.read_parquet(parquet_path)
         else:
-            fetched_frame = statcast(
-                start_dt=query_date.isoformat(),
-                end_dt=query_date.isoformat(),
-                verbose=False,
-                parallel=False,
-            )
+            try:
+                fetched_frame = _fetch_statcast_day_via_pybaseball(query_date)
+            except pd.errors.ParserError:
+                fetched_frame = _fetch_statcast_day_direct(query_date)
             daily_frame = _normalize_statcast_day(fetched_frame, query_date)
             _write_parquet(daily_frame, parquet_path)
 
         frames.append(daily_frame)
 
     return _combine_frames(frames)
+
+
+def _fetch_statcast_day_via_pybaseball(query_date: date) -> pd.DataFrame:
+    return statcast(
+        start_dt=query_date.isoformat(),
+        end_dt=query_date.isoformat(),
+        verbose=False,
+        parallel=False,
+    )
+
+
+def _fetch_statcast_day_direct(query_date: date) -> pd.DataFrame:
+    url = STATCAST_CSV_URL_TEMPLATE.format(
+        start_dt=query_date.isoformat(),
+        end_dt=query_date.isoformat(),
+    )
+    last_error: Exception | None = None
+
+    for _attempt in range(STATCAST_DIRECT_FETCH_ATTEMPTS):
+        try:
+            response = requests.get(url, timeout=60)
+            response.raise_for_status()
+            content = response.text.lstrip()
+            if not content:
+                return pd.DataFrame()
+            if content.startswith("<!DOCTYPE html") or content.startswith("<html"):
+                raise ValueError("Statcast endpoint returned HTML instead of CSV")
+            return pd.read_csv(io.StringIO(content))
+        except (requests.RequestException, pd.errors.ParserError, ValueError) as exc:
+            last_error = exc
+
+    raise RuntimeError(
+        f"Failed to fetch Statcast CSV for {query_date.isoformat()} after "
+        f"{STATCAST_DIRECT_FETCH_ATTEMPTS} attempts"
+    ) from last_error
 
 
 def fetch_pitcher_stats(
@@ -277,7 +321,7 @@ def fetch_team_game_logs(
     """Fetch Baseball Reference batting game logs for a team and store them as parquet."""
 
     raw_root = Path(raw_data_root)
-    resolved_team = TEAM_GAME_LOG_CODES.get(team.upper(), team.upper())
+    resolved_team = _resolve_team_game_log_code(team, season=season)
     if log_type == "batting":
         parquet_name = f"{resolved_team}_{season}.parquet"
     else:
@@ -302,6 +346,13 @@ def fetch_team_game_logs(
     dataframe = _stringify_columns(dataframe)
     _write_parquet(dataframe, parquet_path)
     return dataframe
+
+
+def _resolve_team_game_log_code(team: str, *, season: int) -> str:
+    normalized_team = team.strip().upper()
+    if normalized_team in {"OAK", "ATH"}:
+        return "ATH" if season >= 2025 else "OAK"
+    return TEAM_GAME_LOG_CODES.get(normalized_team, normalized_team)
 
 
 def _fetch_team_game_logs_pandas3_safe(

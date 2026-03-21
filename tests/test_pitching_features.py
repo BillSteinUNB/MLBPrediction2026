@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -656,3 +656,96 @@ def test_compute_pitching_features_uses_league_average_prior_for_first_year_star
 
     assert by_name["home_starter_xfip_1s"] == pytest.approx(expected_home_xfip)
     assert by_name["home_starter_uses_team_composite"] == 0.0
+
+
+def test_fetch_season_start_metrics_reuses_persisted_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.features import pitching as pitching_module
+
+    db_path = tmp_path / "pitching_cache.db"
+    init_db(db_path)
+    _seed_game(
+        db_path,
+        game_pk=9501,
+        game_date="2025-04-10T20:05:00+00:00",
+        home_team="NYY",
+        away_team="BOS",
+        home_starter_id=100,
+        away_starter_id=400,
+    )
+
+    cached_metrics = pd.DataFrame(
+        [
+            {
+                "game_pk": 9501,
+                "game_date": "2025-04-10",
+                "team": "NYY",
+                "pitcher_id": 100,
+                "xfip": 3.2,
+                "xera": 3.1,
+                "k_pct": 28.0,
+                "bb_pct": 6.0,
+                "gb_pct": 45.0,
+                "hr_fb_pct": 9.0,
+                "avg_fastball_velocity": 96.0,
+                "pitch_mix_entropy": 1.8,
+                "innings_pitched": 6.0,
+            },
+            {
+                "game_pk": 9501,
+                "game_date": "2025-04-10",
+                "team": "BOS",
+                "pitcher_id": 400,
+                "xfip": 3.8,
+                "xera": 3.7,
+                "k_pct": 24.0,
+                "bb_pct": 7.0,
+                "gb_pct": 43.0,
+                "hr_fb_pct": 10.0,
+                "avg_fastball_velocity": 94.8,
+                "pitch_mix_entropy": 1.6,
+                "innings_pitched": 5.0,
+            },
+        ]
+    )
+    fetch_calls: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(pitching_module, "DERIVED_CACHE_ROOT", tmp_path / "derived_pitching")
+
+    def _fake_fetch_statcast_range(start_date, end_date, refresh=False):
+        _ = refresh
+        fetch_calls.append((str(start_date), str(end_date)))
+        return pd.DataFrame({"placeholder": []})
+
+    monkeypatch.setattr(pitching_module, "fetch_statcast_range", _fake_fetch_statcast_range)
+    monkeypatch.setattr(
+        pitching_module,
+        "_build_start_metrics_from_statcast",
+        lambda start_rows, statcast_frame: cached_metrics.copy(),
+    )
+
+    first = pitching_module._fetch_season_start_metrics(
+        2025,
+        db_path=db_path,
+        end_date=date(2025, 4, 10),
+        refresh=False,
+    )
+
+    assert fetch_calls == [("2025-04-10", "2025-04-10")]
+    assert first.equals(cached_metrics)
+
+    def _unexpected_fetch(*_args, **_kwargs):
+        raise AssertionError("statcast fetch should not run when cache is present")
+
+    monkeypatch.setattr(pitching_module, "fetch_statcast_range", _unexpected_fetch)
+
+    second = pitching_module._fetch_season_start_metrics(
+        2025,
+        db_path=db_path,
+        end_date=date(2025, 4, 10),
+        refresh=False,
+    )
+
+    assert second.equals(cached_metrics)

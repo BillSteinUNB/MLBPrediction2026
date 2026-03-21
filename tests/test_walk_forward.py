@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
@@ -10,7 +11,11 @@ from types import SimpleNamespace
 import pandas as pd
 
 from src.clients.weather_client import fetch_game_weather
-from src.backtest.walk_forward import create_walk_forward_windows, run_walk_forward_backtest
+from src.backtest.walk_forward import (
+    _configure_cli_logging,
+    create_walk_forward_windows,
+    run_walk_forward_backtest,
+)
 from src.model.calibration import DEFAULT_CALIBRATION_METHOD
 
 
@@ -272,3 +277,22 @@ def test_walk_forward_cli_without_override_uses_live_calibration_default(tmp_pat
     summary_payload = json.loads(summary_path.read_text(encoding="utf-8"))
 
     assert summary_payload["calibration_method"] == DEFAULT_CALIBRATION_METHOD
+
+
+def test_configure_cli_logging_suppresses_http_client_info_noise() -> None:
+    httpx_logger = logging.getLogger("httpx")
+    httpcore_logger = logging.getLogger("httpcore")
+    original_httpx_level = httpx_logger.level
+    original_httpcore_level = httpcore_logger.level
+
+    try:
+        httpx_logger.setLevel(logging.INFO)
+        httpcore_logger.setLevel(logging.INFO)
+
+        _configure_cli_logging()
+
+        assert httpx_logger.level == logging.WARNING
+        assert httpcore_logger.level == logging.WARNING
+    finally:
+        httpx_logger.setLevel(original_httpx_level)
+        httpcore_logger.setLevel(original_httpcore_level)

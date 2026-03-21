@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import hashlib
 import json
 import logging
 import os
-import sqlite3
 import tempfile
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Callable, Mapping, Sequence
 
 import httpx
@@ -23,9 +24,11 @@ from src.clients.statcast_client import (
     fetch_pitcher_stats,
     fetch_team_game_logs,
 )
+from src.clients.chadwick_client import fetch_chadwick_register
+from src.clients.retrosheet_client import fetch_retrosheet_starting_lineups
 from src.clients.weather_client import _get_default_weather, fetch_game_weather
 from src.config import _load_settings_yaml
-from src.db import DEFAULT_DB_PATH, init_db
+from src.db import DEFAULT_DB_PATH, init_db, sqlite_connection
 from src.features.adjustments.abs_adjustment import (
     DEFAULT_STRIKEOUT_RATE_DELTA,
     DEFAULT_WALK_RATE_DELTA,
@@ -63,6 +66,7 @@ DEFAULT_PYTHAGOREAN_WINDOWS: tuple[int, ...] = (30, 60)
 DEFAULT_FULL_REGULAR_SEASONS_TARGET = 7
 SHORTENED_SEASON_GAME_THRESHOLD = 2_000
 SCHEDULE_URL = "https://statsapi.mlb.com/api/v1/schedule"
+DEFAULT_FEATURE_BUILD_CHUNK_DAYS = 14
 
 _SETTINGS = _load_settings_yaml()
 _TEAM_CODES = set(_SETTINGS["teams"].keys())
@@ -71,11 +75,23 @@ _TEAM_CODE_ALIASES.update(
     {
         "AZ": "ARI",
         "ATH": "OAK",
+        "ANA": "LAA",
+        "CHA": "CWS",
+        "CHN": "CHC",
         "CHW": "CWS",
         "KCR": "KC",
+        "KCA": "KC",
+        "LAN": "LAD",
+        "NYA": "NYY",
+        "NYN": "NYM",
         "SDP": "SD",
+        "SDN": "SD",
         "SFG": "SF",
+        "SFN": "SF",
+        "SLN": "STL",
         "TBR": "TB",
+        "TBA": "TB",
+        "WAS": "WSH",
         "WSN": "WSH",
     }
 )
@@ -136,6 +152,20 @@ LineupPlayerIdsByDate = Mapping[str | date | datetime, Mapping[tuple[int, str], 
 logger = logging.getLogger(__name__)
 
 
+def _resolve_feature_build_workers() -> int:
+    configured = os.getenv("MLB_FEATURE_BUILD_WORKERS")
+    if configured is not None:
+        try:
+            return max(1, int(configured))
+        except ValueError:
+            logger.warning("Ignoring invalid MLB_FEATURE_BUILD_WORKERS value: %s", configured)
+    detected_cpu_count = os.cpu_count() or 1
+    return max(1, detected_cpu_count - 1)
+
+
+DEFAULT_FEATURE_BUILD_WORKERS = _resolve_feature_build_workers()
+
+
 @dataclass(frozen=True, slots=True)
 class TrainingDataBuildResult:
     dataframe: pd.DataFrame
@@ -156,6 +186,19 @@ class TrainingDataCompletenessSummary:
     game_type_counts: dict[str, int]
     non_regular_game_types: dict[str, int]
     seasons: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class FeatureBuildTimingSummary:
+    module_seconds: dict[str, float]
+    total_seconds: float
+    processed_dates: int
+
+
+@dataclass(frozen=True, slots=True)
+class _FeatureChunkResult:
+    feature_rows: pd.DataFrame
+    timing_summary: FeatureBuildTimingSummary
 
 
 def resolve_training_years(
@@ -201,6 +244,7 @@ def build_training_dataset(
     shortened_season_game_threshold: int = SHORTENED_SEASON_GAME_THRESHOLD,
     scheduled_start_before: str | date | datetime | None = None,
     refresh: bool = False,
+    refresh_raw_data: bool = False,
     schedule_fetcher: ScheduleFetcher | None = None,
     batting_stats_fetcher: SeasonStatsFetcher = fetch_batting_stats,
     pitching_stats_fetcher: SeasonStatsFetcher = fetch_pitcher_stats,
@@ -266,40 +310,96 @@ def build_training_dataset(
 
     build_timestamp = datetime.now(UTC)
     resolved_lineup_fetcher = lineup_fetcher or _empty_lineups_fetcher
+    resolved_lineup_player_ids_by_date = (
+        lineup_player_ids_by_date
+        if lineup_player_ids_by_date is not None
+        else _load_historical_lineup_player_ids_by_date(
+            schedule,
+            refresh=refresh_raw_data,
+        )
+    )
     resolved_weather_fetcher = weather_fetcher or fetch_game_weather
+    feature_build_workers = _resolve_effective_feature_build_workers(
+        refresh_raw_data=refresh_raw_data,
+        batting_stats_fetcher=batting_stats_fetcher,
+        fielding_stats_fetcher=fielding_stats_fetcher,
+        framing_stats_fetcher=framing_stats_fetcher,
+        team_logs_fetcher=team_logs_fetcher,
+        lineup_fetcher=lineup_fetcher,
+        start_metrics_fetcher=start_metrics_fetcher,
+        bullpen_metrics_fetcher=bullpen_metrics_fetcher,
+        lineup_player_ids_by_date=lineup_player_ids_by_date,
+    )
 
-    temp_fd, temp_db_name = tempfile.mkstemp(prefix="training_builder_", suffix=".db")
-    os.close(temp_fd)
-    working_db_path = Path(temp_db_name)
-    try:
-        working_db_path = init_db(working_db_path)
-        _seed_games_table(working_db_path, schedule)
-        _compute_feature_modules(
-            schedule,
-            database_path=working_db_path,
-            refresh=refresh,
-            batting_stats_fetcher=batting_stats_fetcher,
-            fielding_stats_fetcher=fielding_stats_fetcher,
-            framing_stats_fetcher=framing_stats_fetcher,
-            team_logs_fetcher=team_logs_fetcher,
-            lineup_fetcher=resolved_lineup_fetcher,
-            start_metrics_fetcher=start_metrics_fetcher,
-            bullpen_metrics_fetcher=bullpen_metrics_fetcher,
-            lineup_player_ids_by_date=lineup_player_ids_by_date,
+    if feature_build_workers > 1:
+        logger.info(
+            "[build] Parallel feature generation enabled with %s workers",
+            feature_build_workers,
         )
-        feature_frame = _load_feature_frame(working_db_path)
-        logger.info("[build] Loaded %s feature rows from sqlite cache", len(feature_frame))
-        dataset = _assemble_training_rows(
+        chunk_result = _compute_feature_modules_parallel(
             schedule,
-            feature_frame=feature_frame,
-            database_path=working_db_path,
-            weather_fetcher=resolved_weather_fetcher,
+            refresh=refresh_raw_data,
+            lineup_player_ids_by_date=resolved_lineup_player_ids_by_date,
+            worker_count=feature_build_workers,
         )
-    finally:
+        feature_frame = _feature_rows_to_frame(chunk_result.feature_rows)
+        _log_feature_build_timing_summary(
+            chunk_result.timing_summary,
+            label=f"parallel/{feature_build_workers}w",
+        )
+    else:
+        temp_fd, temp_db_name = tempfile.mkstemp(prefix="training_builder_", suffix=".db")
+        os.close(temp_fd)
+        working_db_path = Path(temp_db_name)
         try:
-            working_db_path.unlink(missing_ok=True)
-        except PermissionError:
-            pass
+            working_db_path = init_db(working_db_path)
+            _seed_games_table(working_db_path, schedule)
+            timing_summary = _compute_feature_modules(
+                schedule,
+                database_path=working_db_path,
+                refresh=refresh_raw_data,
+                batting_stats_fetcher=batting_stats_fetcher,
+                fielding_stats_fetcher=fielding_stats_fetcher,
+                framing_stats_fetcher=framing_stats_fetcher,
+                team_logs_fetcher=team_logs_fetcher,
+                lineup_fetcher=resolved_lineup_fetcher,
+                start_metrics_fetcher=start_metrics_fetcher,
+                bullpen_metrics_fetcher=bullpen_metrics_fetcher,
+                lineup_player_ids_by_date=resolved_lineup_player_ids_by_date,
+            )
+            feature_rows = _load_feature_rows(working_db_path)
+            feature_frame = _feature_rows_to_frame(feature_rows)
+            _log_feature_build_timing_summary(timing_summary, label="serial")
+            logger.info("[build] Loaded %s feature rows from sqlite cache", len(feature_rows))
+            dataset = _assemble_training_rows(
+                schedule,
+                feature_frame=feature_frame,
+                database_path=working_db_path,
+                weather_fetcher=resolved_weather_fetcher,
+            )
+        finally:
+            try:
+                working_db_path.unlink(missing_ok=True)
+            except PermissionError:
+                pass
+    if feature_build_workers > 1:
+        temp_fd, temp_db_name = tempfile.mkstemp(prefix="training_builder_weather_", suffix=".db")
+        os.close(temp_fd)
+        weather_db_path = Path(temp_db_name)
+        try:
+            weather_db_path = init_db(weather_db_path)
+            logger.info("[build] Loaded %s feature rows from parallel cache", len(chunk_result.feature_rows))
+            dataset = _assemble_training_rows(
+                schedule,
+                feature_frame=feature_frame,
+                database_path=weather_db_path,
+                weather_fetcher=resolved_weather_fetcher,
+            )
+        finally:
+            try:
+                weather_db_path.unlink(missing_ok=True)
+            except PermissionError:
+                pass
 
     assert_training_data_is_leakage_free(dataset)
     _assert_targets_present(dataset)
@@ -330,6 +430,7 @@ def build_training_dataset(
                 ),
                 "row_count": int(len(dataset)),
                 "feature_column_count": int(len(_feature_columns(dataset))),
+                "feature_build_workers": int(feature_build_workers),
                 "data_version_hash": data_version_hash,
                 "build_timestamp": build_timestamp.isoformat(),
             },
@@ -409,7 +510,7 @@ def build_live_feature_frame(
             lineup_player_ids_by_date={target_day.isoformat(): lineup_player_ids},
         )
 
-        feature_frame = _load_feature_frame(working_db_path)
+        feature_frame = _feature_rows_to_frame(_load_feature_rows(working_db_path))
     finally:
         try:
             working_db_path.unlink(missing_ok=True)
@@ -737,7 +838,7 @@ def _compute_feature_modules(
     start_metrics_fetcher: StartMetricsFetcher | None,
     bullpen_metrics_fetcher: BullpenMetricsFetcher | None,
     lineup_player_ids_by_date: LineupPlayerIdsByDate | None,
-) -> None:
+) -> FeatureBuildTimingSummary:
     normalized_lineup_player_ids = _normalize_lineup_player_ids_by_date(lineup_player_ids_by_date)
     cached_team_logs_fetcher = _memoize_dataframe_fetcher(team_logs_fetcher)
     cached_batting_stats_fetcher = _memoize_dataframe_fetcher(batting_stats_fetcher)
@@ -752,8 +853,27 @@ def _compute_feature_modules(
 
     game_dates = sorted(schedule["game_date"].astype(str).unique().tolist())
     total_days = len(game_dates)
+    module_seconds = {
+        "prepare": 0.0,
+        "offense": 0.0,
+        "pitching": 0.0,
+        "defense": 0.0,
+        "bullpen": 0.0,
+        "baselines": 0.0,
+    }
+    build_started_at = perf_counter()
     for index, game_date in enumerate(game_dates, start=1):
+        day_started_at = perf_counter()
+        day_seconds = {
+            "prepare": 0.0,
+            "offense": 0.0,
+            "pitching": 0.0,
+            "defense": 0.0,
+            "bullpen": 0.0,
+            "baselines": 0.0,
+        }
         logger.info("[build %s/%s] Preparing %s", index, total_days, game_date)
+        stage_started_at = perf_counter()
         day_lineups = list(cached_lineup_fetcher(game_date))
         roster_turnover_by_team = _build_roster_turnover_by_team(
             game_date=game_date,
@@ -765,7 +885,11 @@ def _compute_feature_modules(
             database_path=database_path,
             refresh=refresh,
         )
+        stage_elapsed = perf_counter() - stage_started_at
+        module_seconds["prepare"] += stage_elapsed
+        day_seconds["prepare"] = stage_elapsed
         logger.info("[build %s/%s] offense %s", index, total_days, game_date)
+        stage_started_at = perf_counter()
         compute_offensive_features(
             game_date,
             db_path=database_path,
@@ -776,7 +900,11 @@ def _compute_feature_modules(
             team_logs_fetcher=cached_team_logs_fetcher,
             batting_stats_fetcher=cached_batting_stats_fetcher,
         )
+        stage_elapsed = perf_counter() - stage_started_at
+        module_seconds["offense"] += stage_elapsed
+        day_seconds["offense"] = stage_elapsed
         logger.info("[build %s/%s] pitching %s", index, total_days, game_date)
+        stage_started_at = perf_counter()
         compute_pitching_features(
             game_date,
             db_path=database_path,
@@ -786,7 +914,11 @@ def _compute_feature_modules(
             lineup_fetcher=cached_lineup_fetcher,
             start_metrics_fetcher=cached_start_metrics_fetcher,
         )
+        stage_elapsed = perf_counter() - stage_started_at
+        module_seconds["pitching"] += stage_elapsed
+        day_seconds["pitching"] = stage_elapsed
         logger.info("[build %s/%s] defense %s", index, total_days, game_date)
+        stage_started_at = perf_counter()
         compute_defense_features(
             game_date,
             db_path=database_path,
@@ -796,7 +928,11 @@ def _compute_feature_modules(
             framing_fetcher=cached_framing_stats_fetcher,
             team_logs_fetcher=cached_team_logs_fetcher,
         )
+        stage_elapsed = perf_counter() - stage_started_at
+        module_seconds["defense"] += stage_elapsed
+        day_seconds["defense"] = stage_elapsed
         logger.info("[build %s/%s] bullpen %s", index, total_days, game_date)
+        stage_started_at = perf_counter()
         compute_bullpen_features(
             game_date,
             db_path=database_path,
@@ -804,13 +940,209 @@ def _compute_feature_modules(
             bullpen_metrics_fetcher=cached_bullpen_metrics_fetcher,
             team_logs_fetcher=cached_team_logs_fetcher,
         )
+        stage_elapsed = perf_counter() - stage_started_at
+        module_seconds["bullpen"] += stage_elapsed
+        day_seconds["bullpen"] = stage_elapsed
         logger.info("[build %s/%s] baselines %s", index, total_days, game_date)
+        stage_started_at = perf_counter()
         compute_baseline_features(
             game_date,
             db_path=database_path,
             windows=DEFAULT_PYTHAGOREAN_WINDOWS,
         )
-        logger.info("[build %s/%s] complete %s", index, total_days, game_date)
+        stage_elapsed = perf_counter() - stage_started_at
+        module_seconds["baselines"] += stage_elapsed
+        day_seconds["baselines"] = stage_elapsed
+        logger.info(
+            "[build %s/%s] complete %s timings prepare=%.2fs offense=%.2fs pitching=%.2fs defense=%.2fs bullpen=%.2fs baselines=%.2fs total=%.2fs",
+            index,
+            total_days,
+            game_date,
+            day_seconds["prepare"],
+            day_seconds["offense"],
+            day_seconds["pitching"],
+            day_seconds["defense"],
+            day_seconds["bullpen"],
+            day_seconds["baselines"],
+            perf_counter() - day_started_at,
+        )
+
+    return FeatureBuildTimingSummary(
+        module_seconds={name: float(seconds) for name, seconds in module_seconds.items()},
+        total_seconds=float(perf_counter() - build_started_at),
+        processed_dates=total_days,
+    )
+
+
+def _resolve_effective_feature_build_workers(
+    *,
+    refresh_raw_data: bool,
+    batting_stats_fetcher: SeasonStatsFetcher,
+    fielding_stats_fetcher: SeasonStatsFetcher,
+    framing_stats_fetcher: SeasonStatsFetcher,
+    team_logs_fetcher: TeamLogsFetcher,
+    lineup_fetcher: LineupFetcher | None,
+    start_metrics_fetcher: StartMetricsFetcher | None,
+    bullpen_metrics_fetcher: BullpenMetricsFetcher | None,
+    lineup_player_ids_by_date: LineupPlayerIdsByDate | None,
+) -> int:
+    if refresh_raw_data:
+        return 1
+    if lineup_fetcher is not None:
+        return 1
+    if start_metrics_fetcher is not None or bullpen_metrics_fetcher is not None:
+        return 1
+    if lineup_player_ids_by_date is not None:
+        return 1
+    if batting_stats_fetcher is not fetch_batting_stats:
+        return 1
+    if fielding_stats_fetcher is not fetch_fielding_stats:
+        return 1
+    if framing_stats_fetcher is not fetch_catcher_framing:
+        return 1
+    if team_logs_fetcher is not fetch_team_game_logs:
+        return 1
+    return DEFAULT_FEATURE_BUILD_WORKERS
+
+
+def _compute_feature_modules_parallel(
+    schedule: pd.DataFrame,
+    *,
+    refresh: bool,
+    lineup_player_ids_by_date: LineupPlayerIdsByDate | None,
+    worker_count: int,
+) -> _FeatureChunkResult:
+    wall_started_at = perf_counter()
+    game_dates = sorted(schedule["game_date"].astype(str).unique().tolist())
+    if len(game_dates) <= 1 or worker_count <= 1:
+        temp_fd, temp_db_name = tempfile.mkstemp(prefix="training_builder_serial_", suffix=".db")
+        os.close(temp_fd)
+        working_db_path = Path(temp_db_name)
+        try:
+            working_db_path = init_db(working_db_path)
+            _seed_games_table(working_db_path, schedule)
+            timing_summary = _compute_feature_modules(
+                schedule,
+                database_path=working_db_path,
+                refresh=refresh,
+                batting_stats_fetcher=fetch_batting_stats,
+                fielding_stats_fetcher=fetch_fielding_stats,
+                framing_stats_fetcher=fetch_catcher_framing,
+                team_logs_fetcher=fetch_team_game_logs,
+                lineup_fetcher=_empty_lineups_fetcher,
+                start_metrics_fetcher=None,
+                bullpen_metrics_fetcher=None,
+                lineup_player_ids_by_date=lineup_player_ids_by_date,
+            )
+            feature_rows = _load_feature_rows(working_db_path)
+            return _FeatureChunkResult(feature_rows=feature_rows, timing_summary=timing_summary)
+        finally:
+            try:
+                working_db_path.unlink(missing_ok=True)
+            except PermissionError:
+                pass
+
+    chunked_dates = _chunk_values(game_dates, DEFAULT_FEATURE_BUILD_CHUNK_DAYS)
+    requested_workers = min(worker_count, len(chunked_dates))
+    results: list[_FeatureChunkResult] = []
+    with ProcessPoolExecutor(max_workers=requested_workers) as executor:
+        futures = [
+            executor.submit(
+                _build_feature_chunk,
+                schedule,
+                tuple(chunk_dates),
+                refresh,
+                _normalize_lineup_player_ids_by_date(lineup_player_ids_by_date),
+            )
+            for chunk_dates in chunked_dates
+        ]
+        for future in as_completed(futures):
+            results.append(future.result())
+
+    feature_rows = pd.concat([result.feature_rows for result in results], ignore_index=True)
+    timing_summary = _combine_timing_summaries([result.timing_summary for result in results])
+    timing_summary = FeatureBuildTimingSummary(
+        module_seconds=timing_summary.module_seconds,
+        total_seconds=float(perf_counter() - wall_started_at),
+        processed_dates=timing_summary.processed_dates,
+    )
+    return _FeatureChunkResult(feature_rows=feature_rows, timing_summary=timing_summary)
+
+
+def _build_feature_chunk(
+    schedule: pd.DataFrame,
+    chunk_dates: tuple[str, ...],
+    refresh: bool,
+    lineup_player_ids_by_date: dict[str, Mapping[tuple[int, str], Sequence[int]]],
+) -> _FeatureChunkResult:
+    chunk_schedule = schedule.loc[schedule["game_date"].astype(str).isin(chunk_dates)].copy()
+    temp_fd, temp_db_name = tempfile.mkstemp(prefix="training_builder_chunk_", suffix=".db")
+    os.close(temp_fd)
+    working_db_path = Path(temp_db_name)
+    try:
+        working_db_path = init_db(working_db_path)
+        _seed_games_table(working_db_path, schedule)
+        timing_summary = _compute_feature_modules(
+            chunk_schedule,
+            database_path=working_db_path,
+            refresh=refresh,
+            batting_stats_fetcher=fetch_batting_stats,
+            fielding_stats_fetcher=fetch_fielding_stats,
+            framing_stats_fetcher=fetch_catcher_framing,
+            team_logs_fetcher=fetch_team_game_logs,
+            lineup_fetcher=_empty_lineups_fetcher,
+            start_metrics_fetcher=None,
+            bullpen_metrics_fetcher=None,
+            lineup_player_ids_by_date=lineup_player_ids_by_date,
+        )
+        return _FeatureChunkResult(
+            feature_rows=_load_feature_rows(working_db_path),
+            timing_summary=timing_summary,
+        )
+    finally:
+        try:
+            working_db_path.unlink(missing_ok=True)
+        except PermissionError:
+            pass
+
+
+def _chunk_values(values: Sequence[str], chunk_size: int) -> list[list[str]]:
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
+    return [list(values[index : index + chunk_size]) for index in range(0, len(values), chunk_size)]
+
+
+def _combine_timing_summaries(
+    summaries: Sequence[FeatureBuildTimingSummary],
+) -> FeatureBuildTimingSummary:
+    combined_module_seconds: dict[str, float] = {}
+    total_seconds = 0.0
+    processed_dates = 0
+    for summary in summaries:
+        total_seconds += float(summary.total_seconds)
+        processed_dates += int(summary.processed_dates)
+        for module_name, seconds in summary.module_seconds.items():
+            combined_module_seconds[module_name] = combined_module_seconds.get(module_name, 0.0) + float(seconds)
+    return FeatureBuildTimingSummary(
+        module_seconds=combined_module_seconds,
+        total_seconds=total_seconds,
+        processed_dates=processed_dates,
+    )
+
+
+def _log_feature_build_timing_summary(summary: FeatureBuildTimingSummary, *, label: str) -> None:
+    logger.info(
+        "[build] Timing summary (%s) prepare=%.2fs offense=%.2fs pitching=%.2fs defense=%.2fs bullpen=%.2fs baselines=%.2fs total=%.2fs dates=%s",
+        label,
+        summary.module_seconds.get("prepare", 0.0),
+        summary.module_seconds.get("offense", 0.0),
+        summary.module_seconds.get("pitching", 0.0),
+        summary.module_seconds.get("defense", 0.0),
+        summary.module_seconds.get("bullpen", 0.0),
+        summary.module_seconds.get("baselines", 0.0),
+        summary.total_seconds,
+        summary.processed_dates,
+    )
 
 
 def _build_roster_turnover_by_team(
@@ -968,7 +1300,7 @@ def _seed_games_table(database_path: Path, schedule: pd.DataFrame) -> None:
         for game in schedule.to_dict(orient="records")
     ]
 
-    with sqlite3.connect(database_path) as connection:
+    with sqlite_connection(database_path, builder_optimized=True) as connection:
         connection.executemany(
             """
             INSERT OR REPLACE INTO games (
@@ -994,8 +1326,8 @@ def _seed_games_table(database_path: Path, schedule: pd.DataFrame) -> None:
         connection.commit()
 
 
-def _load_feature_frame(database_path: Path) -> pd.DataFrame:
-    with sqlite3.connect(database_path) as connection:
+def _load_feature_rows(database_path: Path) -> pd.DataFrame:
+    with sqlite_connection(database_path, builder_optimized=True) as connection:
         feature_rows = pd.read_sql_query(
             """
             SELECT game_pk, feature_name, feature_value
@@ -1005,6 +1337,10 @@ def _load_feature_frame(database_path: Path) -> pd.DataFrame:
             connection,
         )
 
+    return feature_rows
+
+
+def _feature_rows_to_frame(feature_rows: pd.DataFrame) -> pd.DataFrame:
     if feature_rows.empty:
         return pd.DataFrame(columns=["game_pk"])
 
@@ -1278,6 +1614,135 @@ def _normalize_lineup_player_ids_by_date(
     for game_date, lineup_ids in mapping.items():
         normalized[_normalize_lookup_date(game_date)] = lineup_ids
     return normalized
+
+
+def _load_historical_lineup_player_ids_by_date(
+    schedule: pd.DataFrame,
+    *,
+    refresh: bool,
+) -> dict[str, dict[tuple[int, str], list[int]]]:
+    if schedule.empty:
+        return {}
+
+    retrosheet_lineups = fetch_retrosheet_starting_lineups(refresh=refresh)
+    if retrosheet_lineups.empty:
+        return {}
+
+    normalized_lineups = _normalize_retrosheet_lineups(retrosheet_lineups, schedule)
+    if normalized_lineups.empty:
+        return {}
+
+    retrosheet_player_ids = sorted(
+        {
+            str(player_id).strip().lower()
+            for column in [f"start_l{index}" for index in range(1, 10)]
+            if column in normalized_lineups.columns
+            for player_id in normalized_lineups[column].dropna().tolist()
+            if str(player_id).strip()
+        }
+    )
+    if not retrosheet_player_ids:
+        return {}
+
+    register = fetch_chadwick_register(refresh=refresh)
+    if register.empty or "key_retro" not in register.columns or "key_mlbam" not in register.columns:
+        return {}
+
+    retrosheet_to_mlbam: dict[str, int] = {}
+    id_pairs = register[["key_retro", "key_mlbam"]].dropna().drop_duplicates()
+    for retrosheet_id, mlbam_id in id_pairs.itertuples(index=False):
+        normalized_retro_id = str(retrosheet_id).strip().lower()
+        normalized_mlbam_id = _coerce_int(mlbam_id)
+        if normalized_retro_id and normalized_mlbam_id is not None:
+            retrosheet_to_mlbam.setdefault(normalized_retro_id, int(normalized_mlbam_id))
+
+    if not retrosheet_to_mlbam:
+        return {}
+
+    lineup_mapping: dict[str, dict[tuple[int, str], list[int]]] = {}
+    lineup_columns = [column for column in [f"start_l{index}" for index in range(1, 10)] if column in normalized_lineups.columns]
+
+    for row in normalized_lineups.to_dict(orient="records"):
+        game_pk = int(row["game_pk"])
+        team = str(row["team"])
+        game_date = str(row["game_date"])
+        player_ids = [
+            retrosheet_to_mlbam[normalized_retro_id]
+            for column in lineup_columns
+            if (normalized_retro_id := str(row.get(column, "")).strip().lower()) in retrosheet_to_mlbam
+        ]
+        if not player_ids:
+            continue
+        lineup_mapping.setdefault(game_date, {})[(game_pk, team)] = player_ids
+
+    return lineup_mapping
+
+
+def _normalize_retrosheet_lineups(
+    retrosheet_lineups: pd.DataFrame,
+    schedule: pd.DataFrame,
+) -> pd.DataFrame:
+    if retrosheet_lineups.empty or schedule.empty:
+        return pd.DataFrame()
+
+    lineups = retrosheet_lineups.copy()
+    if "date" not in lineups.columns or "team" not in lineups.columns or "opp" not in lineups.columns:
+        return pd.DataFrame()
+    if "vishome" not in lineups.columns:
+        return pd.DataFrame()
+
+    lineups["game_date"] = pd.to_datetime(lineups["date"], format="%Y%m%d", errors="coerce").dt.date.astype(str)
+    lineups["team"] = lineups["team"].map(_normalize_team_code)
+    lineups["opp"] = lineups["opp"].map(_normalize_team_code)
+    lineups["vishome"] = lineups["vishome"].astype(str).str.lower()
+    lineups = lineups.dropna(subset=["game_date", "team", "opp"])
+    lineups = lineups.loc[lineups["vishome"].isin(["h", "v"])].copy()
+
+    schedule_side_rows: list[dict[str, Any]] = []
+    for game in schedule.to_dict(orient="records"):
+        schedule_side_rows.append(
+            {
+                "game_pk": int(game["game_pk"]),
+                "game_date": str(game["game_date"]),
+                "team": str(game["home_team"]),
+                "opp": str(game["away_team"]),
+                "vishome": "h",
+                "scheduled_start": str(game["scheduled_start"]),
+            }
+        )
+        schedule_side_rows.append(
+            {
+                "game_pk": int(game["game_pk"]),
+                "game_date": str(game["game_date"]),
+                "team": str(game["away_team"]),
+                "opp": str(game["home_team"]),
+                "vishome": "v",
+                "scheduled_start": str(game["scheduled_start"]),
+            }
+        )
+
+    schedule_lookup = pd.DataFrame(schedule_side_rows)
+    schedule_lookup = schedule_lookup.sort_values(
+        ["game_date", "team", "opp", "vishome", "scheduled_start", "game_pk"]
+    ).reset_index(drop=True)
+    schedule_lookup["matchup_index"] = schedule_lookup.groupby(
+        ["game_date", "team", "opp", "vishome"]
+    ).cumcount()
+
+    sort_columns = ["game_date", "team", "opp", "vishome"]
+    if "number" in lineups.columns:
+        sort_columns.append("number")
+    if "gid" in lineups.columns:
+        sort_columns.append("gid")
+    lineups = lineups.sort_values(sort_columns).reset_index(drop=True)
+    lineups["matchup_index"] = lineups.groupby(["game_date", "team", "opp", "vishome"]).cumcount()
+
+    merged = lineups.merge(
+        schedule_lookup[["game_pk", "game_date", "team", "opp", "vishome", "matchup_index"]],
+        on=["game_date", "team", "opp", "vishome", "matchup_index"],
+        how="inner",
+    )
+    return merged
 
 
 def _lineup_player_ids_by_game_team(lineups: Sequence[Lineup]) -> dict[tuple[int, str], list[int]]:
