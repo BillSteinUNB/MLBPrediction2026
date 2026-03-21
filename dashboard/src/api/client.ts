@@ -84,18 +84,14 @@ export function listRuns(skip: number = 0, limit: number = 20): Promise<t.RunSum
 }
 
 /**
- * GET /runs/:run_id — Get run detail
+ * GET /runs/detail — Get run detail by summary path
+ * @param summaryPath Path to the run summary JSON file
  */
-export function getRun(runId: string): Promise<t.RunDetail> {
-  return fetchGet(`/runs/${runId}`)
+export function getRunDetail(summaryPath: string): Promise<t.RunDetail> {
+  return fetchGet(`/runs/detail?summary_path=${encodeURIComponent(summaryPath)}`)
 }
 
-/**
- * GET /runs/:run_id/summary — Get run summary (lightweight)
- */
-export function getRunSummary(runId: string): Promise<t.RunSummary> {
-  return fetchGet(`/runs/${runId}/summary`)
-}
+
 
 // ============================================================================
 // LANES
@@ -106,13 +102,6 @@ export function getRunSummary(runId: string): Promise<t.RunSummary> {
  */
 export function listLanes(): Promise<t.Lane[]> {
   return fetchGet('/lanes')
-}
-
-/**
- * GET /lanes/:lane_id — Get lane detail
- */
-export function getLane(laneId: string): Promise<t.Lane> {
-  return fetchGet(`/lanes/${laneId}`)
 }
 
 // ============================================================================
@@ -132,24 +121,10 @@ export function listPromotions(
 }
 
 /**
- * GET /promotions/:promotion_id — Get promotion detail
- */
-export function getPromotion(promotionId: string): Promise<t.Promotion> {
-  return fetchGet(`/promotions/${promotionId}`)
-}
-
-/**
  * POST /promotions — Promote a run
  */
 export function promoteRun(request: t.PromotionRequest): Promise<t.Promotion> {
   return fetchPost('/promotions', request)
-}
-
-/**
- * GET /runs/:run_id/promotions — Get promotions for a run
- */
-export function getRunPromotions(runId: string): Promise<t.Promotion[]> {
-  return fetchGet(`/runs/${runId}/promotions`)
 }
 
 // ============================================================================
@@ -157,45 +132,17 @@ export function getRunPromotions(runId: string): Promise<t.Promotion[]> {
 // ============================================================================
 
 /**
- * POST /compare — Compare two runs
- * @param runAId First run ID
- * @param runBId Second run ID
+ * GET /compare — Compare two runs
+ * @param runAId First run summary path
+ * @param runBId Second run summary path
  */
 export function compareRuns(runAId: string, runBId: string): Promise<t.CompareResult> {
-  return fetchPost('/compare', {
-    run_a_id: runAId,
-    run_b_id: runBId,
-  })
+  return fetchGet(`/compare?run_a=${encodeURIComponent(runAId)}&run_b=${encodeURIComponent(runBId)}`)
 }
 
 // ============================================================================
 // SEARCH & FILTER
 // ============================================================================
-
-/**
- * GET /runs/search — Search runs by criteria
- * @param modelName Filter by model name
- * @param variant Filter by variant
- * @param minMetric Minimum metric value (e.g., roc_auc)
- * @param skip Pagination skip
- * @param limit Pagination limit
- */
-export function searchRuns(params: {
-  modelName?: string
-  variant?: string
-  minMetric?: number
-  skip?: number
-  limit?: number
-}): Promise<t.RunSummary[]> {
-  const queryParams = new URLSearchParams()
-  if (params.modelName) queryParams.append('model_name', params.modelName)
-  if (params.variant) queryParams.append('variant', params.variant)
-  if (params.minMetric !== undefined) queryParams.append('min_metric', params.minMetric.toString())
-  if (params.skip !== undefined) queryParams.append('skip', params.skip.toString())
-  if (params.limit !== undefined) queryParams.append('limit', params.limit.toString())
-
-  return fetchGet(`/runs/search?${queryParams.toString()}`)
-}
 
 /**
  * GET /lanes/:lane_id/runs — Get all runs in a lane (paginated)
@@ -209,30 +156,4 @@ export function getLaneRuns(
   limit: number = 20
 ): Promise<t.RunSummary[]> {
   return fetchGet(`/lanes/${laneId}/runs?skip=${skip}&limit=${limit}`)
-}
-
-// ============================================================================
-// EXPORT & REPORTING
-// ============================================================================
-
-/**
- * GET /runs/:run_id/export/json — Export run as JSON
- */
-export async function exportRunJson(runId: string): Promise<string> {
-  const response = await fetch(`${BASE_URL}/runs/${runId}/export/json`)
-  if (!response.ok) {
-    throw new Error(`Export failed [${response.status}]: ${response.statusText}`)
-  }
-  return response.text()
-}
-
-/**
- * GET /runs/:run_id/export/csv — Export run as CSV
- */
-export async function exportRunCsv(runId: string): Promise<string> {
-  const response = await fetch(`${BASE_URL}/runs/${runId}/export/csv`)
-  if (!response.ok) {
-    throw new Error(`Export failed [${response.status}]: ${response.statusText}`)
-  }
-  return response.text()
 }

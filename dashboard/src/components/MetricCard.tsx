@@ -1,30 +1,44 @@
 import React from "react";
+import { DeltaIndicator } from "./DeltaIndicator";
 
 export interface MetricCardProps {
-  label: string;
+  /** Metric display name (e.g. "ROC AUC") */
+  name: string;
+  /** Raw metric value — will be formatted to 4 decimal places */
   value: number | null;
+  /** Optional delta vs previous run */
+  delta?: number | null;
+  /**
+   * Direction rule: true for accuracy/roc_auc (higher = better),
+   * false for log_loss/brier/ece/reliability_gap (lower = better).
+   */
+  higherIsBetter?: boolean;
+  /** Optional unit suffix (e.g. "%") */
   unit?: string;
-  bgColor?: string;
 }
 
+/* ---- Style tokens (aligned to layout.css variables) ---- */
 const containerStyle: React.CSSProperties = {
-  width: 200,
-  background: "#f5f5f5",
-  border: "1px solid #dbe2ea",
+  minWidth: 180,
+  background: "#ffffff",
+  border: "1px solid #e5e4e7",
   borderRadius: 6,
-  padding: 12,
+  padding: 14,
   boxSizing: "border-box",
-  fontFamily: "Arial, sans-serif",
-  color: "#0b1220",
+  fontFamily: "Arial, Helvetica, sans-serif",
+  color: "#08060d",
   display: "grid",
-  gridTemplateRows: "auto 1fr",
-  gap: 8,
+  gridTemplateRows: "auto 1fr auto",
+  gap: 6,
 };
 
-const labelStyle: React.CSSProperties = {
+const nameStyle: React.CSSProperties = {
   fontSize: 12,
-  color: "#495464",
+  fontWeight: 500,
+  color: "#6b6375",
   margin: 0,
+  textTransform: "uppercase",
+  letterSpacing: "0.04em",
 };
 
 const valueRowStyle: React.CSSProperties = {
@@ -36,36 +50,43 @@ const valueRowStyle: React.CSSProperties = {
 const valueStyle: React.CSSProperties = {
   fontSize: 24,
   fontWeight: 600,
-  color: "#0b1220",
+  color: "#08060d",
   margin: 0,
+  fontFamily: "ui-monospace, Consolas, monospace",
 };
 
 const unitStyle: React.CSSProperties = {
   fontSize: 12,
-  color: "#6b7280",
+  color: "#9ca3af",
   margin: 0,
 };
 
+/**
+ * Format a numeric value to 4 decimal places.
+ * Returns "—" for null/undefined/NaN values.
+ */
+function formatValue(val: number | null): string {
+  if (val === null || val === undefined || Number.isNaN(val)) return "\u2014";
+  return val.toFixed(4);
+}
+
 export const MetricCard: React.FC<MetricCardProps> = ({
-  label,
+  name,
   value,
+  delta,
+  higherIsBetter = true,
   unit,
-  bgColor,
 }) => {
-  const appliedStyle: React.CSSProperties = {
-    ...containerStyle,
-    background: bgColor ?? containerStyle.background,
-  };
-
-  const displayValue = value === null ? "—" : value;
-
   return (
-    <div style={appliedStyle} aria-label={`metric-card-${label}`}>
-      <p style={labelStyle}>{label}</p>
+    <div style={containerStyle} data-metric={name}>
+      <p style={nameStyle}>{name}</p>
       <div style={valueRowStyle}>
-        <p style={valueStyle}>{displayValue}</p>
-        {unit ? <p style={unitStyle}>{unit}</p> : null}
+        <p style={valueStyle}>{formatValue(value)}</p>
+        {unit ? <span style={unitStyle}>{unit}</span> : null}
       </div>
+      {delta !== undefined && delta !== null ? (
+        <DeltaIndicator value={delta} higherIsBetter={higherIsBetter} />
+      ) : null}
     </div>
   );
 };

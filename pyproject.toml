@@ -33,6 +33,8 @@ dashboard = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
   "python-multipart",
+  "playwright>=1.40",
+  "pytest-playwright>=0.4",
 ]
 
 [tool.setuptools.packages.find]

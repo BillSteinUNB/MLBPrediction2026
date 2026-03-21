@@ -179,6 +179,50 @@ def test_run_walk_forward_backtest_tracks_bankroll_for_flat_staking(tmp_path) ->
     assert "max_drawdown_pct" in result.window_metrics.columns
 
 
+def test_run_walk_forward_backtest_supports_edge_scaled_staking(tmp_path) -> None:
+    frame = _synthetic_training_frame()
+
+    result = run_walk_forward_backtest(
+        training_data=frame,
+        start_date="2022-01-01",
+        end_date="2022-01-01",
+        output_dir=tmp_path / "edge_scaled",
+        calibration_fraction=0.15,
+        estimator_kwargs={"max_depth": 1, "n_estimators": 8, "learning_rate": 0.2},
+        starting_bankroll_units=100.0,
+        staking_mode="edge_scaled",
+        min_bet_size_units=0.5,
+        max_bet_size_units=3.0,
+        edge_scale_cap=0.10,
+    )
+
+    bet_rows = result.predictions.loc[result.predictions["is_bet"] == 1]
+    assert not bet_rows.empty
+    assert bet_rows["bet_stake_units"].between(0.5, 3.0).all()
+    assert result.predictions["staking_mode"].eq("edge_scaled").all()
+
+
+def test_run_walk_forward_backtest_supports_edge_bucketed_staking(tmp_path) -> None:
+    frame = _synthetic_training_frame()
+
+    result = run_walk_forward_backtest(
+        training_data=frame,
+        start_date="2022-01-01",
+        end_date="2022-01-01",
+        output_dir=tmp_path / "edge_bucketed",
+        calibration_fraction=0.15,
+        estimator_kwargs={"max_depth": 1, "n_estimators": 8, "learning_rate": 0.2},
+        starting_bankroll_units=100.0,
+        staking_mode="edge_bucketed",
+        edge_threshold=0.05,
+    )
+
+    bet_rows = result.predictions.loc[result.predictions["is_bet"] == 1]
+    assert not bet_rows.empty
+    assert set(bet_rows["bet_stake_units"].unique()).issubset({0.5, 1.0, 1.5, 2.0})
+    assert result.predictions["staking_mode"].eq("edge_bucketed").all()
+
+
 def test_run_walk_forward_backtest_rebuilds_window_data_and_records_build_log(
     tmp_path,
     monkeypatch,

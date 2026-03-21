@@ -64,7 +64,7 @@ DEFAULT_TEST_WINDOW_MONTHS = 1
 DEFAULT_WINDOW_MODE = "rolling"
 SUPPORTED_WINDOW_MODES = ("rolling", "anchored_expanding")
 DEFAULT_STAKING_MODE = "flat"
-SUPPORTED_STAKING_MODES = ("flat", "kelly")
+SUPPORTED_STAKING_MODES = ("flat", "kelly", "edge_scaled", "edge_bucketed")
 DEFAULT_CALIBRATION_FRACTION = 0.15
 DEFAULT_WALK_FORWARD_CALIBRATION_METHOD = DEFAULT_CALIBRATION_METHOD
 DEFAULT_EDGE_THRESHOLD = 0.03
@@ -73,6 +73,9 @@ DEFAULT_TIME_SERIES_SPLITS = 3
 DEFAULT_FLOAT_FORMAT = "%.10f"
 DEFAULT_STARTING_BANKROLL_UNITS = 100.0
 DEFAULT_FLAT_BET_SIZE_UNITS = 1.0
+DEFAULT_MIN_BET_SIZE_UNITS = 0.5
+DEFAULT_MAX_BET_SIZE_UNITS = 3.0
+DEFAULT_EDGE_SCALE_CAP = 0.10
 DEFAULT_ESTIMATOR_KWARGS: dict[str, Any] = {
     "max_depth": 3,
     "n_estimators": 120,
@@ -234,8 +237,11 @@ def run_walk_forward_backtest(
     historical_odds_db_path: str | Path | None = None,
     historical_odds_book_name: str | None = None,
     starting_bankroll_units: float = DEFAULT_STARTING_BANKROLL_UNITS,
-    staking_mode: Literal["flat", "kelly"] = DEFAULT_STAKING_MODE,
+    staking_mode: Literal["flat", "kelly", "edge_scaled", "edge_bucketed"] = DEFAULT_STAKING_MODE,
     flat_bet_size_units: float = DEFAULT_FLAT_BET_SIZE_UNITS,
+    min_bet_size_units: float = DEFAULT_MIN_BET_SIZE_UNITS,
+    max_bet_size_units: float = DEFAULT_MAX_BET_SIZE_UNITS,
+    edge_scale_cap: float = DEFAULT_EDGE_SCALE_CAP,
     kelly_fraction: float = DEFAULT_KELLY_FRACTION,
     max_bet_fraction: float = MAX_BET_FRACTION,
     max_drawdown: float = DEFAULT_MAX_DRAWDOWN,
@@ -317,6 +323,9 @@ def run_walk_forward_backtest(
                 bankroll_state=bankroll_state,
                 staking_mode=staking_mode,
                 flat_bet_size_units=flat_bet_size_units,
+                min_bet_size_units=min_bet_size_units,
+                max_bet_size_units=max_bet_size_units,
+                edge_scale_cap=edge_scale_cap,
                 kelly_fraction=kelly_fraction,
                 max_bet_fraction=max_bet_fraction,
                 max_drawdown=max_drawdown,
@@ -399,6 +408,9 @@ def run_walk_forward_backtest(
                 bankroll_state=bankroll_state,
                 staking_mode=staking_mode,
                 flat_bet_size_units=flat_bet_size_units,
+                min_bet_size_units=min_bet_size_units,
+                max_bet_size_units=max_bet_size_units,
+                edge_scale_cap=edge_scale_cap,
                 kelly_fraction=kelly_fraction,
                 max_bet_fraction=max_bet_fraction,
                 max_drawdown=max_drawdown,
@@ -483,6 +495,9 @@ def run_walk_forward_backtest(
         "starting_bankroll_units": float(starting_bankroll_units),
         "staking_mode": staking_mode,
         "flat_bet_size_units": float(flat_bet_size_units),
+        "min_bet_size_units": float(min_bet_size_units),
+        "max_bet_size_units": float(max_bet_size_units),
+        "edge_scale_cap": float(edge_scale_cap),
         "kelly_fraction": float(kelly_fraction),
         "max_bet_fraction": float(max_bet_fraction),
         "max_drawdown": float(max_drawdown),
@@ -581,6 +596,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--staking-mode", default=DEFAULT_STAKING_MODE, choices=SUPPORTED_STAKING_MODES)
     parser.add_argument("--flat-bet-size-units", type=float, default=DEFAULT_FLAT_BET_SIZE_UNITS)
+    parser.add_argument("--min-bet-size-units", type=float, default=DEFAULT_MIN_BET_SIZE_UNITS)
+    parser.add_argument("--max-bet-size-units", type=float, default=DEFAULT_MAX_BET_SIZE_UNITS)
+    parser.add_argument("--edge-scale-cap", type=float, default=DEFAULT_EDGE_SCALE_CAP)
     parser.add_argument("--kelly-fraction", type=float, default=DEFAULT_KELLY_FRACTION)
     parser.add_argument("--max-bet-fraction", type=float, default=MAX_BET_FRACTION)
     parser.add_argument("--max-drawdown", type=float, default=DEFAULT_MAX_DRAWDOWN)
@@ -616,6 +634,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         starting_bankroll_units=args.starting_bankroll_units,
         staking_mode=args.staking_mode,
         flat_bet_size_units=args.flat_bet_size_units,
+        min_bet_size_units=args.min_bet_size_units,
+        max_bet_size_units=args.max_bet_size_units,
+        edge_scale_cap=args.edge_scale_cap,
         kelly_fraction=args.kelly_fraction,
         max_bet_fraction=args.max_bet_fraction,
         max_drawdown=args.max_drawdown,
@@ -639,6 +660,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         starting_bankroll_units=args.starting_bankroll_units,
         staking_mode=args.staking_mode,
         flat_bet_size_units=args.flat_bet_size_units,
+        min_bet_size_units=args.min_bet_size_units,
+        max_bet_size_units=args.max_bet_size_units,
+        edge_scale_cap=args.edge_scale_cap,
         kelly_fraction=args.kelly_fraction,
         max_bet_fraction=args.max_bet_fraction,
         max_drawdown=args.max_drawdown,
@@ -693,8 +717,11 @@ def _evaluate_window(
     historical_odds_db_path: str | Path | None,
     historical_odds_book_name: str | None,
     bankroll_state: _BankrollState,
-    staking_mode: Literal["flat", "kelly"],
+    staking_mode: Literal["flat", "kelly", "edge_scaled", "edge_bucketed"],
     flat_bet_size_units: float,
+    min_bet_size_units: float,
+    max_bet_size_units: float,
+    edge_scale_cap: float,
     kelly_fraction: float,
     max_bet_fraction: float,
     max_drawdown: float,
@@ -831,8 +858,12 @@ def _evaluate_window(
         starting_bankroll=bankroll_state.current_bankroll,
         peak_bankroll=bankroll_state.peak_bankroll,
         prior_longest_losing_streak=bankroll_state.longest_losing_streak,
+        edge_threshold=edge_threshold,
         staking_mode=staking_mode,
         flat_bet_size_units=flat_bet_size_units,
+        min_bet_size_units=min_bet_size_units,
+        max_bet_size_units=max_bet_size_units,
+        edge_scale_cap=edge_scale_cap,
         kelly_fraction=kelly_fraction,
         max_bet_fraction=max_bet_fraction,
         max_drawdown=max_drawdown,
@@ -1271,8 +1302,12 @@ def _apply_bankroll_strategy(
     starting_bankroll: float,
     peak_bankroll: float,
     prior_longest_losing_streak: int,
-    staking_mode: Literal["flat", "kelly"],
+    edge_threshold: float,
+    staking_mode: Literal["flat", "kelly", "edge_scaled", "edge_bucketed"],
     flat_bet_size_units: float,
+    min_bet_size_units: float,
+    max_bet_size_units: float,
+    edge_scale_cap: float,
     kelly_fraction: float,
     max_bet_fraction: float,
     max_drawdown: float,
@@ -1281,6 +1316,12 @@ def _apply_bankroll_strategy(
         raise ValueError(f"staking_mode must be one of {SUPPORTED_STAKING_MODES}")
     if flat_bet_size_units < 0:
         raise ValueError("flat_bet_size_units must be non-negative")
+    if min_bet_size_units < 0 or max_bet_size_units < 0:
+        raise ValueError("min_bet_size_units and max_bet_size_units must be non-negative")
+    if min_bet_size_units > max_bet_size_units:
+        raise ValueError("min_bet_size_units cannot exceed max_bet_size_units")
+    if edge_scale_cap <= 0:
+        raise ValueError("edge_scale_cap must be positive")
 
     enriched = predictions.copy()
     current_bankroll = float(starting_bankroll)
@@ -1309,6 +1350,20 @@ def _apply_bankroll_strategy(
         if row.bet_side != "none" and current_bankroll > 0 and not kill_switch_active:
             if staking_mode == "flat":
                 stake = min(float(flat_bet_size_units), current_bankroll)
+                stake_fraction = float(stake / current_bankroll) if current_bankroll else 0.0
+            elif staking_mode == "edge_scaled":
+                scaled_units = _edge_scaled_units(
+                    edge=float(row.bet_edge),
+                    edge_threshold=edge_threshold,
+                    min_units=min_bet_size_units,
+                    max_units=max_bet_size_units,
+                    edge_scale_cap=edge_scale_cap,
+                )
+                stake = min(float(scaled_units), current_bankroll)
+                stake_fraction = float(stake / current_bankroll) if current_bankroll else 0.0
+            elif staking_mode == "edge_bucketed":
+                bucketed_units = _edge_bucketed_units(float(row.bet_edge))
+                stake = min(float(bucketed_units), current_bankroll)
                 stake_fraction = float(stake / current_bankroll) if current_bankroll else 0.0
             else:
                 sizing = calculate_kelly_stake(
@@ -1370,6 +1425,32 @@ def _calculate_drawdown_pct(current_bankroll: float, peak_bankroll: float) -> fl
     if peak_bankroll <= 0:
         return 0.0
     return float((peak_bankroll - current_bankroll) / peak_bankroll)
+
+
+def _edge_scaled_units(
+    *,
+    edge: float,
+    edge_threshold: float,
+    min_units: float,
+    max_units: float,
+    edge_scale_cap: float,
+) -> float:
+    effective_edge = max(0.0, float(edge) - float(edge_threshold))
+    scale = min(1.0, effective_edge / float(edge_scale_cap))
+    return float(min_units + ((max_units - min_units) * scale))
+
+
+def _edge_bucketed_units(edge: float) -> float:
+    resolved_edge = float(edge)
+    if resolved_edge >= 0.30:
+        return 0.5
+    if resolved_edge >= 0.20:
+        return 2.0
+    if resolved_edge >= 0.15:
+        return 1.5
+    if resolved_edge >= 0.12:
+        return 1.0
+    return 0.5
 
 
 def _resolve_calibration_split_index(row_count: int, calibration_fraction: float) -> int:

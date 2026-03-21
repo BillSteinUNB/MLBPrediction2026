@@ -6,3 +6,6 @@ export type { DeltaIndicatorProps } from "./DeltaIndicator";
 
 export { default as WarningBadge } from "./WarningBadge";
 export type { WarningBadgeProps } from "./WarningBadge";
+
+export { default as RunTable } from "./RunTable";
+export type { RunTableProps } from "./RunTable";
