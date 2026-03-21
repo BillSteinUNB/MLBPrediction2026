@@ -17,6 +17,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import brier_score_loss
 from xgboost import XGBClassifier
 
+from src.clients.historical_odds_client import load_historical_odds_for_games
+from src.clients.odds_client import devig_probabilities
 from src.clients.weather_client import fetch_game_weather
 from src.model.calibration import (
     CalibratedStackingModel,
@@ -43,6 +45,7 @@ from src.model.xgboost_trainer import (
     _load_training_dataframe,
     _resolve_numeric_feature_columns,
 )
+from src.ops.experiment_tracker import log_walk_forward_run
 
 
 logger = logging.getLogger(__name__)
@@ -188,6 +191,8 @@ def run_walk_forward_backtest(
     estimator_kwargs: Mapping[str, Any] | None = None,
     meta_learner_max_iter: int = DEFAULT_META_LEARNER_MAX_ITER,
     weather_fetcher: WeatherFetcher = fetch_game_weather,
+    historical_odds_db_path: str | Path | None = None,
+    historical_odds_book_name: str | None = None,
 ) -> WalkForwardBacktestResult:
     """Run a deterministic walk-forward backtest and persist predictions plus window metrics."""
 
@@ -253,6 +258,8 @@ def run_walk_forward_backtest(
                 seed=seed,
                 data_version_hash=data_version_hash,
                 code_version_hash=code_version_hash,
+                historical_odds_db_path=historical_odds_db_path,
+                historical_odds_book_name=historical_odds_book_name,
             )
             metrics.update(_window_build_to_metric_fields(build))
             prediction_frames.append(predictions)
@@ -313,6 +320,8 @@ def run_walk_forward_backtest(
                 seed=seed,
                 data_version_hash=build.data_version_hash,
                 code_version_hash=code_version_hash,
+                historical_odds_db_path=historical_odds_db_path,
+                historical_odds_book_name=historical_odds_book_name,
             )
             metrics.update(_window_build_to_metric_fields(build))
             prediction_frames.append(predictions)
@@ -445,6 +454,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=float,
         default=DEFAULT_ESTIMATOR_KWARGS["learning_rate"],
     )
+    parser.add_argument("--historical-odds-db")
+    parser.add_argument("--historical-odds-book")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -470,6 +481,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             "n_estimators": args.n_estimators,
             "learning_rate": args.learning_rate,
         },
+        historical_odds_db_path=args.historical_odds_db,
+        historical_odds_book_name=args.historical_odds_book,
+    )
+    log_walk_forward_run(
+        result,
+        output_dir=args.output_dir,
+        training_data=args.training_data,
+        start_date=args.start_date,
+        end_date=args.end_date,
+        train_window_months=args.train_window_months,
+        test_window_months=args.test_window_months,
+        calibration_method=args.calibration_method,
+        calibration_fraction=args.calibration_fraction,
+        edge_threshold=args.edge_threshold,
+        market_vig=args.market_vig,
+        historical_odds_db_path=args.historical_odds_db,
+        historical_odds_book_name=args.historical_odds_book,
     )
     print(
         json.dumps(
@@ -513,6 +541,8 @@ def _evaluate_window(
     seed: int,
     data_version_hash: str,
     code_version_hash: str,
+    historical_odds_db_path: str | Path | None,
+    historical_odds_book_name: str | None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     train_frame = _slice_time_range(dataframe, start=window.train_start, end=window.train_end)
     test_frame = _slice_time_range(dataframe, start=window.test_start, end=window.test_end)
@@ -541,16 +571,20 @@ def _evaluate_window(
         model_bundle.calibrated_model.predict_calibrated(test_frame),
         dtype=float,
     )
-    market_home_fair_prob = np.clip(
-        pd.to_numeric(test_frame["home_team_log5_30g"], errors="coerce").to_numpy(dtype=float),
-        0.02,
-        0.98,
+    (
+        market_home_fair_prob,
+        market_away_fair_prob,
+        home_implied_prob,
+        away_implied_prob,
+        home_odds,
+        away_odds,
+        market_source,
+    ) = _resolve_market_pricing(
+        test_frame=test_frame,
+        market_vig=market_vig,
+        historical_odds_db_path=historical_odds_db_path,
+        historical_odds_book_name=historical_odds_book_name,
     )
-    market_away_fair_prob = 1.0 - market_home_fair_prob
-    home_implied_prob = np.clip(market_home_fair_prob * (1.0 + market_vig), 0.02, 0.99)
-    away_implied_prob = np.clip(market_away_fair_prob * (1.0 + market_vig), 0.02, 0.99)
-    home_odds = np.array([_implied_probability_to_american(value) for value in home_implied_prob])
-    away_odds = np.array([_implied_probability_to_american(value) for value in away_implied_prob])
     edge_home = model_home_prob - market_home_fair_prob
     edge_away = (1.0 - model_home_prob) - market_away_fair_prob
     actual_home_win = pd.to_numeric(test_frame["f5_ml_result"], errors="raise").astype(int).to_numpy()
@@ -623,6 +657,7 @@ def _evaluate_window(
             "market_away_implied_prob": away_implied_prob,
             "home_odds": home_odds,
             "away_odds": away_odds,
+            "market_source": market_source,
             "edge_home": edge_home,
             "edge_away": edge_away,
             "bet_side": bet_side,
@@ -670,6 +705,7 @@ def _evaluate_window(
         "total_staked_units": total_staked,
         "mean_model_home_prob": float(predictions["model_home_prob"].mean()),
         "mean_market_home_fair_prob": float(predictions["market_home_fair_prob"].mean()),
+        "historical_odds_coverage": float((predictions["market_source"] == "historical").mean()),
         "calibration_method": model_bundle.calibration_method,
         "window_version_hash": _compute_window_version_hash(
             predictions["game_pk"].tolist(),
@@ -681,6 +717,97 @@ def _evaluate_window(
         "code_version_hash": code_version_hash,
     }
     return predictions, metrics
+
+
+def _resolve_market_pricing(
+    *,
+    test_frame: pd.DataFrame,
+    market_vig: float,
+    historical_odds_db_path: str | Path | None,
+    historical_odds_book_name: str | None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    default_home_fair = np.clip(
+        pd.to_numeric(test_frame["home_team_log5_30g"], errors="coerce").to_numpy(dtype=float),
+        0.02,
+        0.98,
+    )
+    default_away_fair = 1.0 - default_home_fair
+    default_home_implied = np.clip(default_home_fair * (1.0 + market_vig), 0.02, 0.99)
+    default_away_implied = np.clip(default_away_fair * (1.0 + market_vig), 0.02, 0.99)
+    default_home_odds = np.array(
+        [_implied_probability_to_american(value) for value in default_home_implied],
+        dtype=int,
+    )
+    default_away_odds = np.array(
+        [_implied_probability_to_american(value) for value in default_away_implied],
+        dtype=int,
+    )
+    market_source = np.full(len(test_frame), "synthetic", dtype=object)
+
+    if historical_odds_db_path is None:
+        return (
+            default_home_fair,
+            default_away_fair,
+            default_home_implied,
+            default_away_implied,
+            default_home_odds,
+            default_away_odds,
+            market_source,
+        )
+
+    historical = load_historical_odds_for_games(
+        db_path=historical_odds_db_path,
+        game_pks=test_frame["game_pk"].astype(int).tolist(),
+        market_type="f5_ml",
+        book_name=historical_odds_book_name,
+    )
+    if historical.empty:
+        return (
+            default_home_fair,
+            default_away_fair,
+            default_home_implied,
+            default_away_implied,
+            default_home_odds,
+            default_away_odds,
+            market_source,
+        )
+
+    historical = historical.drop_duplicates(subset=["game_pk"], keep="last").set_index("game_pk")
+
+    home_fair = default_home_fair.copy()
+    away_fair = default_away_fair.copy()
+    home_implied = default_home_implied.copy()
+    away_implied = default_away_implied.copy()
+    home_odds = default_home_odds.copy()
+    away_odds = default_away_odds.copy()
+
+    for index, game_pk in enumerate(test_frame["game_pk"].astype(int).tolist()):
+        if game_pk not in historical.index:
+            continue
+        odds_row = historical.loc[game_pk]
+        resolved_home_odds = int(odds_row["home_odds"])
+        resolved_away_odds = int(odds_row["away_odds"])
+        resolved_home_fair, resolved_away_fair = devig_probabilities(
+            resolved_home_odds,
+            resolved_away_odds,
+        )
+        home_odds[index] = resolved_home_odds
+        away_odds[index] = resolved_away_odds
+        home_implied[index] = float(
+            abs(resolved_home_odds) / (abs(resolved_home_odds) + 100)
+            if resolved_home_odds < 0
+            else 100 / (resolved_home_odds + 100)
+        )
+        away_implied[index] = float(
+            abs(resolved_away_odds) / (abs(resolved_away_odds) + 100)
+            if resolved_away_odds < 0
+            else 100 / (resolved_away_odds + 100)
+        )
+        home_fair[index] = resolved_home_fair
+        away_fair[index] = resolved_away_fair
+        market_source[index] = "historical"
+
+    return home_fair, away_fair, home_implied, away_implied, home_odds, away_odds, market_source
 
 
 def _train_window_model(
@@ -706,9 +833,14 @@ def _train_window_model(
     if len(training_frame) < 30 or target.nunique() < 2:
         raise ValueError("Need at least 30 non-push rows and both classes to train a window")
 
-    split_index = _resolve_calibration_split_index(len(training_frame), calibration_fraction)
-    model_training_frame = training_frame.iloc[:split_index].copy().reset_index(drop=True)
-    calibration_frame = training_frame.iloc[split_index:].copy().reset_index(drop=True)
+    resolved_calibration_method = str(calibration_method).strip().lower()
+    if resolved_calibration_method == "identity" or calibration_fraction <= 0:
+        model_training_frame = training_frame.copy().reset_index(drop=True)
+        calibration_frame = training_frame.iloc[0:0].copy()
+    else:
+        split_index = _resolve_calibration_split_index(len(training_frame), calibration_fraction)
+        model_training_frame = training_frame.iloc[:split_index].copy().reset_index(drop=True)
+        calibration_frame = training_frame.iloc[split_index:].copy().reset_index(drop=True)
     if model_training_frame.empty or pd.to_numeric(
         model_training_frame["f5_ml_result"],
         errors="raise",
@@ -746,15 +878,18 @@ def _train_window_model(
         raw_meta_feature_columns=list(raw_meta_feature_columns),
         meta_feature_columns=meta_feature_columns,
     )
-    calibration_probabilities = np.asarray(
-        stacking_model.predict_proba(calibration_frame)[:, 1],
-        dtype=float,
-    )
-    calibrator = _fit_probability_calibrator(
-        method=calibration_method,
-        probabilities=calibration_probabilities,
-        y_true=pd.to_numeric(calibration_frame["f5_ml_result"], errors="raise").astype(int),
-    )
+    if calibration_frame.empty:
+        calibrator = _fit_probability_calibrator(method="identity", probabilities=[], y_true=[])
+    else:
+        calibration_probabilities = np.asarray(
+            stacking_model.predict_proba(calibration_frame)[:, 1],
+            dtype=float,
+        )
+        calibrator = _fit_probability_calibrator(
+            method=calibration_method,
+            probabilities=calibration_probabilities,
+            y_true=pd.to_numeric(calibration_frame["f5_ml_result"], errors="raise").astype(int),
+        )
     calibrated_model = CalibratedStackingModel(
         model_name="walk_forward_f5_ml",
         target_column="f5_ml_result",

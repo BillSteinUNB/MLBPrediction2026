@@ -1534,6 +1534,18 @@ def test_resolve_training_years_backfills_shortened_season_with_previous_full_ye
     assert resolved_years == [2018, 2019, 2021, 2022, 2023, 2024, 2025]
 
 
+def test_resolve_training_years_does_not_backfill_unknown_years() -> None:
+    resolved_years = resolve_training_years(
+        start_year=2023,
+        end_year=2025,
+        full_regular_seasons_target=7,
+        season_row_counts={2023: 2430, 2024: 2430, 2025: 2430},
+        shortened_season_game_threshold=2000,
+    )
+
+    assert resolved_years == [2023, 2024, 2025]
+
+
 def test_assert_training_data_is_complete_accepts_cached_validation_parquet(
     tmp_path: Path,
 ) -> None:

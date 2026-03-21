@@ -36,13 +36,14 @@ from src.model.xgboost_trainer import (
     _resolve_holdout_season,
     _resolve_experiment_output_dir,
 )
+from src.ops.experiment_tracker import log_calibration_run
 
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_CALIBRATION_FRACTION = 0.10
 DEFAULT_CALIBRATION_BIN_COUNT = 10
-DEFAULT_CALIBRATION_METHOD = "platt"
+DEFAULT_CALIBRATION_METHOD = "identity"
 SUPPORTED_CALIBRATION_METHODS = ("identity", "isotonic", "platt", "blend")
 TARGET_BRIER_SCORE = 0.25
 TARGET_ECE = 0.05
@@ -231,6 +232,7 @@ def train_calibrated_models(
         dataset,
         holdout_season=effective_holdout_season,
         calibration_fraction=calibration_fraction,
+        calibration_method=calibration_method,
     )
 
     resolved_output_dir = Path(output_dir)
@@ -288,7 +290,9 @@ def train_calibrated_models(
                 "model_version": stacking_result.model_version,
                 "data_version_hash": stacking_result.data_version_hash,
                 "holdout_season": effective_holdout_season,
-                "calibration_fraction": calibration_fraction,
+                "calibration_fraction": (
+                    0.0 if dedicated_split.calibration_row_count == 0 else calibration_fraction
+                ),
                 "calibration_method": calibration_method,
                 "model_training_row_count": int(len(dedicated_split.model_training_frame)),
                 "calibration_row_count": int(dedicated_split.calibration_row_count),
@@ -307,7 +311,7 @@ def train_calibrated_models(
         model_version=stacking_result.model_version,
         data_version_hash=stacking_result.data_version_hash,
         holdout_season=effective_holdout_season,
-        calibration_fraction=calibration_fraction,
+        calibration_fraction=0.0 if dedicated_split.calibration_row_count == 0 else calibration_fraction,
         calibration_method=calibration_method,
         model_training_row_count=len(dedicated_split.model_training_frame),
         calibration_row_count=dedicated_split.calibration_row_count,
@@ -450,6 +454,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         search_iterations=args.search_iterations,
         random_state=args.random_state,
     )
+    log_calibration_run(
+        result,
+        experiment_name=args.experiment_name,
+        output_dir=resolved_output_dir,
+        training_data=training_path,
+        start_year=args.start_year,
+        end_year=args.end_year,
+        refresh_training_data=args.refresh_training_data,
+        search_iterations=args.search_iterations,
+        time_series_splits=args.time_series_splits,
+    )
     print(json.dumps(_calibration_run_result_to_json_ready(result), indent=2))
     return 0
 
@@ -480,7 +495,8 @@ def _train_single_calibrated_model(
     calibration_frame = calibration_frame.sort_values(["scheduled_start", "game_pk"])
     holdout_frame = holdout_frame.sort_values(["scheduled_start", "game_pk"])
 
-    if calibration_frame.empty:
+    resolved_requested_method = str(calibration_method).strip().lower()
+    if calibration_frame.empty and resolved_requested_method != "identity":
         raise ValueError(f"No calibration rows available for {model_name}")
     if holdout_frame.empty:
         raise ValueError(f"No holdout rows available for {model_name}")
@@ -489,23 +505,24 @@ def _train_single_calibrated_model(
     if not isinstance(stacking_model, StackingEnsembleModel):
         raise TypeError(f"Expected StackingEnsembleModel at {stacking_model_path}")
 
-    calibration_target = calibration_frame[target_column].astype(int)
     holdout_target = holdout_frame[target_column].astype(int)
-
-    calibration_stacked_probability = np.asarray(
-        stacking_model.predict_proba(calibration_frame)[:, 1],
-        dtype=float,
-    )
     holdout_stacked_probability = np.asarray(
         stacking_model.predict_proba(holdout_frame)[:, 1],
         dtype=float,
     )
-
-    calibrator = _fit_probability_calibrator(
-        method=calibration_method,
-        probabilities=calibration_stacked_probability,
-        y_true=calibration_target,
-    )
+    if calibration_frame.empty:
+        calibrator = IdentityProbabilityCalibrator()
+    else:
+        calibration_target = calibration_frame[target_column].astype(int)
+        calibration_stacked_probability = np.asarray(
+            stacking_model.predict_proba(calibration_frame)[:, 1],
+            dtype=float,
+        )
+        calibrator = _fit_probability_calibrator(
+            method=calibration_method,
+            probabilities=calibration_stacked_probability,
+            y_true=calibration_target,
+        )
     resolved_calibration_method = str(getattr(calibrator, "method", calibration_method))
     holdout_calibrated_probability = np.asarray(
         calibrator.transform(holdout_stacked_probability),
@@ -552,7 +569,7 @@ def _train_single_calibrated_model(
                 "train_row_count": int(len(model_training_frame)),
                 "calibration_row_count": int(len(calibration_frame)),
                 "holdout_row_count": int(len(holdout_frame)),
-                "calibration_fraction": calibration_fraction,
+                "calibration_fraction": 0.0 if calibration_frame.empty else calibration_fraction,
                 "calibration_window_start": calibration_window_start,
                 "calibration_window_end": calibration_window_end,
                 "calibrator_threshold_count": int(
@@ -584,7 +601,7 @@ def _train_single_calibrated_model(
         train_row_count=len(model_training_frame),
         calibration_row_count=len(calibration_frame),
         holdout_row_count=len(holdout_frame),
-        calibration_fraction=calibration_fraction,
+        calibration_fraction=0.0 if calibration_frame.empty else calibration_fraction,
         calibration_window_start=calibration_window_start,
         calibration_window_end=calibration_window_end,
         holdout_metrics=holdout_metrics,
@@ -596,10 +613,8 @@ def _split_dedicated_calibration_frame(
     *,
     holdout_season: int,
     calibration_fraction: float,
+    calibration_method: str,
 ) -> _DedicatedCalibrationSplit:
-    if calibration_fraction <= 0 or calibration_fraction >= 1:
-        raise ValueError("calibration_fraction must be between 0 and 1")
-
     frame = dataframe.sort_values(["scheduled_start", "game_pk"]).reset_index(drop=True)
     pre_holdout_frame = frame.loc[frame["season"] < holdout_season].copy().reset_index(drop=True)
     holdout_frame = frame.loc[frame["season"] == holdout_season].copy().reset_index(drop=True)
@@ -607,6 +622,15 @@ def _split_dedicated_calibration_frame(
         raise ValueError(f"No rows found before holdout season {holdout_season}")
     if holdout_frame.empty:
         raise ValueError(f"No rows found for holdout season {holdout_season}")
+    if str(calibration_method).strip().lower() == "identity" or calibration_fraction <= 0:
+        return _DedicatedCalibrationSplit(
+            model_training_frame=pre_holdout_frame,
+            calibration_frame=pre_holdout_frame.iloc[0:0].copy(),
+            holdout_frame=holdout_frame,
+            calibration_row_count=0,
+        )
+    if calibration_fraction >= 1:
+        raise ValueError("calibration_fraction must be between 0 and 1")
     if len(pre_holdout_frame) < 2:
         raise ValueError("Need at least two pre-holdout rows to reserve a calibration slice")
 

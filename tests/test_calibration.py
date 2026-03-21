@@ -96,6 +96,7 @@ def test_train_calibrated_models_trains_and_saves_versioned_bundle(tmp_path) -> 
         output_dir=tmp_path / "models",
         holdout_season=2025,
         calibration_fraction=0.10,
+        calibration_method="platt",
         base_search_space={
             "max_depth": [1],
             "n_estimators": [12],
@@ -226,6 +227,8 @@ def test_train_calibrated_models_supports_identity_method(tmp_path) -> None:
     stacked = stacking_model.predict_proba(holdout_frame)[:, 1]
 
     assert loaded_model.calibration_method == "identity"
+    assert artifact.calibration_row_count == 0
+    assert artifact.calibration_fraction == 0.0
     np.testing.assert_allclose(calibrated, stacked)
 
 

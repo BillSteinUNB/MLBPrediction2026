@@ -3,16 +3,20 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Callable
 
+import joblib
 import pandas as pd
 import pytest
 
 from src.db import init_db
+from src.model.calibration import CalibratedStackingModel, IdentityProbabilityCalibrator
 from src.models.lineup import Lineup, LineupPlayer
 from src.models.odds import OddsSnapshot
 from src.models.prediction import Prediction
 from src.pipeline.daily import (
+    ArtifactOrFallbackPredictionEngine,
     PipelineDependencies,
     _default_feature_frame_builder,
     run_daily_pipeline,
@@ -180,6 +184,69 @@ def _dependencies(
         prediction_engine=prediction_engine,
         notifier=notifier,
     )
+
+
+def _dummy_calibrated_model() -> CalibratedStackingModel:
+    stacking_model = SimpleNamespace(
+        base_feature_columns=["park_runs_factor"],
+        raw_meta_feature_columns=["home_team_log5_30g"],
+        predict_proba=lambda dataframe: [[0.4, 0.6] for _ in range(len(dataframe))],
+    )
+    return CalibratedStackingModel(
+        model_name="dummy",
+        target_column="dummy_target",
+        stacking_model=stacking_model,
+        calibrator=IdentityProbabilityCalibrator(),
+    )
+
+
+def test_artifact_engine_loads_latest_recursive_calibrated_bundle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    older_dir = tmp_path / "older-exp"
+    newer_dir = tmp_path / "newer-exp"
+    older_dir.mkdir()
+    newer_dir.mkdir()
+    older_version = "20260320T010000Z_aaaa1111"
+    newer_version = "20260321T010000Z_bbbb2222"
+    older_ml = older_dir / f"f5_ml_calibrated_model_{older_version}.joblib"
+    older_rl = older_dir / f"f5_rl_calibrated_model_{older_version}.joblib"
+    newer_ml = newer_dir / f"f5_ml_calibrated_model_{newer_version}.joblib"
+    newer_rl = newer_dir / f"f5_rl_calibrated_model_{newer_version}.joblib"
+    for path in (older_ml, older_rl, newer_ml, newer_rl):
+        path.write_text("placeholder", encoding="utf-8")
+
+    def _fake_load(path: Path) -> CalibratedStackingModel:
+        return _dummy_calibrated_model()
+
+    monkeypatch.setattr(joblib, "load", _fake_load)
+
+    engine = ArtifactOrFallbackPredictionEngine(model_dir=tmp_path)
+
+    assert engine.ml_model_path == newer_ml
+    assert engine.rl_model_path == newer_rl
+    assert engine.model_version == newer_version
+    assert engine.ml_model is not None
+    assert engine.rl_model is not None
+
+
+def test_artifact_engine_falls_back_without_complete_recursive_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    incomplete_dir = tmp_path / "incomplete-exp"
+    incomplete_dir.mkdir()
+    version = "20260321T010000Z_onlyml"
+    (incomplete_dir / f"f5_ml_calibrated_model_{version}.joblib").write_text(
+        "placeholder",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(joblib, "load", lambda path: _dummy_calibrated_model())
+
+    engine = ArtifactOrFallbackPredictionEngine(model_dir=tmp_path)
+
+    assert engine.ml_model_path is None
+    assert engine.rl_model_path is None
+    assert engine.model_version == "baseline-fallback"
 
 
 def test_run_daily_pipeline_dry_run_persists_predictions_and_returns_pick_payload(tmp_path: Path) -> None:

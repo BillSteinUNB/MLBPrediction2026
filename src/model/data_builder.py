@@ -26,6 +26,7 @@ from src.clients.statcast_client import (
 )
 from src.clients.chadwick_client import fetch_chadwick_register
 from src.clients.retrosheet_client import fetch_retrosheet_starting_lineups
+from src.clients.retrosheet_client import fetch_retrosheet_umpires
 from src.clients.weather_client import _get_default_weather, fetch_game_weather
 from src.config import _load_settings_yaml
 from src.db import DEFAULT_DB_PATH, init_db, sqlite_connection
@@ -56,6 +57,7 @@ from src.features.pitching import (
     compute_pitching_features,
     _fetch_season_start_metrics,
 )
+from src.features.umpires import compute_umpire_features
 from src.models.lineup import Lineup
 from src.models.weather import WeatherData
 
@@ -131,6 +133,13 @@ _WEATHER_FEATURE_DEFAULTS = {
     "weather_composite": NEUTRAL_WEATHER_FACTOR,
     "weather_data_missing": 1.0,
 }
+_UMPIRE_FEATURE_DEFAULTS = {
+    "known": 0.0,
+    "home_win_pct": 0.54,
+    "total_runs_avg": 8.8,
+    "f5_total_runs_avg": 4.5,
+    "sample_size": 0.0,
+}
 _SCHEDULE_FEATURE_DEFAULTS = {
     "park_runs_factor": 1.0,
     "park_hr_factor": 1.0,
@@ -144,6 +153,7 @@ ScheduleFetcher = Callable[[int], pd.DataFrame]
 SeasonStatsFetcher = Callable[..., pd.DataFrame]
 TeamLogsFetcher = Callable[..., pd.DataFrame]
 LineupFetcher = Callable[[str | date | datetime], Sequence[Lineup]]
+UmpireFetcher = Callable[..., pd.DataFrame]
 StartMetricsFetcher = Callable[..., pd.DataFrame]
 BullpenMetricsFetcher = Callable[..., pd.DataFrame]
 WeatherFetcher = Callable[..., WeatherData | None]
@@ -218,17 +228,15 @@ def resolve_training_years(
     row_counts = dict(season_row_counts or {})
 
     effective_years = [
-        year
-        for year in requested_years
-        if row_counts.get(year, shortened_season_game_threshold) >= shortened_season_game_threshold
+        year for year in requested_years if row_counts.get(year, 0) >= shortened_season_game_threshold
     ]
 
     backfill_year = start_year - 1
-    while len(effective_years) < full_regular_seasons_target:
-        if backfill_year not in effective_years and row_counts.get(
-            backfill_year,
-            shortened_season_game_threshold,
-        ) >= shortened_season_game_threshold:
+    while len(effective_years) < full_regular_seasons_target and backfill_year in row_counts:
+        if (
+            backfill_year not in effective_years
+            and row_counts.get(backfill_year, 0) >= shortened_season_game_threshold
+        ):
             effective_years.insert(0, backfill_year)
         backfill_year -= 1
 
@@ -252,6 +260,7 @@ def build_training_dataset(
     framing_stats_fetcher: SeasonStatsFetcher = fetch_catcher_framing,
     team_logs_fetcher: TeamLogsFetcher = fetch_team_game_logs,
     lineup_fetcher: LineupFetcher | None = None,
+    umpire_fetcher: UmpireFetcher | None = None,
     start_metrics_fetcher: StartMetricsFetcher | None = None,
     bullpen_metrics_fetcher: BullpenMetricsFetcher | None = None,
     weather_fetcher: WeatherFetcher | None = None,
@@ -273,6 +282,22 @@ def build_training_dataset(
     for year in requested_years:
         schedules_by_year[year] = _prepare_schedule_frame(resolved_schedule_fetcher(year))
 
+    backfill_year = start_year - 1
+    while backfill_year >= 1900:
+        effective_years = resolve_training_years(
+            start_year=start_year,
+            end_year=end_year,
+            full_regular_seasons_target=full_regular_seasons_target,
+            season_row_counts={year: len(frame) for year, frame in schedules_by_year.items()},
+            shortened_season_game_threshold=shortened_season_game_threshold,
+        )
+        if len(effective_years) >= full_regular_seasons_target:
+            break
+        schedules_by_year[backfill_year] = _prepare_schedule_frame(
+            resolved_schedule_fetcher(backfill_year)
+        )
+        backfill_year -= 1
+
     effective_years = tuple(
         resolve_training_years(
             start_year=start_year,
@@ -282,10 +307,6 @@ def build_training_dataset(
             shortened_season_game_threshold=shortened_season_game_threshold,
         )
     )
-
-    for year in effective_years:
-        if year not in schedules_by_year:
-            schedules_by_year[year] = _prepare_schedule_frame(resolved_schedule_fetcher(year))
 
     schedule = pd.concat(
         [schedules_by_year[year] for year in effective_years],
@@ -310,6 +331,10 @@ def build_training_dataset(
 
     build_timestamp = datetime.now(UTC)
     resolved_lineup_fetcher = lineup_fetcher or _empty_lineups_fetcher
+    resolved_umpire_fetcher = (
+        umpire_fetcher
+        or (fetch_retrosheet_umpires if schedule_fetcher is None else _empty_umpires_fetcher)
+    )
     resolved_lineup_player_ids_by_date = (
         lineup_player_ids_by_date
         if lineup_player_ids_by_date is not None
@@ -326,6 +351,7 @@ def build_training_dataset(
         framing_stats_fetcher=framing_stats_fetcher,
         team_logs_fetcher=team_logs_fetcher,
         lineup_fetcher=lineup_fetcher,
+        umpire_fetcher=resolved_umpire_fetcher,
         start_metrics_fetcher=start_metrics_fetcher,
         bullpen_metrics_fetcher=bullpen_metrics_fetcher,
         lineup_player_ids_by_date=lineup_player_ids_by_date,
@@ -339,6 +365,7 @@ def build_training_dataset(
         chunk_result = _compute_feature_modules_parallel(
             schedule,
             refresh=refresh_raw_data,
+            umpire_fetcher=resolved_umpire_fetcher,
             lineup_player_ids_by_date=resolved_lineup_player_ids_by_date,
             worker_count=feature_build_workers,
         )
@@ -363,6 +390,7 @@ def build_training_dataset(
                 framing_stats_fetcher=framing_stats_fetcher,
                 team_logs_fetcher=team_logs_fetcher,
                 lineup_fetcher=resolved_lineup_fetcher,
+                umpire_fetcher=resolved_umpire_fetcher,
                 start_metrics_fetcher=start_metrics_fetcher,
                 bullpen_metrics_fetcher=bullpen_metrics_fetcher,
                 lineup_player_ids_by_date=resolved_lineup_player_ids_by_date,
@@ -505,6 +533,7 @@ def build_live_feature_frame(
             framing_stats_fetcher=framing_stats_fetcher,
             team_logs_fetcher=team_logs_fetcher,
             lineup_fetcher=_static_lineup_fetcher(target_day, lineup_list),
+            umpire_fetcher=_empty_umpires_fetcher,
             start_metrics_fetcher=start_metrics_fetcher,
             bullpen_metrics_fetcher=bullpen_metrics_fetcher,
             lineup_player_ids_by_date={target_day.isoformat(): lineup_player_ids},
@@ -835,6 +864,7 @@ def _compute_feature_modules(
     framing_stats_fetcher: SeasonStatsFetcher,
     team_logs_fetcher: TeamLogsFetcher,
     lineup_fetcher: LineupFetcher,
+    umpire_fetcher: UmpireFetcher,
     start_metrics_fetcher: StartMetricsFetcher | None,
     bullpen_metrics_fetcher: BullpenMetricsFetcher | None,
     lineup_player_ids_by_date: LineupPlayerIdsByDate | None,
@@ -845,6 +875,7 @@ def _compute_feature_modules(
     cached_fielding_stats_fetcher = _memoize_dataframe_fetcher(fielding_stats_fetcher)
     cached_framing_stats_fetcher = _memoize_dataframe_fetcher(framing_stats_fetcher)
     cached_lineup_fetcher = _memoize_lineup_fetcher(lineup_fetcher)
+    cached_umpire_fetcher = _memoize_dataframe_fetcher(umpire_fetcher)
     cached_start_metrics_fetcher = _build_cached_start_metrics_fetcher(start_metrics_fetcher)
     cached_bullpen_metrics_fetcher = _build_cached_bullpen_metrics_fetcher(
         bullpen_metrics_fetcher,
@@ -860,6 +891,7 @@ def _compute_feature_modules(
         "defense": 0.0,
         "bullpen": 0.0,
         "baselines": 0.0,
+        "umpires": 0.0,
     }
     build_started_at = perf_counter()
     for index, game_date in enumerate(game_dates, start=1):
@@ -871,6 +903,7 @@ def _compute_feature_modules(
             "defense": 0.0,
             "bullpen": 0.0,
             "baselines": 0.0,
+            "umpires": 0.0,
         }
         logger.info("[build %s/%s] Preparing %s", index, total_days, game_date)
         stage_started_at = perf_counter()
@@ -953,8 +986,19 @@ def _compute_feature_modules(
         stage_elapsed = perf_counter() - stage_started_at
         module_seconds["baselines"] += stage_elapsed
         day_seconds["baselines"] = stage_elapsed
+        logger.info("[build %s/%s] umpires %s", index, total_days, game_date)
+        stage_started_at = perf_counter()
+        compute_umpire_features(
+            game_date,
+            db_path=database_path,
+            refresh=refresh,
+            umpire_fetcher=cached_umpire_fetcher,
+        )
+        stage_elapsed = perf_counter() - stage_started_at
+        module_seconds["umpires"] += stage_elapsed
+        day_seconds["umpires"] = stage_elapsed
         logger.info(
-            "[build %s/%s] complete %s timings prepare=%.2fs offense=%.2fs pitching=%.2fs defense=%.2fs bullpen=%.2fs baselines=%.2fs total=%.2fs",
+            "[build %s/%s] complete %s timings prepare=%.2fs offense=%.2fs pitching=%.2fs defense=%.2fs bullpen=%.2fs baselines=%.2fs umpires=%.2fs total=%.2fs",
             index,
             total_days,
             game_date,
@@ -964,6 +1008,7 @@ def _compute_feature_modules(
             day_seconds["defense"],
             day_seconds["bullpen"],
             day_seconds["baselines"],
+            day_seconds["umpires"],
             perf_counter() - day_started_at,
         )
 
@@ -982,6 +1027,7 @@ def _resolve_effective_feature_build_workers(
     framing_stats_fetcher: SeasonStatsFetcher,
     team_logs_fetcher: TeamLogsFetcher,
     lineup_fetcher: LineupFetcher | None,
+    umpire_fetcher: UmpireFetcher,
     start_metrics_fetcher: StartMetricsFetcher | None,
     bullpen_metrics_fetcher: BullpenMetricsFetcher | None,
     lineup_player_ids_by_date: LineupPlayerIdsByDate | None,
@@ -993,6 +1039,8 @@ def _resolve_effective_feature_build_workers(
     if start_metrics_fetcher is not None or bullpen_metrics_fetcher is not None:
         return 1
     if lineup_player_ids_by_date is not None:
+        return 1
+    if umpire_fetcher is not fetch_retrosheet_umpires:
         return 1
     if batting_stats_fetcher is not fetch_batting_stats:
         return 1
@@ -1009,6 +1057,7 @@ def _compute_feature_modules_parallel(
     schedule: pd.DataFrame,
     *,
     refresh: bool,
+    umpire_fetcher: UmpireFetcher,
     lineup_player_ids_by_date: LineupPlayerIdsByDate | None,
     worker_count: int,
 ) -> _FeatureChunkResult:
@@ -1030,6 +1079,7 @@ def _compute_feature_modules_parallel(
                 framing_stats_fetcher=fetch_catcher_framing,
                 team_logs_fetcher=fetch_team_game_logs,
                 lineup_fetcher=_empty_lineups_fetcher,
+                umpire_fetcher=umpire_fetcher,
                 start_metrics_fetcher=None,
                 bullpen_metrics_fetcher=None,
                 lineup_player_ids_by_date=lineup_player_ids_by_date,
@@ -1052,6 +1102,7 @@ def _compute_feature_modules_parallel(
                 schedule,
                 tuple(chunk_dates),
                 refresh,
+                umpire_fetcher,
                 _normalize_lineup_player_ids_by_date(lineup_player_ids_by_date),
             )
             for chunk_dates in chunked_dates
@@ -1073,6 +1124,7 @@ def _build_feature_chunk(
     schedule: pd.DataFrame,
     chunk_dates: tuple[str, ...],
     refresh: bool,
+    umpire_fetcher: UmpireFetcher,
     lineup_player_ids_by_date: dict[str, Mapping[tuple[int, str], Sequence[int]]],
 ) -> _FeatureChunkResult:
     chunk_schedule = schedule.loc[schedule["game_date"].astype(str).isin(chunk_dates)].copy()
@@ -1091,6 +1143,7 @@ def _build_feature_chunk(
             framing_stats_fetcher=fetch_catcher_framing,
             team_logs_fetcher=fetch_team_game_logs,
             lineup_fetcher=_empty_lineups_fetcher,
+            umpire_fetcher=umpire_fetcher,
             start_metrics_fetcher=None,
             bullpen_metrics_fetcher=None,
             lineup_player_ids_by_date=lineup_player_ids_by_date,
@@ -1132,7 +1185,7 @@ def _combine_timing_summaries(
 
 def _log_feature_build_timing_summary(summary: FeatureBuildTimingSummary, *, label: str) -> None:
     logger.info(
-        "[build] Timing summary (%s) prepare=%.2fs offense=%.2fs pitching=%.2fs defense=%.2fs bullpen=%.2fs baselines=%.2fs total=%.2fs dates=%s",
+        "[build] Timing summary (%s) prepare=%.2fs offense=%.2fs pitching=%.2fs defense=%.2fs bullpen=%.2fs baselines=%.2fs umpires=%.2fs total=%.2fs dates=%s",
         label,
         summary.module_seconds.get("prepare", 0.0),
         summary.module_seconds.get("offense", 0.0),
@@ -1140,6 +1193,7 @@ def _log_feature_build_timing_summary(summary: FeatureBuildTimingSummary, *, lab
         summary.module_seconds.get("defense", 0.0),
         summary.module_seconds.get("bullpen", 0.0),
         summary.module_seconds.get("baselines", 0.0),
+        summary.module_seconds.get("umpires", 0.0),
         summary.total_seconds,
         summary.processed_dates,
     )
@@ -1586,6 +1640,8 @@ def _default_feature_fill_value(column: str) -> float:
         return _resolve_pattern_default(column, _BULLPEN_FEATURE_DEFAULTS)
     if "_pythagorean_wp_" in column or "_log5_" in column:
         return 0.5
+    if column.startswith("plate_umpire_"):
+        return _resolve_pattern_default(column, _UMPIRE_FEATURE_DEFAULTS)
     if _matches_feature_pattern(column, _DEFENSE_FEATURE_DEFAULTS):
         return _resolve_pattern_default(column, _DEFENSE_FEATURE_DEFAULTS)
     if "_lineup_" in column or _matches_feature_pattern(column, _OFFENSE_FEATURE_DEFAULTS):
@@ -1928,6 +1984,10 @@ def _coerce_training_data_source(source: pd.DataFrame | str | Path) -> pd.DataFr
 
 def _empty_lineups_fetcher(_game_date: str | date | datetime) -> list[Lineup]:
     return []
+
+
+def _empty_umpires_fetcher(*_args: Any, **_kwargs: Any) -> pd.DataFrame:
+    return pd.DataFrame()
 
 
 def _cache_key(*args: Any, **kwargs: Any) -> tuple[Any, ...]:

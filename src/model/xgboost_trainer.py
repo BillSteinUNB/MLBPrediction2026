@@ -24,19 +24,26 @@ from src.model.data_builder import (
     _feature_columns,
     build_training_dataset,
 )
+from src.ops.experiment_tracker import log_training_run
 
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL_OUTPUT_DIR = Path("data") / "models"
 DEFAULT_TIME_SERIES_SPLITS = 5
-DEFAULT_SEARCH_ITERATIONS = 15
+DEFAULT_SEARCH_ITERATIONS = 40
 DEFAULT_RANDOM_STATE = 2026
 DEFAULT_TOP_FEATURE_COUNT = 25
 DEFAULT_SEARCH_SPACE: dict[str, list[float | int]] = {
     "max_depth": [3, 4, 5, 6, 7, 8],
     "n_estimators": [100, 200, 300, 400, 500],
     "learning_rate": [0.01, 0.03, 0.05, 0.07, 0.1],
+    "subsample": [0.7, 0.8, 0.9, 1.0],
+    "colsample_bytree": [0.6, 0.7, 0.8, 0.9, 1.0],
+    "min_child_weight": [1, 3, 5, 7],
+    "gamma": [0.0, 0.1, 0.3, 0.5],
+    "reg_alpha": [0.0, 0.01, 0.1, 1.0],
+    "reg_lambda": [0.5, 1.0, 2.0, 4.0],
 }
 _MODEL_SPECS = (
     {"model_name": "f5_ml_model", "target_column": "f5_ml_result", "drop_ties": True},
@@ -204,6 +211,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         time_series_splits=args.time_series_splits,
         search_iterations=args.search_iterations,
         random_state=args.random_state,
+    )
+    log_training_run(
+        result,
+        experiment_name=args.experiment_name,
+        output_dir=resolved_output_dir,
+        training_data=training_path,
+        start_year=args.start_year,
+        end_year=args.end_year,
+        refresh_training_data=args.refresh_training_data,
+        search_iterations=args.search_iterations,
+        time_series_splits=args.time_series_splits,
     )
     print(json.dumps(_run_result_to_json_ready(result), indent=2))
     return 0

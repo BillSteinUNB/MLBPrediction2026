@@ -173,11 +173,9 @@ class DiscordNotifier:
 class ArtifactOrFallbackPredictionEngine:
     def __init__(self, model_dir: str | Path = DEFAULT_MODEL_OUTPUT_DIR) -> None:
         self.model_dir = Path(model_dir)
-        self.ml_model_path = self._latest_model_path("f5_ml_calibrated_model")
-        self.rl_model_path = self._latest_model_path("f5_rl_calibrated_model")
+        self.ml_model_path, self.rl_model_path, self.model_version = self._resolve_model_bundle()
         self.ml_model = self._load_model(self.ml_model_path)
         self.rl_model = self._load_model(self.rl_model_path)
-        self.model_version = self._resolve_model_version()
 
     def predict(self, inference_frame: pd.DataFrame) -> Prediction:
         resolved_frame = inference_frame.copy().reset_index(drop=True)
@@ -223,9 +221,47 @@ class ArtifactOrFallbackPredictionEngine:
 
         return resolved
 
-    def _latest_model_path(self, prefix: str) -> Path | None:
-        candidates = sorted(self.model_dir.glob(f"{prefix}_*.joblib"))
-        return candidates[-1] if candidates else None
+    def _resolve_model_bundle(self) -> tuple[Path | None, Path | None, str]:
+        ml_candidates = self._collect_model_candidates("f5_ml_calibrated_model")
+        rl_candidates = self._collect_model_candidates("f5_rl_calibrated_model")
+        shared_versions = set(ml_candidates) & set(rl_candidates)
+
+        if not shared_versions:
+            logger.warning(
+                "No complete calibrated model bundle found under %s; daily pipeline will use baseline fallback",
+                self.model_dir,
+            )
+            return None, None, "baseline-fallback"
+
+        selected_version = max(
+            shared_versions,
+            key=lambda version: (
+                max(
+                    ml_candidates[version].stat().st_mtime,
+                    rl_candidates[version].stat().st_mtime,
+                ),
+                version,
+            ),
+        )
+        ml_model_path = ml_candidates[selected_version]
+        rl_model_path = rl_candidates[selected_version]
+        logger.info(
+            "Loaded calibrated model bundle version=%s ml=%s rl=%s",
+            selected_version,
+            ml_model_path,
+            rl_model_path,
+        )
+        return ml_model_path, rl_model_path, selected_version
+
+    def _collect_model_candidates(self, prefix: str) -> dict[str, Path]:
+        candidates: dict[str, Path] = {}
+        pattern = f"{prefix}_*.joblib"
+        for path in self.model_dir.rglob(pattern):
+            version = path.name.removeprefix(f"{prefix}_").removesuffix(".joblib")
+            current = candidates.get(version)
+            if current is None or path.stat().st_mtime > current.stat().st_mtime:
+                candidates[version] = path
+        return candidates
 
     def _load_model(self, path: Path | None) -> CalibratedStackingModel | None:
         if path is None:
@@ -233,13 +269,6 @@ class ArtifactOrFallbackPredictionEngine:
 
         loaded = joblib.load(path)
         return loaded if isinstance(loaded, CalibratedStackingModel) else None
-
-    def _resolve_model_version(self) -> str:
-        if self.ml_model_path is not None and self.rl_model_path is not None:
-            prefix = "f5_ml_calibrated_model_"
-            return self.ml_model_path.name.removeprefix(prefix).removesuffix(".joblib")
-        return "baseline-fallback"
-
 
 def run_daily_pipeline(
     *,

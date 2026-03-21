@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
@@ -16,6 +17,7 @@ from src.backtest.walk_forward import (
     create_walk_forward_windows,
     run_walk_forward_backtest,
 )
+from src.db import init_db
 from src.model.calibration import DEFAULT_CALIBRATION_METHOD
 
 
@@ -296,3 +298,61 @@ def test_configure_cli_logging_suppresses_http_client_info_noise() -> None:
     finally:
         httpx_logger.setLevel(original_httpx_level)
         httpcore_logger.setLevel(original_httpcore_level)
+
+
+def test_run_walk_forward_backtest_uses_historical_odds_when_available(tmp_path) -> None:
+    frame = _synthetic_training_frame()
+    db_path = tmp_path / "historical_odds.db"
+    with sqlite3.connect(init_db(db_path)) as connection:
+        for row in frame.to_dict(orient="records"):
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO games (
+                    game_pk, date, home_team, away_team, venue, is_dome, is_abs_active,
+                    f5_home_score, f5_away_score, final_home_score, final_away_score, status
+                )
+                VALUES (?, ?, ?, ?, ?, 0, 1, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(row["game_pk"]),
+                    str(row["scheduled_start"]),
+                    str(row["home_team"]),
+                    str(row["away_team"]),
+                    str(row["venue"]),
+                    int(row["f5_ml_result"]),
+                    int(1 - row["f5_ml_result"]),
+                    int(row["f5_ml_result"]),
+                    int(1 - row["f5_ml_result"]),
+                    "final",
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO odds_snapshots (
+                    game_pk, book_name, market_type, home_odds, away_odds, fetched_at, is_frozen
+                )
+                VALUES (?, ?, 'f5_ml', ?, ?, ?, 1)
+                """,
+                (
+                    int(row["game_pk"]),
+                    "archive-book",
+                    -120,
+                    110,
+                    str(row["scheduled_start"]),
+                ),
+            )
+        connection.commit()
+
+    result = run_walk_forward_backtest(
+        training_data=frame,
+        start_date="2022-01-01",
+        end_date="2022-01-01",
+        output_dir=tmp_path / "historical_run",
+        calibration_fraction=0.15,
+        historical_odds_db_path=db_path,
+        historical_odds_book_name="archive-book",
+        estimator_kwargs={"max_depth": 1, "n_estimators": 8, "learning_rate": 0.2},
+    )
+
+    assert result.predictions["market_source"].eq("historical").all()
+    assert result.window_metrics["historical_odds_coverage"].eq(1.0).all()
