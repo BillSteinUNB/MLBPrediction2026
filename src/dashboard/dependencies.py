@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class DashboardSettings(BaseSettings):
@@ -11,9 +11,7 @@ class DashboardSettings(BaseSettings):
     models_dir: Path = Path("data") / "models"
     experiments_dir: Path = Path("data") / "experiments"
 
-    class Config:
-        env_prefix = "DASHBOARD_"
-        extra = "ignore"
+    model_config = SettingsConfigDict(env_prefix="DASHBOARD_", extra="ignore")
 
 
 _settings: DashboardSettings | None = None
