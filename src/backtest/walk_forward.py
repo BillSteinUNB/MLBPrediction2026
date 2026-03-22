@@ -68,6 +68,7 @@ SUPPORTED_STAKING_MODES = ("flat", "kelly", "edge_scaled", "edge_bucketed")
 DEFAULT_CALIBRATION_FRACTION = 0.15
 DEFAULT_WALK_FORWARD_CALIBRATION_METHOD = DEFAULT_CALIBRATION_METHOD
 DEFAULT_EDGE_THRESHOLD = 0.03
+DEFAULT_MAX_EDGE_TO_BET: float | None = None
 DEFAULT_MARKET_VIG = 0.04
 DEFAULT_TIME_SERIES_SPLITS = 3
 DEFAULT_FLOAT_FORMAT = "%.10f"
@@ -228,6 +229,7 @@ def run_walk_forward_backtest(
     calibration_fraction: float = DEFAULT_CALIBRATION_FRACTION,
     calibration_method: str = DEFAULT_WALK_FORWARD_CALIBRATION_METHOD,
     edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
+    max_edge_to_bet: float | None = DEFAULT_MAX_EDGE_TO_BET,
     market_vig: float = DEFAULT_MARKET_VIG,
     time_series_splits: int = DEFAULT_TIME_SERIES_SPLITS,
     raw_meta_feature_columns: Sequence[str] = DEFAULT_RAW_META_FEATURE_COLUMNS,
@@ -311,6 +313,7 @@ def run_walk_forward_backtest(
                 calibration_fraction=calibration_fraction,
                 calibration_method=calibration_method,
                 edge_threshold=edge_threshold,
+                max_edge_to_bet=max_edge_to_bet,
                 market_vig=market_vig,
                 time_series_splits=time_series_splits,
                 estimator_kwargs=resolved_estimator_kwargs,
@@ -396,6 +399,7 @@ def run_walk_forward_backtest(
                 calibration_fraction=calibration_fraction,
                 calibration_method=calibration_method,
                 edge_threshold=edge_threshold,
+                max_edge_to_bet=max_edge_to_bet,
                 market_vig=market_vig,
                 time_series_splits=time_series_splits,
                 estimator_kwargs=resolved_estimator_kwargs,
@@ -490,6 +494,7 @@ def run_walk_forward_backtest(
         "calibration_fraction": calibration_fraction,
         "calibration_method": calibration_method,
         "edge_threshold": edge_threshold,
+        "max_edge_to_bet": max_edge_to_bet,
         "market_vig": market_vig,
         "time_series_splits": time_series_splits,
         "starting_bankroll_units": float(starting_bankroll_units),
@@ -574,6 +579,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         choices=SUPPORTED_CALIBRATION_METHODS,
     )
     parser.add_argument("--edge-threshold", type=float, default=DEFAULT_EDGE_THRESHOLD)
+    parser.add_argument("--max-edge-to-bet", type=float)
     parser.add_argument("--market-vig", type=float, default=DEFAULT_MARKET_VIG)
     parser.add_argument("--time-series-splits", type=int, default=DEFAULT_TIME_SERIES_SPLITS)
     parser.add_argument("--max-depth", type=int, default=DEFAULT_ESTIMATOR_KWARGS["max_depth"])
@@ -587,6 +593,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=float,
         default=DEFAULT_ESTIMATOR_KWARGS["learning_rate"],
     )
+    parser.add_argument("--subsample", type=float, default=DEFAULT_ESTIMATOR_KWARGS["subsample"])
+    parser.add_argument(
+        "--colsample-bytree",
+        type=float,
+        default=DEFAULT_ESTIMATOR_KWARGS["colsample_bytree"],
+    )
+    parser.add_argument("--min-child-weight", type=float, default=1.0)
+    parser.add_argument("--gamma", type=float, default=0.0)
+    parser.add_argument("--reg-alpha", type=float, default=0.0)
+    parser.add_argument("--reg-lambda", type=float, default=1.0)
     parser.add_argument("--historical-odds-db")
     parser.add_argument("--historical-odds-book")
     parser.add_argument(
@@ -622,12 +638,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         calibration_fraction=args.calibration_fraction,
         calibration_method=args.calibration_method,
         edge_threshold=args.edge_threshold,
+        max_edge_to_bet=args.max_edge_to_bet,
         market_vig=args.market_vig,
         time_series_splits=args.time_series_splits,
         estimator_kwargs={
             "max_depth": args.max_depth,
             "n_estimators": args.n_estimators,
             "learning_rate": args.learning_rate,
+            "subsample": args.subsample,
+            "colsample_bytree": args.colsample_bytree,
+            "min_child_weight": args.min_child_weight,
+            "gamma": args.gamma,
+            "reg_alpha": args.reg_alpha,
+            "reg_lambda": args.reg_lambda,
         },
         historical_odds_db_path=args.historical_odds_db,
         historical_odds_book_name=args.historical_odds_book,
@@ -654,6 +677,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         calibration_method=args.calibration_method,
         calibration_fraction=args.calibration_fraction,
         edge_threshold=args.edge_threshold,
+        max_edge_to_bet=args.max_edge_to_bet,
         market_vig=args.market_vig,
         historical_odds_db_path=args.historical_odds_db,
         historical_odds_book_name=args.historical_odds_book,
@@ -707,6 +731,7 @@ def _evaluate_window(
     calibration_fraction: float,
     calibration_method: str,
     edge_threshold: float,
+    max_edge_to_bet: float | None,
     market_vig: float,
     time_series_splits: int,
     estimator_kwargs: Mapping[str, Any],
@@ -774,6 +799,9 @@ def _evaluate_window(
 
     bet_side = np.where(edge_home >= edge_threshold, "home", "none")
     bet_side = np.where(edge_away >= edge_threshold, "away", bet_side)
+    if max_edge_to_bet is not None:
+        bet_side = np.where((bet_side == "home") & (edge_home > max_edge_to_bet), "none", bet_side)
+        bet_side = np.where((bet_side == "away") & (edge_away > max_edge_to_bet), "none", bet_side)
     bet_edge = np.where(
         bet_side == "home",
         edge_home,
@@ -897,6 +925,7 @@ def _evaluate_window(
         "roi": roi,
         "total_profit_units": total_profit,
         "total_staked_units": total_staked,
+        "max_edge_to_bet": max_edge_to_bet,
         "starting_bankroll_units": float(predictions["bankroll_before_units"].iloc[0]),
         "ending_bankroll_units": float(predictions["bankroll_after_units"].iloc[-1]),
         "peak_bankroll_units": float(predictions["peak_bankroll_units"].max()),

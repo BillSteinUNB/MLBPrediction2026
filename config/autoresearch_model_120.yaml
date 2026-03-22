@@ -1,0 +1,69 @@
+session_name: autoresearch-model-120
+trials: 120
+random_seed: 20260321
+module: src.backtest.walk_forward
+output_root: data/models
+experiments_dir: data/experiments
+refresh_reports: true
+max_param_changes_per_trial: 3
+
+objective:
+  metric: bankroll_return_pct
+  direction: max
+
+constraints:
+  - metric: max_drawdown_pct
+    operator: "<="
+    value: 0.35
+  - metric: total_bets
+    operator: ">="
+    value: 3000
+
+fixed_args:
+  training-data: data/training/training_data_2018_2025.parquet
+  start: 2021-01-01
+  end: 2025-01-01
+  test-window-months: 12
+  window-mode: anchored_expanding
+  anchored-train-start: 2018-01-01
+  historical-odds-db: data/mlb.db
+  historical-odds-book: "sbr:caesars"
+  starting-bankroll-units: 100
+  calibration-method: identity
+  edge-threshold: 0.07
+  staking-mode: edge_scaled
+  min-bet-size-units: 0.25
+  max-bet-size-units: 3.0
+  edge-scale-cap: 0.06
+  max-edge-to-bet: 0.35
+
+baseline_params:
+  max-depth: 3
+  n-estimators: 120
+  learning-rate: 0.05
+  subsample: 1.0
+  colsample-bytree: 1.0
+  min-child-weight: 1.0
+  gamma: 0.0
+  reg-alpha: 0.0
+  reg-lambda: 1.0
+
+search_space:
+  max-depth:
+    values: [3, 4, 5, 6]
+  n-estimators:
+    values: [80, 120, 180, 240]
+  learning-rate:
+    values: [0.03, 0.05, 0.07, 0.10]
+  subsample:
+    values: [0.7, 0.8, 0.9, 1.0]
+  colsample-bytree:
+    values: [0.6, 0.7, 0.8, 0.9, 1.0]
+  min-child-weight:
+    values: [1.0, 3.0, 5.0]
+  gamma:
+    values: [0.0, 0.1, 0.3]
+  reg-alpha:
+    values: [0.0, 0.01, 0.1]
+  reg-lambda:
+    values: [1.0, 2.0, 4.0]

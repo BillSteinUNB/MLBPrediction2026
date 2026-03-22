@@ -223,6 +223,35 @@ def test_run_walk_forward_backtest_supports_edge_bucketed_staking(tmp_path) -> N
     assert result.predictions["staking_mode"].eq("edge_bucketed").all()
 
 
+def test_run_walk_forward_backtest_can_filter_extreme_edges(tmp_path) -> None:
+    frame = _synthetic_training_frame()
+
+    unfiltered = run_walk_forward_backtest(
+        training_data=frame,
+        start_date="2022-01-01",
+        end_date="2022-01-01",
+        output_dir=tmp_path / "unfiltered_edges",
+        calibration_fraction=0.15,
+        estimator_kwargs={"max_depth": 1, "n_estimators": 8, "learning_rate": 0.2},
+        edge_threshold=0.05,
+    )
+    filtered = run_walk_forward_backtest(
+        training_data=frame,
+        start_date="2022-01-01",
+        end_date="2022-01-01",
+        output_dir=tmp_path / "filtered_edges",
+        calibration_fraction=0.15,
+        estimator_kwargs={"max_depth": 1, "n_estimators": 8, "learning_rate": 0.2},
+        edge_threshold=0.05,
+        max_edge_to_bet=0.30,
+    )
+
+    assert int(filtered.predictions["is_bet"].sum()) <= int(unfiltered.predictions["is_bet"].sum())
+    filtered_bets = filtered.predictions.loc[filtered.predictions["is_bet"] == 1]
+    if not filtered_bets.empty:
+        assert filtered_bets["bet_edge"].max() <= 0.30
+
+
 def test_run_walk_forward_backtest_rebuilds_window_data_and_records_build_log(
     tmp_path,
     monkeypatch,

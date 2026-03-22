@@ -1,0 +1,51 @@
+session_name: autoresearch-policy-100
+trials: 100
+random_seed: 20260321
+module: src.backtest.walk_forward
+output_root: data/models
+experiments_dir: data/experiments
+refresh_reports: true
+max_param_changes_per_trial: 2
+
+objective:
+  metric: bankroll_return_pct
+  direction: max
+
+constraints:
+  - metric: max_drawdown_pct
+    operator: "<="
+    value: 0.35
+  - metric: total_bets
+    operator: ">="
+    value: 1000
+
+fixed_args:
+  training-data: data/training/training_data_2018_2025.parquet
+  start: 2021-01-01
+  end: 2025-01-01
+  test-window-months: 12
+  window-mode: anchored_expanding
+  anchored-train-start: 2018-01-01
+  historical-odds-db: data/mlb.db
+  historical-odds-book: "sbr:caesars"
+  starting-bankroll-units: 100
+  calibration-method: identity
+
+baseline_params:
+  edge-threshold: 0.05
+  staking-mode: edge_scaled
+  min-bet-size-units: 0.25
+  max-bet-size-units: 3.0
+  edge-scale-cap: 0.10
+
+search_space:
+  edge-threshold:
+    values: [0.04, 0.05, 0.06, 0.07, 0.08]
+  staking-mode:
+    values: [flat, edge_scaled, edge_bucketed]
+  min-bet-size-units:
+    values: [0.10, 0.25, 0.50, 0.75]
+  max-bet-size-units:
+    values: [1.0, 1.5, 2.0, 2.5, 3.0]
+  edge-scale-cap:
+    values: [0.06, 0.08, 0.10, 0.12]
