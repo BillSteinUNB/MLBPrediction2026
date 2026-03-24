@@ -59,10 +59,13 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_BACKTEST_OUTPUT_DIR = Path("data") / "backtest"
 DEFAULT_BACKTEST_CACHE_DIR = Path("data") / "training"
+DEFAULT_MODEL_ARTIFACTS_DIR = Path("data") / "models"
 DEFAULT_TRAIN_WINDOW_MONTHS = 6
 DEFAULT_TEST_WINDOW_MONTHS = 1
 DEFAULT_WINDOW_MODE = "rolling"
 SUPPORTED_WINDOW_MODES = ("rolling", "anchored_expanding")
+DEFAULT_MODEL_MODE = "auto"
+SUPPORTED_MODEL_MODES = ("auto", "legacy_default", "promoted_params")
 DEFAULT_STAKING_MODE = "flat"
 SUPPORTED_STAKING_MODES = ("flat", "kelly", "edge_scaled", "edge_bucketed")
 DEFAULT_CALIBRATION_FRACTION = 0.15
@@ -224,7 +227,9 @@ def run_walk_forward_backtest(
     end_date: str,
     output_dir: str | Path = DEFAULT_BACKTEST_OUTPUT_DIR,
     cache_dir: str | Path = DEFAULT_BACKTEST_CACHE_DIR,
+    model_artifacts_dir: str | Path = DEFAULT_MODEL_ARTIFACTS_DIR,
     refresh_data: bool = False,
+    model_mode: Literal["auto", "legacy_default", "promoted_params"] = DEFAULT_MODEL_MODE,
     seed: int = DEFAULT_RANDOM_STATE,
     train_window_months: int = DEFAULT_TRAIN_WINDOW_MONTHS,
     test_window_months: int = DEFAULT_TEST_WINDOW_MONTHS,
@@ -263,7 +268,14 @@ def run_walk_forward_backtest(
         start_date,
         end_date,
     )
-    resolved_estimator_kwargs = {**DEFAULT_ESTIMATOR_KWARGS, **dict(estimator_kwargs or {})}
+    resolved_model_config = _resolve_walk_forward_model_config(
+        model_mode=model_mode,
+        model_artifacts_dir=model_artifacts_dir,
+        estimator_kwargs=estimator_kwargs,
+        raw_meta_feature_columns=raw_meta_feature_columns,
+    )
+    resolved_estimator_kwargs = resolved_model_config["estimator_kwargs"]
+    resolved_raw_meta_feature_columns = resolved_model_config["raw_meta_feature_columns"]
     code_version_hash = _compute_code_version_hash()
 
     prediction_frames: list[pd.DataFrame] = []
@@ -287,9 +299,9 @@ def run_walk_forward_backtest(
         logger.info("[backtest] Prepared %s windows from explicit training data", len(windows))
 
         feature_columns = _resolve_numeric_feature_columns(dataframe)
-        resolved_raw_meta_feature_columns = _resolve_raw_meta_feature_columns(
+        validated_raw_meta_feature_columns = _resolve_raw_meta_feature_columns(
             dataframe,
-            requested_columns=raw_meta_feature_columns,
+            requested_columns=resolved_raw_meta_feature_columns,
         )
         data_version_hash = _resolve_data_version_hash(dataframe)
         cache_path = str(Path(training_data)) if isinstance(training_data, str | Path) else None
@@ -316,7 +328,7 @@ def run_walk_forward_backtest(
                 dataframe=dataframe,
                 window=window,
                 feature_columns=feature_columns,
-                raw_meta_feature_columns=resolved_raw_meta_feature_columns,
+                raw_meta_feature_columns=validated_raw_meta_feature_columns,
                 calibration_fraction=calibration_fraction,
                 calibration_method=calibration_method,
                 edge_threshold=edge_threshold,
@@ -397,15 +409,15 @@ def run_walk_forward_backtest(
                 continue
 
             feature_columns = _resolve_numeric_feature_columns(dataframe)
-            resolved_raw_meta_feature_columns = _resolve_raw_meta_feature_columns(
+            validated_raw_meta_feature_columns = _resolve_raw_meta_feature_columns(
                 dataframe,
-                requested_columns=raw_meta_feature_columns,
+                requested_columns=resolved_raw_meta_feature_columns,
             )
             predictions, metrics = _evaluate_window(
                 dataframe=dataframe,
                 window=window,
                 feature_columns=feature_columns,
-                raw_meta_feature_columns=resolved_raw_meta_feature_columns,
+                raw_meta_feature_columns=validated_raw_meta_feature_columns,
                 calibration_fraction=calibration_fraction,
                 calibration_method=calibration_method,
                 edge_threshold=edge_threshold,
@@ -521,8 +533,13 @@ def run_walk_forward_backtest(
         "max_bet_fraction": float(max_bet_fraction),
         "max_drawdown": float(max_drawdown),
         "historical_odds_snapshot_selection": historical_odds_snapshot_selection,
+        "model_mode_requested": model_mode,
+        "model_mode_resolved": resolved_model_config["resolved_model_mode"],
+        "model_artifacts_dir": str(Path(model_artifacts_dir)),
+        "promoted_training_summary_path": resolved_model_config["training_summary_path"],
+        "promoted_stacking_summary_path": resolved_model_config["stacking_summary_path"],
         "estimator_kwargs": resolved_estimator_kwargs,
-        "raw_meta_feature_columns": list(raw_meta_feature_columns),
+        "raw_meta_feature_columns": list(resolved_raw_meta_feature_columns),
         "window_count": int(len(window_metrics)),
         "aggregate_brier_score": aggregate_brier,
         "aggregate_roi": aggregate_roi,
@@ -579,6 +596,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--training-data")
     parser.add_argument("--output-dir", default=str(DEFAULT_BACKTEST_OUTPUT_DIR))
     parser.add_argument("--cache-dir", default=str(DEFAULT_BACKTEST_CACHE_DIR))
+    parser.add_argument("--model-artifacts-dir", default=str(DEFAULT_MODEL_ARTIFACTS_DIR))
+    parser.add_argument("--model-mode", default=DEFAULT_MODEL_MODE, choices=SUPPORTED_MODEL_MODES)
     parser.add_argument("--refresh-data", action="store_true")
     parser.add_argument("--seed", type=int, default=DEFAULT_RANDOM_STATE)
     parser.add_argument("--train-window-months", type=int, default=DEFAULT_TRAIN_WINDOW_MONTHS)
@@ -653,7 +672,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         end_date=args.end_date,
         output_dir=args.output_dir,
         cache_dir=args.cache_dir,
+        model_artifacts_dir=args.model_artifacts_dir,
         refresh_data=args.refresh_data,
+        model_mode=args.model_mode,
         seed=args.seed,
         train_window_months=args.train_window_months,
         test_window_months=args.test_window_months,
@@ -742,6 +763,101 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     )
     return 0
+
+
+def _resolve_walk_forward_model_config(
+    *,
+    model_mode: Literal["auto", "legacy_default", "promoted_params"],
+    model_artifacts_dir: str | Path,
+    estimator_kwargs: Mapping[str, Any] | None,
+    raw_meta_feature_columns: Sequence[str],
+) -> dict[str, Any]:
+    requested_estimator_kwargs = dict(estimator_kwargs or {})
+    requested_raw_meta_feature_columns = [str(column) for column in raw_meta_feature_columns]
+
+    if model_mode not in SUPPORTED_MODEL_MODES:
+        raise ValueError(f"model_mode must be one of {SUPPORTED_MODEL_MODES}")
+
+    if model_mode == "legacy_default":
+        return {
+            "resolved_model_mode": "legacy_default",
+            "estimator_kwargs": {**DEFAULT_ESTIMATOR_KWARGS, **requested_estimator_kwargs},
+            "raw_meta_feature_columns": requested_raw_meta_feature_columns,
+            "training_summary_path": None,
+            "stacking_summary_path": None,
+        }
+
+    resolved_training_summary_path = _find_latest_summary_path(
+        root=model_artifacts_dir,
+        pattern="training_run_*.json",
+    )
+    resolved_stacking_summary_path = _find_latest_summary_path(
+        root=model_artifacts_dir,
+        pattern="stacking_run_*.json",
+    )
+    if resolved_training_summary_path is None:
+        if model_mode == "promoted_params":
+            raise ValueError(
+                f"No training summary found under {Path(model_artifacts_dir)} for promoted_params mode"
+            )
+        return {
+            "resolved_model_mode": "legacy_default",
+            "estimator_kwargs": {**DEFAULT_ESTIMATOR_KWARGS, **requested_estimator_kwargs},
+            "raw_meta_feature_columns": requested_raw_meta_feature_columns,
+            "training_summary_path": None,
+            "stacking_summary_path": None,
+        }
+
+    promoted_estimator_kwargs = _load_promoted_ml_estimator_kwargs(resolved_training_summary_path)
+    promoted_raw_meta_feature_columns = (
+        _load_promoted_raw_meta_feature_columns(resolved_stacking_summary_path)
+        if resolved_stacking_summary_path is not None
+        else requested_raw_meta_feature_columns
+    )
+    return {
+        "resolved_model_mode": "promoted_params",
+        "estimator_kwargs": {**promoted_estimator_kwargs, **requested_estimator_kwargs},
+        "raw_meta_feature_columns": promoted_raw_meta_feature_columns,
+        "training_summary_path": str(resolved_training_summary_path),
+        "stacking_summary_path": (
+            None if resolved_stacking_summary_path is None else str(resolved_stacking_summary_path)
+        ),
+    }
+
+
+def _find_latest_summary_path(*, root: str | Path, pattern: str) -> Path | None:
+    resolved_root = Path(root)
+    if resolved_root.is_file():
+        return resolved_root if resolved_root.match(pattern) else None
+    if not resolved_root.exists():
+        return None
+    matches = sorted(
+        resolved_root.rglob(pattern),
+        key=lambda path: (path.stat().st_mtime, str(path)),
+        reverse=True,
+    )
+    return matches[0] if matches else None
+
+
+def _load_promoted_ml_estimator_kwargs(summary_path: str | Path) -> dict[str, Any]:
+    payload = json.loads(Path(summary_path).read_text(encoding="utf-8"))
+    model_payload = payload.get("models", {}).get("f5_ml_model")
+    if not isinstance(model_payload, dict):
+        raise ValueError(f"Training summary {summary_path} does not contain f5_ml_model")
+    best_params = model_payload.get("best_params")
+    if not isinstance(best_params, dict) or not best_params:
+        raise ValueError(f"Training summary {summary_path} does not contain usable best_params")
+    return {**DEFAULT_ESTIMATOR_KWARGS, **best_params}
+
+
+def _load_promoted_raw_meta_feature_columns(summary_path: str | Path) -> list[str]:
+    payload = json.loads(Path(summary_path).read_text(encoding="utf-8"))
+    columns = payload.get("raw_meta_feature_columns")
+    if not isinstance(columns, list) or not columns:
+        raise ValueError(
+            f"Stacking summary {summary_path} does not contain usable raw_meta_feature_columns"
+        )
+    return [str(column) for column in columns]
 
 
 def _configure_cli_logging() -> None:

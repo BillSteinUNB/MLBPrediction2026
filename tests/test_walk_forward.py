@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
 from src.clients.weather_client import fetch_game_weather
 from src.backtest.walk_forward import (
@@ -463,6 +464,110 @@ def test_run_walk_forward_backtest_defaults_to_live_calibration_method_and_match
         default_result.window_metrics_path.read_bytes()
         == explicit_result.window_metrics_path.read_bytes()
     )
+
+
+def test_run_walk_forward_backtest_auto_mode_prefers_promoted_params_and_meta_features(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    frame = _synthetic_training_frame()
+    models_dir = tmp_path / "models"
+    models_dir.mkdir(parents=True)
+    (models_dir / "training_run_test.json").write_text(
+        json.dumps(
+            {
+                "models": {
+                    "f5_ml_model": {
+                        "best_params": {
+                            "max_depth": 5,
+                            "n_estimators": 44,
+                            "learning_rate": 0.07,
+                            "subsample": 0.8,
+                            "colsample_bytree": 0.6,
+                        }
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (models_dir / "stacking_run_test.json").write_text(
+        json.dumps({"raw_meta_feature_columns": ["home_team_log5_30g", "park_runs_factor"]}),
+        encoding="utf-8",
+    )
+
+    captured: dict[str, object] = {}
+
+    class _DummyCalibratedModel:
+        def predict_calibrated(self, dataframe: pd.DataFrame):
+            return pd.Series([0.6] * len(dataframe), dtype=float)
+
+    def _fake_train_window_model(**kwargs):
+        captured["estimator_kwargs"] = dict(kwargs["estimator_kwargs"])
+        captured["raw_meta_feature_columns"] = list(kwargs["raw_meta_feature_columns"])
+        return SimpleNamespace(
+            calibrated_model=_DummyCalibratedModel(),
+            model_training_row_count=30,
+            calibration_row_count=0,
+            calibration_method="identity",
+        )
+
+    def _fake_resolve_market_pricing(**kwargs):
+        row_count = len(kwargs["test_frame"])
+        return (
+            pd.Series([0.5] * row_count, dtype=float).to_numpy(),
+            pd.Series([0.5] * row_count, dtype=float).to_numpy(),
+            pd.Series([0.52] * row_count, dtype=float).to_numpy(),
+            pd.Series([0.52] * row_count, dtype=float).to_numpy(),
+            pd.Series([-110] * row_count, dtype=int).to_numpy(),
+            pd.Series([-110] * row_count, dtype=int).to_numpy(),
+            pd.Series(["historical"] * row_count, dtype=object).to_numpy(),
+        )
+
+    monkeypatch.setattr("src.backtest.walk_forward._train_window_model", _fake_train_window_model)
+    monkeypatch.setattr(
+        "src.backtest.walk_forward._resolve_market_pricing",
+        _fake_resolve_market_pricing,
+    )
+
+    result = run_walk_forward_backtest(
+        training_data=frame,
+        start_date="2022-01-01",
+        end_date="2022-01-01",
+        output_dir=tmp_path / "auto_promoted",
+        model_mode="auto",
+        model_artifacts_dir=models_dir,
+        estimator_kwargs={"learning_rate": 0.2},
+    )
+
+    assert captured["estimator_kwargs"] == {
+        "max_depth": 5,
+        "n_estimators": 44,
+        "learning_rate": 0.2,
+        "subsample": 0.8,
+        "colsample_bytree": 0.6,
+    }
+    assert captured["raw_meta_feature_columns"] == ["home_team_log5_30g", "park_runs_factor"]
+
+    summary_payload = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    assert summary_payload["model_mode_requested"] == "auto"
+    assert summary_payload["model_mode_resolved"] == "promoted_params"
+    assert summary_payload["promoted_training_summary_path"].endswith("training_run_test.json")
+    assert summary_payload["promoted_stacking_summary_path"].endswith("stacking_run_test.json")
+    assert summary_payload["raw_meta_feature_columns"] == ["home_team_log5_30g", "park_runs_factor"]
+
+
+def test_run_walk_forward_backtest_promoted_params_mode_requires_training_summary(tmp_path) -> None:
+    with pytest.raises(ValueError, match="No training summary found"):
+        run_walk_forward_backtest(
+            training_data=_synthetic_training_frame(),
+            start_date="2022-01-01",
+            end_date="2022-01-01",
+            output_dir=tmp_path / "missing_promoted",
+            model_mode="promoted_params",
+            model_artifacts_dir=tmp_path / "missing_models",
+            estimator_kwargs={"max_depth": 1, "n_estimators": 8, "learning_rate": 0.2},
+        )
 
 
 def test_walk_forward_cli_without_override_uses_live_calibration_default(tmp_path) -> None:

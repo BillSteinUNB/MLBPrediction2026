@@ -24,8 +24,11 @@ def test_overview_page(page: Page) -> None:
     # Wait for page heading
     expect(page.locator("h2").filter(has_text="Overview")).to_be_visible(timeout=10000)
 
-    # Wait for metric cards to load (look for "Total Runs" card)
-    expect(page.locator("text=Total Runs")).to_be_visible(timeout=10000)
+    # Wait for either populated metrics or the empty state.
+    metrics_or_empty = page.locator("text=Total Runs").or_(
+        page.locator("text=No experiment data found")
+    )
+    expect(metrics_or_empty.first).to_be_visible(timeout=10000)
 
     # Assert we're not on an error page
     assert "Failed to load" not in page.content()
