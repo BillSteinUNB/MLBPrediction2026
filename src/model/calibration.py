@@ -18,6 +18,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, brier_score_loss, log_loss, roc_auc_score
 
 from src.clients.weather_client import fetch_game_weather
+from src.model.artifact_runtime import collect_runtime_versions
 from src.model.data_builder import DEFAULT_OUTPUT_PATH, build_training_dataset
 from src.model.promotion import build_promotion_reason, select_promoted_variant
 from src.model.stacking import (
@@ -625,6 +626,7 @@ def _train_single_calibrated_model(
                 "target_column": target_column,
                 "calibration_method": resolved_calibration_method,
                 "model_version": model_version,
+                "runtime_versions": collect_runtime_versions(),
                 "stacking_model_path": str(stacking_model_path),
                 "train_row_count": int(len(model_training_frame)),
                 "calibration_row_count": int(len(calibration_frame)),

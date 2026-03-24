@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 import joblib
 import pandas as pd
 
+from src.model.artifact_runtime import collect_runtime_versions
 from src.model.direct_rl_trainer import (
     _prepare_direct_rl_frame,
     _resolve_direct_rl_feature_columns,
@@ -117,4 +118,7 @@ def test_train_direct_rl_model_trains_and_saves_versioned_model(tmp_path) -> Non
     metadata = json.loads(result.artifact.metadata_path.read_text(encoding="utf-8"))
     assert metadata["market_book_name"] == "sbr:caesars"
     assert metadata["dropped_push_row_count"] == 2
+    assert metadata["runtime_versions"] == collect_runtime_versions()
+    assert metadata["final_n_estimators"] <= metadata["requested_n_estimators"]
+    assert metadata["early_stopping_validation_row_count"] >= 1
     assert "posted_f5_rl_home_point" in metadata["feature_columns"]

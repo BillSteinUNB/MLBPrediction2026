@@ -31,6 +31,7 @@ from src.engine.settlement import settle_game_bets
 from src.features.adjustments.abs_adjustment import is_abs_active
 from src.features.adjustments.park_factors import get_park_factors
 from src.model.calibration import CalibratedStackingModel
+from src.model.artifact_runtime import validate_runtime_versions
 from src.model.data_builder import (
     _default_feature_fill_value,
     _fetch_regular_season_schedule,
@@ -509,6 +510,11 @@ class ArtifactOrFallbackPredictionEngine:
             metadata_payload = json.loads(metadata_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             return None
+        try:
+            validate_runtime_versions(metadata_payload, artifact_path=model_path)
+        except RuntimeError:
+            logger.warning("Skipping incompatible artifact %s", model_path, exc_info=True)
+            return None
 
         holdout_metrics = metadata_payload.get("holdout_metrics", {})
         if variant == "base":
@@ -604,6 +610,11 @@ class ArtifactOrFallbackPredictionEngine:
                 continue
 
             metadata_payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+            try:
+                validate_runtime_versions(metadata_payload, artifact_path=model_path)
+            except RuntimeError:
+                logger.warning("Skipping incompatible artifact %s", model_path, exc_info=True)
+                continue
             model = joblib.load(model_path)
             return StructuredModelBundle(
                 model=model,

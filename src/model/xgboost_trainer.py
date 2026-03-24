@@ -13,11 +13,13 @@ from typing import Any, Mapping, Sequence
 
 import joblib
 import pandas as pd
+from sklearn.base import clone
 from sklearn.metrics import accuracy_score, log_loss, roc_auc_score
 from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
 from xgboost import XGBClassifier
 
 from src.clients.weather_client import fetch_game_weather
+from src.model.artifact_runtime import collect_runtime_versions
 from src.model.data_builder import (
     DEFAULT_OUTPUT_PATH,
     _compute_data_version_hash,
@@ -35,6 +37,8 @@ DEFAULT_TIME_SERIES_SPLITS = 5
 DEFAULT_SEARCH_ITERATIONS = 40
 DEFAULT_RANDOM_STATE = 2026
 DEFAULT_TOP_FEATURE_COUNT = 25
+DEFAULT_EARLY_STOPPING_ROUNDS = 20
+DEFAULT_VALIDATION_FRACTION = 0.15
 DEFAULT_SEARCH_SPACE: dict[str, list[float | int]] = {
     "max_depth": [3, 4, 5, 6, 7, 8],
     "n_estimators": [100, 200, 300, 400, 500],
@@ -81,6 +85,13 @@ class ModelTrainingArtifact:
     train_row_count: int
     holdout_row_count: int
     holdout_season: int
+    requested_n_estimators: int
+    final_n_estimators: int
+    best_iteration: int | None
+    early_stopping_rounds: int
+    validation_fraction: float
+    early_stopping_train_row_count: int
+    early_stopping_validation_row_count: int
     promoted_variant: str
     promotion_reason: str
 
@@ -121,6 +132,8 @@ def train_f5_models(
     search_iterations: int = DEFAULT_SEARCH_ITERATIONS,
     random_state: int = DEFAULT_RANDOM_STATE,
     top_feature_count: int = DEFAULT_TOP_FEATURE_COUNT,
+    early_stopping_rounds: int = DEFAULT_EARLY_STOPPING_ROUNDS,
+    validation_fraction: float = DEFAULT_VALIDATION_FRACTION,
 ) -> TrainingRunResult:
     """Train and persist versioned XGBoost models for F5 moneyline and run line outcomes."""
 
@@ -160,6 +173,8 @@ def train_f5_models(
             random_state=random_state,
             top_feature_count=top_feature_count,
             data_version_hash=data_version_hash,
+            early_stopping_rounds=early_stopping_rounds,
+            validation_fraction=validation_fraction,
         )
         artifacts[artifact.model_name] = artifact
 
@@ -201,6 +216,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--time-series-splits", type=int, default=DEFAULT_TIME_SERIES_SPLITS)
     parser.add_argument("--search-iterations", type=int, default=DEFAULT_SEARCH_ITERATIONS)
     parser.add_argument("--random-state", type=int, default=DEFAULT_RANDOM_STATE)
+    parser.add_argument("--early-stopping-rounds", type=int, default=DEFAULT_EARLY_STOPPING_ROUNDS)
+    parser.add_argument("--validation-fraction", type=float, default=DEFAULT_VALIDATION_FRACTION)
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -226,6 +243,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         time_series_splits=args.time_series_splits,
         search_iterations=args.search_iterations,
         random_state=args.random_state,
+        early_stopping_rounds=args.early_stopping_rounds,
+        validation_fraction=args.validation_fraction,
     )
     log_training_run(
         result,
@@ -259,6 +278,8 @@ def _train_single_model(
     random_state: int,
     top_feature_count: int,
     data_version_hash: str,
+    early_stopping_rounds: int,
+    validation_fraction: float,
 ) -> ModelTrainingArtifact:
     frame = _prepare_training_frame(dataset, target_column=target_column, drop_ties=drop_ties)
     train_frame = frame.loc[frame["season"] < holdout_season].copy()
@@ -284,7 +305,22 @@ def _train_single_model(
     )
 
     search.fit(train_frame[feature_columns], train_frame[target_column])
-    best_estimator: XGBClassifier = search.best_estimator_
+    searched_estimator: XGBClassifier = search.best_estimator_
+    (
+        best_estimator,
+        requested_n_estimators,
+        final_n_estimators,
+        best_iteration,
+        early_stopping_train_row_count,
+        early_stopping_validation_row_count,
+    ) = _refit_estimator_with_temporal_early_stopping(
+        estimator=searched_estimator,
+        training_frame=train_frame,
+        feature_columns=feature_columns,
+        target_column=target_column,
+        early_stopping_rounds=early_stopping_rounds,
+        validation_fraction=validation_fraction,
+    )
     holdout_probabilities = best_estimator.predict_proba(holdout_frame[feature_columns])[:, 1]
     holdout_predictions = best_estimator.predict(holdout_frame[feature_columns])
 
@@ -318,8 +354,16 @@ def _train_single_model(
         "holdout_row_count": int(len(holdout_frame)),
         "feature_columns": feature_columns,
         "best_params": best_params,
+        "runtime_versions": collect_runtime_versions(),
         "cv_best_log_loss": cv_best_log_loss,
         "holdout_metrics": holdout_metrics,
+        "requested_n_estimators": requested_n_estimators,
+        "final_n_estimators": final_n_estimators,
+        "best_iteration": best_iteration,
+        "early_stopping_rounds": int(early_stopping_rounds),
+        "validation_fraction": float(validation_fraction),
+        "early_stopping_train_row_count": int(early_stopping_train_row_count),
+        "early_stopping_validation_row_count": int(early_stopping_validation_row_count),
         "promoted_variant": "base",
         "promotion_reason": build_promotion_reason(
             promoted_variant="base",
@@ -352,6 +396,13 @@ def _train_single_model(
         train_row_count=len(train_frame),
         holdout_row_count=len(holdout_frame),
         holdout_season=holdout_season,
+        requested_n_estimators=requested_n_estimators,
+        final_n_estimators=final_n_estimators,
+        best_iteration=best_iteration,
+        early_stopping_rounds=int(early_stopping_rounds),
+        validation_fraction=float(validation_fraction),
+        early_stopping_train_row_count=early_stopping_train_row_count,
+        early_stopping_validation_row_count=early_stopping_validation_row_count,
         promoted_variant="base",
         promotion_reason=build_promotion_reason(
             promoted_variant="base",
@@ -375,6 +426,78 @@ def _build_estimator(*, random_state: int) -> XGBClassifier:
         tree_method="hist",
         n_jobs=DEFAULT_XGBOOST_N_JOBS,
         verbosity=0,
+    )
+
+
+def _refit_estimator_with_temporal_early_stopping(
+    *,
+    estimator: XGBClassifier,
+    training_frame: pd.DataFrame,
+    feature_columns: Sequence[str],
+    target_column: str,
+    early_stopping_rounds: int,
+    validation_fraction: float,
+) -> tuple[XGBClassifier, int, int, int | None, int, int]:
+    requested_n_estimators = int(estimator.get_params().get("n_estimators", 100))
+    train_slice, validation_slice = _split_temporal_validation_frame(
+        training_frame,
+        validation_fraction=validation_fraction,
+    )
+    if early_stopping_rounds <= 0 or validation_slice.empty:
+        fitted_estimator = clone(estimator)
+        fitted_estimator.fit(training_frame[list(feature_columns)], training_frame[target_column])
+        return (
+            fitted_estimator,
+            requested_n_estimators,
+            requested_n_estimators,
+            None,
+            int(len(training_frame)),
+            0,
+        )
+
+    early_stop_estimator = clone(estimator)
+    early_stop_estimator.set_params(early_stopping_rounds=int(early_stopping_rounds))
+    early_stop_estimator.fit(
+        train_slice[list(feature_columns)],
+        train_slice[target_column],
+        eval_set=[(validation_slice[list(feature_columns)], validation_slice[target_column])],
+        verbose=False,
+    )
+    best_iteration = getattr(early_stop_estimator, "best_iteration", None)
+    final_n_estimators = requested_n_estimators
+    if best_iteration is not None:
+        final_n_estimators = max(1, int(best_iteration) + 1)
+
+    final_estimator = clone(estimator)
+    final_estimator.set_params(n_estimators=final_n_estimators)
+    final_estimator.fit(training_frame[list(feature_columns)], training_frame[target_column])
+    return (
+        final_estimator,
+        requested_n_estimators,
+        final_n_estimators,
+        None if best_iteration is None else int(best_iteration),
+        int(len(train_slice)),
+        int(len(validation_slice)),
+    )
+
+
+def _split_temporal_validation_frame(
+    dataframe: pd.DataFrame,
+    *,
+    validation_fraction: float,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if dataframe.empty or validation_fraction <= 0:
+        return dataframe.copy(), dataframe.iloc[0:0].copy()
+    validation_row_count = min(
+        max(1, int(round(len(dataframe) * validation_fraction))),
+        max(len(dataframe) - 1, 0),
+    )
+    if validation_row_count <= 0:
+        return dataframe.copy(), dataframe.iloc[0:0].copy()
+    split_index = len(dataframe) - validation_row_count
+    return (
+        dataframe.iloc[:split_index].copy().reset_index(drop=True),
+        dataframe.iloc[split_index:].copy().reset_index(drop=True),
     )
 
 

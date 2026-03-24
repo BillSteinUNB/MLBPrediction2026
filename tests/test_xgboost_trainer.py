@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 from sklearn.model_selection import TimeSeriesSplit
 
+from src.model.artifact_runtime import collect_runtime_versions
 from src.clients.weather_client import fetch_game_weather
 import src.model.xgboost_trainer as xgboost_trainer_module
 from src.model.xgboost_trainer import (
@@ -128,6 +129,11 @@ def test_train_f5_models_records_best_params_feature_importance_and_filters_ml_t
     assert metadata["train_row_count"] == 12
     assert metadata["holdout_row_count"] == 5
     assert metadata["promoted_variant"] == "base"
+    assert metadata["runtime_versions"] == collect_runtime_versions()
+    assert metadata["requested_n_estimators"] == 20
+    assert metadata["final_n_estimators"] <= metadata["requested_n_estimators"]
+    assert metadata["early_stopping_rounds"] == xgboost_trainer_module.DEFAULT_EARLY_STOPPING_ROUNDS
+    assert metadata["early_stopping_validation_row_count"] >= 1
     assert metadata["feature_importance_rankings"]
     assert metadata["feature_importance_rankings"][0]["importance"] >= 0.0
     assert ml_artifact.feature_importance_rankings == metadata["feature_importance_rankings"]

@@ -12,6 +12,7 @@ import pandas as pd
 import pytest
 
 from src.db import init_db
+from src.model.artifact_runtime import collect_runtime_versions
 from src.model.calibration import CalibratedStackingModel, IdentityProbabilityCalibrator
 from src.models.bet import BetDecision
 from src.models.lineup import Lineup, LineupPlayer
@@ -220,11 +221,14 @@ def _write_legacy_metadata(
     roc_auc: float,
     accuracy: float,
     brier: float | None = None,
+    runtime_versions: dict[str, str] | None = None,
 ) -> None:
+    resolved_runtime_versions = runtime_versions or collect_runtime_versions()
     if variant == "base":
         payload = {
             "model_version": version,
             "holdout_season": holdout_season,
+            "runtime_versions": resolved_runtime_versions,
             "feature_columns": ["park_runs_factor"],
             "holdout_metrics": {
                 "log_loss": log_loss,
@@ -237,6 +241,7 @@ def _write_legacy_metadata(
         payload = {
             "model_version": version,
             "holdout_season": holdout_season,
+            "runtime_versions": resolved_runtime_versions,
             "feature_columns": ["park_runs_factor"],
             "raw_meta_feature_columns": ["home_team_log5_30g"],
             "holdout_metrics": {
@@ -251,6 +256,7 @@ def _write_legacy_metadata(
         payload = {
             "model_version": version,
             "holdout_season": holdout_season,
+            "runtime_versions": resolved_runtime_versions,
             "holdout_metrics": {
                 "calibrated_log_loss": log_loss,
                 "calibrated_roc_auc": roc_auc,
@@ -376,6 +382,48 @@ def test_artifact_engine_falls_back_without_complete_recursive_bundle(
     assert engine.ml_model_path is None
     assert engine.rl_model_path is None
     assert engine.model_version == "baseline-fallback"
+
+
+def test_artifact_engine_skips_incompatible_runtime_versions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    experiment_dir = tmp_path / "exp"
+    experiment_dir.mkdir()
+    version = "20260321T010000Z_badv"
+
+    ml_base = experiment_dir / f"f5_ml_model_{version}.joblib"
+    rl_base = experiment_dir / f"f5_rl_model_{version}.joblib"
+    for path in (ml_base, rl_base):
+        path.write_text("placeholder", encoding="utf-8")
+
+    bad_versions = {**collect_runtime_versions(), "xgboost": "999.0.0"}
+    _write_legacy_metadata(
+        ml_base.with_suffix(".metadata.json"),
+        variant="base",
+        version=version,
+        log_loss=0.60,
+        roc_auc=0.61,
+        accuracy=0.58,
+        runtime_versions=bad_versions,
+    )
+    _write_legacy_metadata(
+        rl_base.with_suffix(".metadata.json"),
+        variant="base",
+        version=version,
+        log_loss=0.55,
+        roc_auc=0.63,
+        accuracy=0.68,
+        runtime_versions=bad_versions,
+    )
+
+    monkeypatch.setattr(joblib, "load", lambda path: _dummy_base_model())
+
+    engine = ArtifactOrFallbackPredictionEngine(model_dir=tmp_path)
+
+    assert engine.model_version == "baseline-fallback"
+    assert engine.ml_model_path is None
+    assert engine.rl_model_path is None
 
 
 def test_run_daily_pipeline_dry_run_persists_predictions_and_returns_pick_payload(tmp_path: Path) -> None:

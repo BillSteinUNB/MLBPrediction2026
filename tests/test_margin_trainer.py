@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.model.artifact_runtime import collect_runtime_versions
 from src.model.margin_pricing import margin_to_cover_probability
 from src.model.margin_trainer import train_margin_model
 
@@ -73,3 +74,7 @@ def test_train_margin_model_writes_artifacts(tmp_path: Path) -> None:
 
     payload = json.loads(result.summary_path.read_text(encoding="utf-8"))
     assert payload["artifact"]["model_name"] == "f5_margin_v2_model"
+    metadata = json.loads(result.artifact.metadata_path.read_text(encoding="utf-8"))
+    assert metadata["runtime_versions"] == collect_runtime_versions()
+    assert metadata["final_n_estimators"] <= metadata["requested_n_estimators"]
+    assert metadata["early_stopping_validation_row_count"] >= 1

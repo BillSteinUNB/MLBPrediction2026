@@ -19,6 +19,7 @@ from sklearn.model_selection import cross_val_predict
 from xgboost import XGBClassifier
 
 from src.clients.weather_client import fetch_game_weather
+from src.model.artifact_runtime import collect_runtime_versions
 from src.model.data_builder import DEFAULT_OUTPUT_PATH, build_training_dataset
 from src.model.promotion import build_promotion_reason, select_promoted_variant
 from src.model.xgboost_trainer import (
@@ -464,6 +465,7 @@ def _train_single_stacking_model(
         "base_model_name": base_model_name,
         "target_column": target_column,
         "model_version": model_version,
+        "runtime_versions": collect_runtime_versions(),
         "base_model_path": str(base_model_path),
         "train_row_count": int(len(train_frame)),
         "oof_row_count": int(len(oof_frame)),

@@ -15,20 +15,24 @@ from sklearn.model_selection import RandomizedSearchCV
 from xgboost import XGBClassifier
 
 from src.clients.weather_client import fetch_game_weather
+from src.model.artifact_runtime import collect_runtime_versions
 from src.model.data_builder import DEFAULT_OUTPUT_PATH, build_training_dataset
 from src.model.xgboost_trainer import (
+    DEFAULT_EARLY_STOPPING_ROUNDS,
     DEFAULT_MODEL_OUTPUT_DIR,
     DEFAULT_RANDOM_STATE,
     DEFAULT_SEARCH_ITERATIONS,
     DEFAULT_SEARCH_SPACE,
     DEFAULT_TIME_SERIES_SPLITS,
     DEFAULT_TOP_FEATURE_COUNT,
+    DEFAULT_VALIDATION_FRACTION,
     DEFAULT_XGBOOST_N_JOBS,
     _build_model_version,
     _compute_data_version_hash,
     _extract_feature_importance_rankings,
     _load_training_dataframe,
     _normalize_best_params,
+    _refit_estimator_with_temporal_early_stopping,
     _resolve_data_version_hash,
     _resolve_experiment_output_dir,
     _resolve_holdout_season,
@@ -72,6 +76,13 @@ class DirectRLTrainingArtifact:
     dropped_push_row_count: int
     holdout_season: int
     market_book_name: str | None
+    requested_n_estimators: int
+    final_n_estimators: int
+    best_iteration: int | None
+    early_stopping_rounds: int
+    validation_fraction: float
+    early_stopping_train_row_count: int
+    early_stopping_validation_row_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +106,8 @@ def train_direct_rl_model(
     top_feature_count: int = DEFAULT_TOP_FEATURE_COUNT,
     target_column: str = DEFAULT_DIRECT_RL_TARGET_COLUMN,
     market_book_name: str | None = None,
+    early_stopping_rounds: int = DEFAULT_EARLY_STOPPING_ROUNDS,
+    validation_fraction: float = DEFAULT_VALIDATION_FRACTION,
 ) -> DirectRLTrainingResult:
     dataset = _augment_direct_rl_training_frame(_load_training_dataframe(training_data))
     frame, dropped_push_row_count = _prepare_direct_rl_frame(dataset, target_column=target_column)
@@ -132,7 +145,21 @@ def train_direct_rl_model(
         n_jobs=1,
     )
     search.fit(train_frame[feature_columns], train_frame[target_column])
-    best_estimator: XGBClassifier = search.best_estimator_
+    (
+        best_estimator,
+        requested_n_estimators,
+        final_n_estimators,
+        best_iteration,
+        early_stopping_train_row_count,
+        early_stopping_validation_row_count,
+    ) = _refit_estimator_with_temporal_early_stopping(
+        estimator=search.best_estimator_,
+        training_frame=train_frame,
+        feature_columns=feature_columns,
+        target_column=target_column,
+        early_stopping_rounds=early_stopping_rounds,
+        validation_fraction=validation_fraction,
+    )
     holdout_probabilities = best_estimator.predict_proba(holdout_frame[feature_columns])[:, 1]
     holdout_predictions = best_estimator.predict(holdout_frame[feature_columns])
 
@@ -165,8 +192,16 @@ def train_direct_rl_model(
         "dropped_push_row_count": int(dropped_push_row_count),
         "feature_columns": feature_columns,
         "best_params": best_params,
+        "runtime_versions": collect_runtime_versions(),
         "cv_best_log_loss": cv_best_log_loss,
         "holdout_metrics": holdout_metrics,
+        "requested_n_estimators": requested_n_estimators,
+        "final_n_estimators": final_n_estimators,
+        "best_iteration": best_iteration,
+        "early_stopping_rounds": int(early_stopping_rounds),
+        "validation_fraction": float(validation_fraction),
+        "early_stopping_train_row_count": int(early_stopping_train_row_count),
+        "early_stopping_validation_row_count": int(early_stopping_validation_row_count),
         "feature_importance_rankings": feature_importance_rankings,
         "search_space": {key: list(values) for key, values in search_space.items()},
         "time_series_splits": int(search.cv.n_splits),
@@ -190,6 +225,13 @@ def train_direct_rl_model(
         dropped_push_row_count=dropped_push_row_count,
         holdout_season=effective_holdout_season,
         market_book_name=market_book_name,
+        requested_n_estimators=requested_n_estimators,
+        final_n_estimators=final_n_estimators,
+        best_iteration=best_iteration,
+        early_stopping_rounds=int(early_stopping_rounds),
+        validation_fraction=float(validation_fraction),
+        early_stopping_train_row_count=early_stopping_train_row_count,
+        early_stopping_validation_row_count=early_stopping_validation_row_count,
     )
 
     summary_path = resolved_output_dir / f"direct_rl_training_run_{model_version}.json"
@@ -229,6 +271,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--time-series-splits", type=int, default=DEFAULT_TIME_SERIES_SPLITS)
     parser.add_argument("--search-iterations", type=int, default=DEFAULT_SEARCH_ITERATIONS)
     parser.add_argument("--random-state", type=int, default=DEFAULT_RANDOM_STATE)
+    parser.add_argument("--early-stopping-rounds", type=int, default=DEFAULT_EARLY_STOPPING_ROUNDS)
+    parser.add_argument("--validation-fraction", type=float, default=DEFAULT_VALIDATION_FRACTION)
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -257,6 +301,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         search_iterations=args.search_iterations,
         random_state=args.random_state,
         market_book_name=args.historical_rl_book,
+        early_stopping_rounds=args.early_stopping_rounds,
+        validation_fraction=args.validation_fraction,
     )
     print(json.dumps(_run_result_to_json_ready(result), indent=2))
     return 0
@@ -321,7 +367,7 @@ def _resolve_direct_rl_feature_columns(dataframe: pd.DataFrame) -> list[str]:
         if (
             column in dataframe.columns
             and pd.api.types.is_numeric_dtype(dataframe[column])
-            and dataframe[column].nunique(dropna=False) > 1
+            and dataframe[column].dropna().nunique() > 1
             and column not in resolved
         ):
             resolved.append(column)
