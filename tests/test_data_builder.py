@@ -31,6 +31,7 @@ from src.features.defense import compute_defense_features
 from src.features.offense import compute_offensive_features
 from src.features.pitching import compute_pitching_features
 from src.model.data_builder import (
+    _feature_rows_to_frame,
     _fill_missing_feature_values,
     assert_training_data_is_complete,
     assert_training_data_is_leakage_free,
@@ -640,6 +641,120 @@ def test_build_training_dataset_integrates_real_feature_modules_and_matches_infe
     assert metadata["feature_column_count"] >= len(expected_feature_values) + 9
     assert metadata["data_version_hash"] == dataset["data_version_hash"].iat[0]
     assert dataset["data_version_hash"].nunique() == 1
+
+
+def test_build_training_dataset_attaches_posted_f5_runline_targets(tmp_path: Path) -> None:
+    schedule = pd.DataFrame(
+        [
+            _schedule_row(
+                4001,
+                "2025-04-03T23:05:00Z",
+                "NYY",
+                "BOS",
+                "Yankee Stadium",
+                f5_home_score=3,
+                f5_away_score=2,
+                final_home_score=5,
+                final_away_score=4,
+            ),
+            _schedule_row(
+                4002,
+                "2025-04-10T23:05:00Z",
+                "NYY",
+                "BOS",
+                "Yankee Stadium",
+                f5_home_score=2,
+                f5_away_score=1,
+                final_home_score=4,
+                final_away_score=2,
+            ),
+        ]
+    )
+    odds_db_path = tmp_path / "historical_odds.db"
+    _seed_schedule(odds_db_path, schedule.copy())
+    with sqlite3.connect(odds_db_path) as connection:
+        connection.executemany(
+            """
+            INSERT INTO odds_snapshots (
+                game_pk,
+                book_name,
+                market_type,
+                home_odds,
+                away_odds,
+                home_point,
+                away_point,
+                fetched_at,
+                is_frozen
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (4001, "sbr:caesars", "f5_rl", 105, -125, -0.5, 0.5, "2025-04-03T23:05:00+00:00", 1),
+                (4002, "sbr:caesars", "f5_rl", 120, -140, -1.0, 1.0, "2025-04-10T23:05:00+00:00", 1),
+            ],
+        )
+        connection.commit()
+
+    result = build_training_dataset(
+        start_year=2025,
+        end_year=2025,
+        output_path=tmp_path / "training.parquet",
+        full_regular_seasons_target=1,
+        shortened_season_game_threshold=0,
+        schedule_fetcher=lambda year: schedule.copy(),
+        batting_stats_fetcher=lambda *_args, **_kwargs: pd.DataFrame(),
+        team_logs_fetcher=lambda *_args, **_kwargs: pd.DataFrame(),
+        fielding_stats_fetcher=lambda *_args, **_kwargs: pd.DataFrame(),
+        framing_stats_fetcher=lambda *_args, **_kwargs: pd.DataFrame(),
+        lineup_fetcher=lambda *_args, **_kwargs: [],
+        historical_odds_db_path=odds_db_path,
+        historical_rl_book_name="sbr:caesars",
+    )
+
+    dataset = result.dataframe.set_index("game_pk")
+    assert dataset.loc[4001, "posted_f5_rl_home_point"] == pytest.approx(-0.5)
+    assert dataset.loc[4001, "posted_f5_rl_away_odds"] == -125
+    assert dataset.loc[4001, "home_cover_at_posted_line"] == 1
+    assert dataset.loc[4001, "away_cover_at_posted_line"] == 0
+    assert dataset.loc[4001, "push_at_posted_line"] == 0
+    assert dataset.loc[4002, "posted_f5_rl_home_point"] == pytest.approx(-1.0)
+    assert dataset.loc[4002, "home_cover_at_posted_line"] == 0
+    assert dataset.loc[4002, "away_cover_at_posted_line"] == 0
+    assert dataset.loc[4002, "push_at_posted_line"] == 1
+
+
+def test_feature_rows_to_frame_uses_latest_as_of_timestamp_per_feature() -> None:
+    feature_rows = pd.DataFrame(
+        [
+            {
+                "id": 2,
+                "game_pk": 111,
+                "feature_name": "home_team_log5_30g",
+                "feature_value": 0.44,
+                "as_of_timestamp": "2024-04-01T00:00:00+00:00",
+            },
+            {
+                "id": 1,
+                "game_pk": 111,
+                "feature_name": "home_team_log5_30g",
+                "feature_value": 0.41,
+                "as_of_timestamp": "2024-03-31T00:00:00+00:00",
+            },
+            {
+                "id": 3,
+                "game_pk": 111,
+                "feature_name": "park_runs_factor",
+                "feature_value": 1.02,
+                "as_of_timestamp": "2024-03-31T00:00:00+00:00",
+            },
+        ]
+    )
+
+    feature_frame = _feature_rows_to_frame(feature_rows)
+
+    assert len(feature_frame) == 1
+    assert float(feature_frame.loc[0, "home_team_log5_30g"]) == pytest.approx(0.44)
+    assert float(feature_frame.loc[0, "park_runs_factor"]) == pytest.approx(1.02)
 
 
 @pytest.mark.parametrize(
@@ -1281,6 +1396,50 @@ def test_build_live_feature_frame_recomputes_same_day_features_and_ignores_stale
     assert target_row["home_team_log5_30g"] == pytest.approx(
         expected_feature_values["home_team_log5_30g"]
     )
+
+
+def test_build_live_feature_frame_uses_official_game_date_not_utc_rollover(
+    tmp_path: Path,
+) -> None:
+    current_schedule = pd.DataFrame(
+        [
+            {
+                **_schedule_row(
+                    823244,
+                    "2026-03-26T00:05:00Z",
+                    "SF",
+                    "NYY",
+                    "Oracle Park",
+                    home_starter_id=657277,
+                    away_starter_id=608331,
+                    status="scheduled",
+                    f5_home_score=0,
+                    f5_away_score=0,
+                    final_home_score=0,
+                    final_away_score=0,
+                ),
+                "game_date": "2026-03-25",
+            }
+        ]
+    )
+
+    frame = build_live_feature_frame(
+        target_date="2026-03-25",
+        schedule=current_schedule,
+        historical_games=pd.DataFrame(),
+        db_path=tmp_path / "live_rollover.db",
+        lineups=[],
+        weather_fetcher=_fake_weather_fetcher,
+        batting_stats_fetcher=lambda *_args, **_kwargs: pd.DataFrame(),
+        team_logs_fetcher=_fake_team_logs_fetcher({}),
+        fielding_stats_fetcher=_fake_fielding_fetcher({}),
+        framing_stats_fetcher=_fake_framing_fetcher({}),
+        start_metrics_fetcher=_fake_start_metrics_fetcher({}),
+        bullpen_metrics_fetcher=_fake_bullpen_metrics_fetcher({}),
+    )
+
+    assert frame["game_pk"].tolist() == [823244]
+    assert frame.iloc[0]["game_date"] == "2026-03-25"
 
 
 def test_build_live_feature_frame_threads_roster_turnover_into_live_feature_modules(

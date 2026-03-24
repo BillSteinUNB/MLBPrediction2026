@@ -5,6 +5,7 @@ import { MetricCard } from "../components/MetricCard";
 import { RunTable } from "../components/RunTable";
 import { MetricTrendChart } from "../charts/MetricTrendChart";
 import type { MetricTrendPoint } from "../charts/MetricTrendChart";
+import { TooltipLabel } from "../components/TooltipLabel";
 
 /* ====================================================================
    Metric definitions for the selector & trend chart
@@ -51,24 +52,24 @@ const seasonGroupStyle: React.CSSProperties = {
 const seasonHeadingStyle: React.CSSProperties = {
   fontSize: 15,
   fontWeight: 600,
-  color: "#08060d",
+  color: "var(--text-h)",
   margin: 0,
   padding: "6px 0",
-  borderBottom: "1px solid #e5e4e7",
+  borderBottom: "1px solid var(--border)",
   letterSpacing: "-0.1px",
 };
 
 const laneCardStyle: React.CSSProperties = {
-  background: "#ffffff",
-  border: "1px solid #e5e4e7",
-  borderRadius: 6,
+  background: "var(--bg-panel)",
+  border: "1px solid var(--border)",
+  borderRadius: 10,
   overflow: "hidden",
   transition: "border-color 0.15s",
 };
 
 const laneCardExpandedStyle: React.CSSProperties = {
   ...laneCardStyle,
-  borderColor: "#c4c2c7",
+  borderColor: "var(--accent)",
 };
 
 const laneHeaderStyle: React.CSSProperties = {
@@ -88,7 +89,7 @@ const laneHeaderHoverStyle: React.CSSProperties = {
 const laneNameStyle: React.CSSProperties = {
   fontSize: 14,
   fontWeight: 600,
-  color: "#08060d",
+  color: "var(--text-h)",
   margin: 0,
   flex: "0 0 auto",
 };
@@ -97,15 +98,15 @@ const variantBadgeStyle: React.CSSProperties = {
   display: "inline-block",
   padding: "2px 8px",
   borderRadius: 10,
-  background: "#eef2f6",
+  background: "var(--surface-2)",
   fontSize: 12,
-  color: "#495464",
+  color: "var(--text)",
   fontWeight: 500,
 };
 
 const laneMetaStyle: React.CSSProperties = {
   fontSize: 12,
-  color: "#9ca3af",
+  color: "var(--muted)",
   marginLeft: "auto",
   display: "flex",
   gap: 16,
@@ -115,7 +116,7 @@ const laneMetaStyle: React.CSSProperties = {
 
 const chevronStyle: React.CSSProperties = {
   fontSize: 14,
-  color: "#9ca3af",
+  color: "var(--muted)",
   transition: "transform 0.2s",
   flex: "0 0 auto",
 };
@@ -143,10 +144,10 @@ const selectStyle: React.CSSProperties = {
   fontFamily: "Arial, Helvetica, sans-serif",
   fontSize: 13,
   padding: "5px 10px",
-  border: "1px solid #e5e4e7",
+  border: "1px solid var(--border)",
   borderRadius: 6,
-  background: "#ffffff",
-  color: "#08060d",
+  background: "var(--bg-panel)",
+  color: "var(--text-h)",
   cursor: "pointer",
   outline: "none",
 };
@@ -164,7 +165,7 @@ const centerStyle: React.CSSProperties = {
   justifyContent: "center",
   alignItems: "center",
   minHeight: 200,
-  color: "#9ca3af",
+  color: "var(--muted)",
   fontSize: 14,
   fontFamily: "Arial, Helvetica, sans-serif",
 };
@@ -417,10 +418,10 @@ const LaneExplorerPage: React.FC = () => {
   return (
     <div className="page" style={pageStyle}>
       <div style={headerRow}>
-        <h2 style={{ margin: 0 }}>Lane Explorer</h2>
+          <TooltipLabel label="Lane Explorer" as="h2" style={{ margin: 0, color: "var(--text-h)" }} helpText="Browse experiment lanes grouped by holdout season, target, and variant." />
 
         <div style={selectorRow}>
-          <span style={selectLabelStyle}>Trend metric</span>
+          <TooltipLabel label="Trend metric" as="span" style={selectLabelStyle} helpText="Which metric to plot over time for each lane." />
           <select
             style={selectStyle}
             value={selectedMetricKey}

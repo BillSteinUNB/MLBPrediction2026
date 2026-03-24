@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import logging
 import os
+import json
+import re
 import sqlite3
+import time
 import unicodedata
 from contextlib import nullcontext
 from datetime import datetime, timezone
@@ -19,13 +23,31 @@ from src.features.adjustments.abs_adjustment import is_abs_active
 from src.models.odds import OddsSnapshot
 
 
+logger = logging.getLogger(__name__)
+
 ODDS_API_BASE_URL = "https://api.the-odds-api.com"
 ODDS_API_SPORT_KEY = "baseball_mlb"
 ODDS_API_MONTHLY_LIMIT = 500
 ODDS_API_EVENTS_PATH = f"/v4/sports/{ODDS_API_SPORT_KEY}/events"
+ODDS_API_ODDS_PATH = f"/v4/sports/{ODDS_API_SPORT_KEY}/odds"
 ODDS_API_F5_MARKETS = {
     "h2h_1st_5_innings": "f5_ml",
     "spreads_1st_5_innings": "f5_rl",
+}
+SBR_F5_URL_TEMPLATE = (
+    "https://www.sportsbookreview.com/betting-odds/mlb-baseball/money-line/1st-half/"
+    "?date={game_date}"
+)
+SBR_NEXT_DATA_PATTERN = re.compile(
+    r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
+    re.DOTALL,
+)
+SBR_REQUEST_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
 }
 _SETTINGS_PAYLOAD = _load_settings_yaml()
 
@@ -182,20 +204,19 @@ def _resolve_game_pk(
     if home_team_code is None or away_team_code is None:
         return None
 
-    game_date = commence_time.date().isoformat()
     row = connection.execute(
         """
         SELECT game_pk
         FROM games
         WHERE home_team = ?
           AND away_team = ?
-          AND date LIKE ?
+          AND ABS(julianday(date) - julianday(?)) <= 1.5
         ORDER BY CASE WHEN game_pk > 0 THEN 0 ELSE 1 END ASC,
                  ABS(julianday(date) - julianday(?)) ASC,
                  date ASC
         LIMIT 1
         """,
-        (home_team_code, away_team_code, f"{game_date}%", commence_time.isoformat()),
+        (home_team_code, away_team_code, commence_time.isoformat(), commence_time.isoformat()),
     ).fetchone()
     return int(row[0]) if row else None
 
@@ -396,6 +417,26 @@ def _extract_market_prices(
     return prices_by_team[home_team_name], prices_by_team[away_team_name]
 
 
+def _extract_market_points(
+    outcomes: list[dict[str, Any]],
+    *,
+    home_team_name: str,
+    away_team_name: str,
+) -> tuple[float | None, float | None]:
+    points_by_team: dict[str, float | None] = {}
+    for outcome in outcomes:
+        team_name = outcome.get("name")
+        point = outcome.get("point")
+        if team_name not in {home_team_name, away_team_name}:
+            continue
+        if isinstance(point, (int, float)):
+            points_by_team[str(team_name)] = float(point)
+        else:
+            points_by_team[str(team_name)] = None
+
+    return points_by_team.get(home_team_name), points_by_team.get(away_team_name)
+
+
 def _persist_snapshots(connection: sqlite3.Connection, snapshots: Sequence[OddsSnapshot]) -> None:
     connection.executemany(
         """
@@ -405,10 +446,12 @@ def _persist_snapshots(connection: sqlite3.Connection, snapshots: Sequence[OddsS
             market_type,
             home_odds,
             away_odds,
+            home_point,
+            away_point,
             fetched_at,
             is_frozen
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
@@ -417,6 +460,8 @@ def _persist_snapshots(connection: sqlite3.Connection, snapshots: Sequence[OddsS
                 snapshot.market_type,
                 snapshot.home_odds,
                 snapshot.away_odds,
+                snapshot.home_point,
+                snapshot.away_point,
                 snapshot.fetched_at.isoformat(),
                 int(snapshot.is_frozen),
             )
@@ -438,6 +483,271 @@ def _persist_snapshots(connection: sqlite3.Connection, snapshots: Sequence[OddsS
             connection=connection,
             commit=False,
         )
+
+
+def _is_better_price(candidate: int, current: int | None) -> bool:
+    if current is None:
+        return True
+    return candidate > current
+
+
+def _extract_full_game_context_for_event(
+    event_payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    home_team_name = str(event_payload.get("home_team") or "")
+    away_team_name = str(event_payload.get("away_team") or "")
+    result: dict[str, Any] = {
+        "full_game_odds_available": False,
+        "full_game_odds_books": [],
+        "full_game_home_ml": None,
+        "full_game_home_ml_book": None,
+        "full_game_away_ml": None,
+        "full_game_away_ml_book": None,
+        "full_game_home_spread": None,
+        "full_game_home_spread_odds": None,
+        "full_game_home_spread_book": None,
+        "full_game_away_spread": None,
+        "full_game_away_spread_odds": None,
+        "full_game_away_spread_book": None,
+        "full_game_ml_pairs": [],
+    }
+
+    bookmakers = event_payload.get("bookmakers")
+    if not isinstance(bookmakers, list):
+        return result
+
+    for bookmaker in bookmakers:
+        if not isinstance(bookmaker, Mapping):
+            continue
+        book_name = bookmaker.get("title") or bookmaker.get("key")
+        if not isinstance(book_name, str) or not book_name:
+            continue
+
+        markets = bookmaker.get("markets")
+        if not isinstance(markets, list):
+            continue
+
+        market_found = False
+        for market in markets:
+            if not isinstance(market, Mapping):
+                continue
+            market_key = market.get("key")
+            outcomes = market.get("outcomes")
+            if not isinstance(outcomes, list):
+                continue
+
+            if market_key == "h2h":
+                market_found = True
+                prices = _extract_market_prices(
+                    outcomes,
+                    home_team_name=home_team_name,
+                    away_team_name=away_team_name,
+                )
+                if prices is None:
+                    continue
+                home_price, away_price = prices
+                result["full_game_ml_pairs"].append(
+                    {
+                        "book_name": book_name,
+                        "home_odds": home_price,
+                        "away_odds": away_price,
+                    }
+                )
+                if _is_better_price(home_price, result["full_game_home_ml"]):
+                    result["full_game_home_ml"] = home_price
+                    result["full_game_home_ml_book"] = book_name
+                if _is_better_price(away_price, result["full_game_away_ml"]):
+                    result["full_game_away_ml"] = away_price
+                    result["full_game_away_ml_book"] = book_name
+
+            if market_key == "spreads":
+                market_found = True
+                for outcome in outcomes:
+                    if not isinstance(outcome, Mapping):
+                        continue
+                    team_name = outcome.get("name")
+                    price = outcome.get("price")
+                    point = outcome.get("point")
+                    if team_name not in {home_team_name, away_team_name}:
+                        continue
+                    if not isinstance(price, (int, float)) or not isinstance(point, (int, float)):
+                        continue
+
+                    if team_name == home_team_name and _is_better_price(
+                        int(price),
+                        result["full_game_home_spread_odds"],
+                    ):
+                        result["full_game_home_spread"] = float(point)
+                        result["full_game_home_spread_odds"] = int(price)
+                        result["full_game_home_spread_book"] = book_name
+                    elif team_name == away_team_name and _is_better_price(
+                        int(price),
+                        result["full_game_away_spread_odds"],
+                    ):
+                        result["full_game_away_spread"] = float(point)
+                        result["full_game_away_spread_odds"] = int(price)
+                        result["full_game_away_spread_book"] = book_name
+
+        if market_found:
+            result["full_game_odds_books"].append(book_name)
+
+    result["full_game_odds_books"] = sorted(set(result["full_game_odds_books"]))
+    result["full_game_odds_available"] = bool(result["full_game_odds_books"])
+    return result
+
+
+def _probability_to_american(probability: float) -> int:
+    clamped_probability = min(max(float(probability), 0.01), 0.99)
+    if clamped_probability >= 0.5:
+        return -int(round((clamped_probability / (1 - clamped_probability)) * 100))
+    return int(round(((1 - clamped_probability) / clamped_probability) * 100))
+
+
+def _extract_sbr_next_data(payload_text: str) -> dict[str, Any] | None:
+    match = SBR_NEXT_DATA_PATTERN.search(payload_text)
+    if match is None:
+        return None
+    return json.loads(match.group(1))
+
+
+def fetch_sbr_f5_odds(
+    *,
+    target_date: datetime | str,
+    db_path: str | Path = DEFAULT_DB_PATH,
+    client: httpx.Client | None = None,
+) -> list[OddsSnapshot]:
+    """Fetch projected MLB F5 moneyline odds from SBR when available."""
+
+    if isinstance(target_date, datetime):
+        game_date = target_date.date().isoformat()
+    else:
+        game_date = str(target_date)
+
+    database_path = init_db(db_path)
+    url = SBR_F5_URL_TEMPLATE.format(game_date=game_date)
+    client_context = nullcontext(client) if client is not None else httpx.Client(timeout=30.0)
+
+    with client_context as http_client, sqlite3.connect(database_path) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        response = http_client.get(url, headers=SBR_REQUEST_HEADERS)
+        response.raise_for_status()
+
+        next_data = _extract_sbr_next_data(response.text)
+        if not isinstance(next_data, Mapping):
+            return []
+
+        page_props = next_data.get("props", {}).get("pageProps", {})
+        odds_tables = page_props.get("oddsTables")
+        if not isinstance(odds_tables, list) or not odds_tables:
+            return []
+
+        game_rows = odds_tables[0].get("oddsTableModel", {}).get("gameRows")
+        if not isinstance(game_rows, list):
+            return []
+
+        snapshots: list[OddsSnapshot] = []
+        for row in game_rows:
+            if not isinstance(row, Mapping):
+                continue
+            game_view = row.get("gameView")
+            odds_views = row.get("oddsViews")
+            if not isinstance(game_view, Mapping) or not isinstance(odds_views, list):
+                continue
+
+            commence_raw = game_view.get("startDate")
+            home_team = game_view.get("homeTeam", {})
+            away_team = game_view.get("awayTeam", {})
+            if not isinstance(commence_raw, str):
+                continue
+            home_team_name = home_team.get("fullName")
+            away_team_name = away_team.get("fullName")
+            if not isinstance(home_team_name, str) or not isinstance(away_team_name, str):
+                continue
+
+            commence_time = _parse_iso_datetime(commence_raw)
+            game_pk = _ensure_game_row(
+                connection,
+                event_id=f"sbr-f5-{game_view.get('gameId') or commence_raw}-{home_team_name}-{away_team_name}",
+                home_team_name=home_team_name,
+                away_team_name=away_team_name,
+                commence_time=commence_time,
+                event_venue=_extract_event_venue(game_view),
+            )
+            if game_pk is None:
+                continue
+
+            for odds_view in odds_views:
+                if not isinstance(odds_view, Mapping):
+                    continue
+                book_name = odds_view.get("sportsbook")
+                current_line = odds_view.get("currentLine")
+                if not isinstance(book_name, str) or not isinstance(current_line, Mapping):
+                    continue
+                home_odds = current_line.get("homeOdds")
+                away_odds = current_line.get("awayOdds")
+                if not isinstance(home_odds, int) or not isinstance(away_odds, int):
+                    continue
+                snapshots.append(
+                    OddsSnapshot(
+                        game_pk=game_pk,
+                        book_name=f"sbr:{book_name}",
+                        market_type="f5_ml",
+                        home_odds=home_odds,
+                        away_odds=away_odds,
+                        fetched_at=datetime.now(timezone.utc),
+                    )
+                )
+
+        connection.commit()
+        return sorted(
+            snapshots,
+            key=lambda snapshot: (snapshot.game_pk, snapshot.book_name, snapshot.market_type),
+        )
+
+
+def build_estimated_f5_ml_snapshots(
+    full_game_context_by_game: Mapping[int, Mapping[str, Any]],
+    *,
+    fetched_at: datetime | None = None,
+    shrink_factor: float = 0.78,
+) -> list[OddsSnapshot]:
+    """Build paper-only F5 moneyline estimates from full-game moneyline pairs."""
+
+    resolved_fetched_at = fetched_at or datetime.now(timezone.utc)
+    snapshots: list[OddsSnapshot] = []
+    for game_pk, context in full_game_context_by_game.items():
+        ml_pairs = context.get("full_game_ml_pairs")
+        if not isinstance(ml_pairs, list):
+            continue
+        for pair in ml_pairs:
+            if not isinstance(pair, Mapping):
+                continue
+            book_name = pair.get("book_name")
+            home_odds = pair.get("home_odds")
+            away_odds = pair.get("away_odds")
+            if not isinstance(book_name, str) or not isinstance(home_odds, int) or not isinstance(away_odds, int):
+                continue
+            try:
+                home_probability, _away_probability = devig_probabilities(home_odds, away_odds)
+            except ValueError:
+                continue
+            estimated_home_probability = 0.5 + ((home_probability - 0.5) * float(shrink_factor))
+            estimated_away_probability = 1.0 - estimated_home_probability
+            snapshots.append(
+                OddsSnapshot(
+                    game_pk=int(game_pk),
+                    book_name=f"estimate:full-game:{book_name}",
+                    market_type="f5_ml",
+                    home_odds=_probability_to_american(estimated_home_probability),
+                    away_odds=_probability_to_american(estimated_away_probability),
+                    fetched_at=resolved_fetched_at,
+                )
+            )
+
+    return sorted(
+        snapshots,
+        key=lambda snapshot: (snapshot.game_pk, snapshot.book_name, snapshot.market_type),
+    )
 
 
 def american_to_implied(odds: int) -> float:
@@ -485,6 +795,7 @@ def fetch_mlb_odds(
     commence_time_from: datetime | None = None,
     commence_time_to: datetime | None = None,
     quota_limit: int = ODDS_API_MONTHLY_LIMIT,
+    request_pause_seconds: float = 0.35,
 ) -> list[OddsSnapshot]:
     """Fetch MLB F5 odds, persist snapshots, and track monthly API usage."""
 
@@ -547,11 +858,25 @@ def fetch_mlb_odds(
                 if bookmakers:
                     event_params["bookmakers"] = ",".join(bookmakers)
 
-                event_response = http_client.get(
-                    f"/v4/sports/{ODDS_API_SPORT_KEY}/events/{event['id']}/odds",
-                    params=event_params,
-                )
-                event_response.raise_for_status()
+                try:
+                    event_response = http_client.get(
+                        f"/v4/sports/{ODDS_API_SPORT_KEY}/events/{event['id']}/odds",
+                        params=event_params,
+                    )
+                    event_response.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code != 429:
+                        raise
+                    logger.warning(
+                        "Odds API rate limited while fetching event %s (%s vs %s); continuing with partial slate",
+                        event.get("id"),
+                        event.get("away_team"),
+                        event.get("home_team"),
+                    )
+                    connection.commit()
+                    if request_pause_seconds > 0:
+                        time.sleep(request_pause_seconds)
+                    continue
                 event_payload = event_response.json()
                 if not isinstance(event_payload, dict):
                     raise OddsApiError("Unexpected event odds response payload")
@@ -568,13 +893,22 @@ def fetch_mlb_odds(
                         if market_type is None:
                             continue
 
+                        outcomes = market.get("outcomes", [])
                         prices = _extract_market_prices(
-                            market.get("outcomes", []),
+                            outcomes,
                             home_team_name=event["home_team"],
                             away_team_name=event["away_team"],
                         )
                         if prices is None:
                             continue
+
+                        points: tuple[float | None, float | None] = (None, None)
+                        if market_key == "spreads_1st_5_innings":
+                            points = _extract_market_points(
+                                outcomes,
+                                home_team_name=str(event["home_team"]),
+                                away_team_name=str(event["away_team"]),
+                            )
 
                         fetched_at_raw = (
                             market.get("last_update")
@@ -591,6 +925,8 @@ def fetch_mlb_odds(
                                 market_type=market_type,
                                 home_odds=prices[0],
                                 away_odds=prices[1],
+                                home_point=points[0],
+                                away_point=points[1],
                                 fetched_at=_parse_iso_datetime(fetched_at_raw),
                             )
                         )
@@ -608,11 +944,108 @@ def fetch_mlb_odds(
                     snapshots.extend(event_snapshots)
 
                 connection.commit()
+                if request_pause_seconds > 0:
+                    time.sleep(request_pause_seconds)
             except Exception:
                 connection.rollback()
                 raise
 
     return sorted(snapshots, key=lambda snapshot: (snapshot.game_pk, snapshot.book_name, snapshot.market_type))
+
+
+def fetch_mlb_full_game_odds_context(
+    *,
+    api_key: str | None = None,
+    db_path: str | Path = DEFAULT_DB_PATH,
+    client: httpx.Client | None = None,
+    regions: str = "us",
+    bookmakers: Sequence[str] | None = None,
+    commence_time_from: datetime | None = None,
+    commence_time_to: datetime | None = None,
+    quota_limit: int = ODDS_API_MONTHLY_LIMIT,
+) -> dict[int, dict[str, Any]]:
+    """Fetch public full-game MLB odds context for display purposes."""
+
+    resolved_api_key = _resolve_api_key(api_key)
+    database_path = init_db(db_path)
+    usage_month = _usage_month()
+    request_cost = _quota_cost(regions, bookmakers)
+
+    params: dict[str, str] = {
+        "apiKey": resolved_api_key,
+        "regions": regions,
+        "markets": "h2h,spreads",
+        "oddsFormat": "american",
+        "dateFormat": "iso",
+    }
+    if commence_time_from is not None:
+        params["commenceTimeFrom"] = _to_iso_z(commence_time_from)
+    if commence_time_to is not None:
+        params["commenceTimeTo"] = _to_iso_z(commence_time_to)
+    if bookmakers:
+        params["bookmakers"] = ",".join(bookmakers)
+
+    client_context = (
+        nullcontext(client)
+        if client is not None
+        else httpx.Client(base_url=ODDS_API_BASE_URL, timeout=30.0)
+    )
+
+    with client_context as http_client, sqlite3.connect(database_path) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        _ensure_usage_table(connection)
+        _ensure_quota_available(
+            connection,
+            usage_month=usage_month,
+            additional_cost=request_cost,
+            quota_limit=quota_limit,
+        )
+
+        response = http_client.get(ODDS_API_ODDS_PATH, params=params)
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, list):
+            raise OddsApiError("Unexpected full-game odds response payload")
+
+        _record_usage(
+            connection,
+            usage_month=usage_month,
+            headers=dict(response.headers),
+            estimated_cost=request_cost,
+            quota_limit=quota_limit,
+        )
+        connection.commit()
+
+        result: dict[int, dict[str, Any]] = {}
+        for event in payload:
+            if not isinstance(event, Mapping):
+                continue
+            commence_raw = event.get("commence_time")
+            home_team_name = event.get("home_team")
+            away_team_name = event.get("away_team")
+            event_id = event.get("id")
+            if not all(
+                isinstance(value, str) and value
+                for value in (commence_raw, home_team_name, away_team_name, event_id)
+            ):
+                continue
+
+            commence_time = _parse_iso_datetime(str(commence_raw))
+            game_pk = _ensure_game_row(
+                connection,
+                event_id=str(event_id),
+                home_team_name=str(home_team_name),
+                away_team_name=str(away_team_name),
+                commence_time=commence_time,
+                event_venue=_extract_event_venue(event),
+            )
+            if game_pk is None:
+                continue
+
+            result[game_pk] = _extract_full_game_context_for_event(event)
+
+        connection.commit()
+        return result
 
 
 def freeze_odds(

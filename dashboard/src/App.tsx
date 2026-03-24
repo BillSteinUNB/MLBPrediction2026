@@ -1,4 +1,3 @@
-import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./Layout";
 import OverviewPage from "./pages/OverviewPage";
@@ -6,6 +5,8 @@ import LaneExplorerPage from "./pages/LaneExplorerPage";
 import ComparePage from "./pages/ComparePage";
 import RunDetailPage from "./pages/RunDetailPage";
 import PromotionBoardPage from "./pages/PromotionBoardPage";
+import SlatePage from "./pages/SlatePage";
+import LiveSeasonPage from "./pages/LiveSeasonPage";
 
 function App() {
   return (
@@ -13,6 +14,8 @@ function App() {
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<OverviewPage />} />
+          <Route path="slate" element={<SlatePage />} />
+          <Route path="live-season" element={<LiveSeasonPage />} />
           <Route path="lanes" element={<LaneExplorerPage />} />
           <Route path="compare" element={<ComparePage />} />
           <Route path="runs/:summaryPath" element={<RunDetailPage />} />
@@ -26,4 +29,3 @@ function App() {
 }
 
 export default App;
-

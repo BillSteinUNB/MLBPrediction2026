@@ -2,12 +2,13 @@ import React, { useEffect, useState } from "react";
 import { getOverview } from "../api";
 import type { OverviewResponse, RunSummary } from "../api/types";
 import { MetricCard, RunTable } from "../components";
+import { TooltipLabel } from "../components/TooltipLabel";
 
 /* ---- Style tokens aligned to layout.css variables ---- */
 const sectionHeading: React.CSSProperties = {
   fontSize: 16,
   fontWeight: 600,
-  color: "var(--text-h, #08060d)",
+  color: "var(--text-h)",
   margin: "0 0 12px 0",
 };
 
@@ -24,7 +25,7 @@ const sectionBlock: React.CSSProperties = {
 
 const statusText: React.CSSProperties = {
   fontSize: 14,
-  color: "var(--muted, #9ca3af)",
+  color: "var(--muted)",
   padding: 24,
   textAlign: "center",
 };
@@ -136,7 +137,7 @@ const OverviewPage: React.FC = () => {
   return (
     <div className="page">
       <h2 style={{ ...sectionHeading, fontSize: 20, marginBottom: 20 }}>
-        Overview
+        <TooltipLabel label="Overview" as="span" />
       </h2>
 
       {/* ---- Summary metric cards ---- */}

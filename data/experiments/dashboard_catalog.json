@@ -1,0 +1,16 @@
+{
+  "include_folders": [
+    "bullpen-audit-rebuild",
+    "2024-umpires-identity",
+    "2024-offense-fix-2023",
+    "2024-offense-fix",
+    "2025-offense-fix"
+  ],
+  "aliases": {
+    "bullpen-audit-rebuild": "2024 Clean Baseline",
+    "2024-umpires-identity": "2024 Legacy Peak",
+    "2024-offense-fix-2023": "2024 Recent Window Reference",
+    "2024-offense-fix": "2024 Historical Window Reference",
+    "2025-offense-fix": "2025 Holdout Reference"
+  }
+}

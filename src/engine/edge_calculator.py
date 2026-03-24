@@ -183,6 +183,8 @@ def calculate_edge(
     model_probability: float,
     home_odds: int,
     away_odds: int,
+    home_point: float | None = None,
+    away_point: float | None = None,
     book_name: str = "manual",
     db_path: str | Path = DEFAULT_DB_PATH,
     edge_threshold: float | None = None,
@@ -207,9 +209,11 @@ def calculate_edge(
     if side == "home":
         fair_probability = home_fair_probability
         odds_at_bet = validated_home_odds
+        line_at_bet = home_point
     else:
         fair_probability = away_fair_probability
         odds_at_bet = validated_away_odds
+        line_at_bet = away_point
 
     edge_pct = float(validated_model_probability - fair_probability)
     ev = expected_value(validated_model_probability, odds_at_bet)
@@ -226,6 +230,7 @@ def calculate_edge(
         ev=ev,
         is_positive_ev=is_positive_ev,
         odds_at_bet=odds_at_bet,
+        line_at_bet=line_at_bet,
     )
 
     _log_edge_calculation(

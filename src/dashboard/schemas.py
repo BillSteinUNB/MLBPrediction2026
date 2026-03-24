@@ -155,3 +155,193 @@ class OverviewResponse(BaseModel):
     best_run: Optional[RunSummary] = None
     latest_run: Optional[RunSummary] = None
     recent_runs: List[RunSummary] = []
+
+
+class SlatePrediction(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    game_pk: int
+    model_version: str
+    f5_ml_home_prob: float
+    f5_ml_away_prob: float
+    f5_rl_home_prob: float
+    f5_rl_away_prob: float
+    projected_f5_home_runs: Optional[float] = None
+    projected_f5_away_runs: Optional[float] = None
+    projected_f5_total_runs: Optional[float] = None
+    projected_f5_home_margin: Optional[float] = None
+    predicted_at: str
+
+
+class SlateDecision(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    game_pk: int
+    market_type: str
+    side: str
+    source_model: Optional[str] = None
+    source_model_version: Optional[str] = None
+    book_name: Optional[str] = None
+    model_probability: float
+    fair_probability: float
+    edge_pct: float
+    ev: float
+    is_positive_ev: bool
+    kelly_stake: float
+    odds_at_bet: Optional[int] = None
+    line_at_bet: Optional[float] = None
+    result: Optional[str] = None
+    settled_at: Optional[str] = None
+    profit_loss: Optional[float] = None
+
+
+class SlateInputStatus(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    home_lineup_available: bool = False
+    home_lineup_confirmed: bool = False
+    home_lineup_source: Optional[str] = None
+    away_lineup_available: bool = False
+    away_lineup_confirmed: bool = False
+    away_lineup_source: Optional[str] = None
+    odds_available: bool = False
+    odds_books: List[str] = []
+    f5_odds_estimated: bool = False
+    f5_odds_sources: List[str] = []
+    full_game_odds_available: bool = False
+    full_game_odds_books: List[str] = []
+    full_game_home_ml: Optional[int] = None
+    full_game_home_ml_book: Optional[str] = None
+    full_game_away_ml: Optional[int] = None
+    full_game_away_ml_book: Optional[str] = None
+    full_game_home_spread: Optional[float] = None
+    full_game_home_spread_odds: Optional[int] = None
+    full_game_home_spread_book: Optional[str] = None
+    full_game_away_spread: Optional[float] = None
+    full_game_away_spread_odds: Optional[int] = None
+    full_game_away_spread_book: Optional[str] = None
+    weather_available: bool = False
+
+
+class SlateGame(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    game_pk: int
+    matchup: str
+    status: str
+    prediction: Optional[SlatePrediction] = None
+    selected_decision: Optional[SlateDecision] = None
+    forced_decision: Optional[SlateDecision] = None
+    no_pick_reason: Optional[str] = None
+    error_message: Optional[str] = None
+    notified: bool = False
+    paper_fallback: bool = False
+    input_status: Optional[SlateInputStatus] = None
+
+
+class SlateResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    run_id: str
+    pipeline_date: str
+    mode: str
+    dry_run: bool
+    model_version: str
+    pick_count: int
+    no_pick_count: int
+    error_count: int
+    notification_type: str
+    games: List[SlateGame] = []
+
+
+class LiveSeasonSummaryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    season: int
+    tracked_games: int
+    settled_games: int
+    picks: int
+    graded_picks: int
+    wins: int
+    losses: int
+    pushes: int
+    no_picks: int
+    errors: int
+    paper_fallback_picks: int
+    flat_profit_units: float
+    flat_roi: Optional[float] = None
+    play_of_day_count: int
+    play_of_day_graded_picks: int
+    play_of_day_wins: int
+    play_of_day_losses: int
+    play_of_day_pushes: int
+    play_of_day_profit_units: float
+    play_of_day_roi: Optional[float] = None
+    forced_picks: int
+    forced_graded_picks: int
+    forced_wins: int
+    forced_losses: int
+    forced_pushes: int
+    forced_profit_units: float
+    forced_roi: Optional[float] = None
+    f5_ml_accuracy: Optional[float] = None
+    f5_ml_brier: Optional[float] = None
+    f5_ml_log_loss: Optional[float] = None
+    f5_rl_accuracy: Optional[float] = None
+    f5_rl_brier: Optional[float] = None
+    f5_rl_log_loss: Optional[float] = None
+    latest_capture_at: Optional[str] = None
+
+
+class LiveSeasonGameResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    season: int
+    pipeline_date: str
+    game_pk: int
+    matchup: str
+    run_id: str
+    captured_at: str
+    model_version: Optional[str] = None
+    status: str
+    paper_fallback: bool
+    f5_ml_home_prob: Optional[float] = None
+    f5_ml_away_prob: Optional[float] = None
+    f5_rl_home_prob: Optional[float] = None
+    f5_rl_away_prob: Optional[float] = None
+    selected_market_type: Optional[str] = None
+    selected_side: Optional[str] = None
+    source_model: Optional[str] = None
+    source_model_version: Optional[str] = None
+    is_play_of_day: bool = False
+    play_of_day_score: Optional[float] = None
+    book_name: Optional[str] = None
+    odds_at_bet: Optional[int] = None
+    line_at_bet: Optional[float] = None
+    fair_probability: Optional[float] = None
+    model_probability: Optional[float] = None
+    edge_pct: Optional[float] = None
+    ev: Optional[float] = None
+    kelly_stake: Optional[float] = None
+    forced_market_type: Optional[str] = None
+    forced_side: Optional[str] = None
+    forced_source_model: Optional[str] = None
+    forced_source_model_version: Optional[str] = None
+    forced_book_name: Optional[str] = None
+    forced_odds_at_bet: Optional[int] = None
+    forced_line_at_bet: Optional[float] = None
+    forced_fair_probability: Optional[float] = None
+    forced_model_probability: Optional[float] = None
+    forced_edge_pct: Optional[float] = None
+    forced_ev: Optional[float] = None
+    forced_kelly_stake: Optional[float] = None
+    no_pick_reason: Optional[str] = None
+    error_message: Optional[str] = None
+    actual_status: Optional[str] = None
+    actual_f5_home_score: Optional[int] = None
+    actual_f5_away_score: Optional[int] = None
+    settled_result: Optional[str] = None
+    flat_profit_loss: Optional[float] = None
+    forced_settled_result: Optional[str] = None
+    forced_flat_profit_loss: Optional[float] = None
+    settled_at: Optional[str] = None

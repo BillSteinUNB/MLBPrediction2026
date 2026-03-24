@@ -38,6 +38,7 @@ class KellyStakeResult(ModelBase):
     game_pk: int | None = None
     selected_market_type: MarketType | None = None
     selected_side: BetSide | None = None
+    selected_source_model: str | None = None
     suppressed_market_types: tuple[MarketType, ...] = ()
 
 
@@ -58,6 +59,7 @@ class _KellyCandidate:
     game_pk: int | None
     market_type: str | None
     side: str | None
+    source_model: str | None
     model_probability: float
     odds: int
     suppressed_market_types: tuple[str, ...] = ()
@@ -132,6 +134,7 @@ def _select_candidate(
             game_pk=selected.game_pk,
             market_type=selected.market_type,
             side=selected.side,
+            source_model=selected.source_model,
             model_probability=selected.model_probability,
             odds=selected.odds_at_bet,
             suppressed_market_types=suppressed,
@@ -144,6 +147,7 @@ def _select_candidate(
             game_pk=decision.game_pk,
             market_type=decision.market_type,
             side=decision.side,
+            source_model=decision.source_model,
             model_probability=decision.model_probability,
             odds=decision.odds_at_bet,
         )
@@ -155,6 +159,7 @@ def _select_candidate(
         game_pk=None,
         market_type=None,
         side=None,
+        source_model=None,
         model_probability=float(model_probability),
         odds=int(odds),
     )
@@ -199,6 +204,7 @@ def calculate_kelly_stake(
             game_pk=selected_candidate.game_pk,
             selected_market_type=selected_candidate.market_type,
             selected_side=selected_candidate.side,
+            selected_source_model=selected_candidate.source_model,
             suppressed_market_types=selected_candidate.suppressed_market_types,
         )
 
@@ -219,6 +225,7 @@ def calculate_kelly_stake(
         game_pk=selected_candidate.game_pk,
         selected_market_type=selected_candidate.market_type,
         selected_side=selected_candidate.side,
+        selected_source_model=selected_candidate.source_model,
         suppressed_market_types=selected_candidate.suppressed_market_types,
     )
 

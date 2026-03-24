@@ -9,6 +9,7 @@ from typing import Any, Literal, Sequence
 
 import pandas as pd
 
+from src.clients.historical_f5_acquirer import DEFAULT_MAX_ABS_AMERICAN_ODDS
 from src.clients.odds_client import _ensure_game_row, _persist_snapshots
 from src.db import DEFAULT_DB_PATH, init_db
 from src.models.odds import OddsSnapshot
@@ -38,6 +39,8 @@ _COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
     ),
     "book_name": ("book_name", "sportsbook", "book"),
     "fetched_at": ("fetched_at", "snapshot_time", "captured_at"),
+    "home_point": ("home_point", "home_spread", "point_home", "spread_home"),
+    "away_point": ("away_point", "away_spread", "point_away", "spread_away"),
 }
 
 _MARKET_ALIASES = {
@@ -51,6 +54,7 @@ _MARKET_ALIASES = {
     "spread_1st5": "f5_rl",
 }
 MarketTypeLiteral = Literal["f5_ml", "f5_rl"]
+SnapshotSelectionLiteral = Literal["latest", "opening"]
 
 
 def import_historical_odds(
@@ -59,6 +63,7 @@ def import_historical_odds(
     db_path: str | Path = DEFAULT_DB_PATH,
     default_market_type: str = "f5_ml",
     default_book_name: str = "historical",
+    max_abs_odds: int = DEFAULT_MAX_ABS_AMERICAN_ODDS,
 ) -> int:
     """Import normalized historical odds rows into odds_snapshots."""
 
@@ -87,6 +92,8 @@ def import_historical_odds(
     market_type_column = _resolve_column(frame, "market_type")
     book_name_column = _resolve_column(frame, "book_name")
     fetched_at_column = _resolve_column(frame, "fetched_at")
+    home_point_column = _resolve_column(frame, "home_point")
+    away_point_column = _resolve_column(frame, "away_point")
 
     database_path = init_db(db_path)
     snapshots: list[OddsSnapshot] = []
@@ -120,6 +127,8 @@ def import_historical_odds(
             )
             home_odds = int(row[home_odds_column])
             away_odds = int(row[away_odds_column])
+            if abs(home_odds) > int(max_abs_odds) or abs(away_odds) > int(max_abs_odds):
+                continue
             fetched_at_value = row.get(fetched_at_column) if fetched_at_column else None
             fetched_at = (
                 _coerce_timestamp(fetched_at_value)
@@ -143,6 +152,12 @@ def import_historical_odds(
                     market_type=market_type,
                     home_odds=home_odds,
                     away_odds=away_odds,
+                    home_point=_coerce_nullable_float(row.get(home_point_column))
+                    if home_point_column is not None
+                    else None,
+                    away_point=_coerce_nullable_float(row.get(away_point_column))
+                    if away_point_column is not None
+                    else None,
                     fetched_at=fetched_at,
                     is_frozen=True,
                 )
@@ -159,23 +174,40 @@ def load_historical_odds_for_games(
     game_pks: Sequence[int],
     market_type: str = "f5_ml",
     book_name: str | None = None,
+    max_abs_odds: int = DEFAULT_MAX_ABS_AMERICAN_ODDS,
+    snapshot_selection: SnapshotSelectionLiteral = "latest",
 ) -> pd.DataFrame:
-    """Load latest historical odds snapshots for the requested games."""
+    """Load historical odds snapshots for the requested games."""
 
     if not game_pks:
         return pd.DataFrame(
-            columns=["game_pk", "book_name", "market_type", "home_odds", "away_odds", "fetched_at"]
+            columns=[
+                "game_pk",
+                "book_name",
+                "market_type",
+                "home_odds",
+                "away_odds",
+                "home_point",
+                "away_point",
+                "fetched_at",
+            ]
         )
 
+    if snapshot_selection not in {"latest", "opening"}:
+        raise ValueError("snapshot_selection must be one of {'latest', 'opening'}")
+
     placeholders = ",".join("?" for _ in game_pks)
+    fetched_at_aggregate = "MAX" if snapshot_selection == "latest" else "MIN"
     query = f"""
-        SELECT o.game_pk, o.book_name, o.market_type, o.home_odds, o.away_odds, o.fetched_at
+        SELECT o.game_pk, o.book_name, o.market_type, o.home_odds, o.away_odds, o.home_point, o.away_point, o.fetched_at
         FROM odds_snapshots AS o
         INNER JOIN (
-            SELECT game_pk, market_type, MAX(fetched_at) AS fetched_at
+            SELECT game_pk, market_type, {fetched_at_aggregate}(fetched_at) AS fetched_at
             FROM odds_snapshots
             WHERE market_type = ?
               AND game_pk IN ({placeholders})
+              AND ABS(home_odds) <= ?
+              AND ABS(away_odds) <= ?
               {{book_filter_inner}}
             GROUP BY game_pk, market_type
         ) AS latest
@@ -183,13 +215,21 @@ def load_historical_odds_for_games(
            AND latest.market_type = o.market_type
            AND latest.fetched_at = o.fetched_at
         WHERE o.market_type = ?
+          AND ABS(o.home_odds) <= ?
+          AND ABS(o.away_odds) <= ?
           {"" if book_name is None else "AND o.book_name = ?"}
     """
     query = query.replace("{book_filter_inner}", "" if book_name is None else "AND book_name = ?")
-    params: list[Any] = [market_type, *[int(game_pk) for game_pk in game_pks]]
+    params: list[Any] = [
+        market_type,
+        *[int(game_pk) for game_pk in game_pks],
+        int(max_abs_odds),
+        int(max_abs_odds),
+    ]
     if book_name:
         params.append(book_name)
     params.append(market_type)
+    params.extend([int(max_abs_odds), int(max_abs_odds)])
     if book_name:
         params.append(book_name)
 
@@ -284,6 +324,15 @@ def _coerce_nullable_int(value: Any) -> int | None:
         return None
     try:
         return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_nullable_float(value: Any) -> float | None:
+    if not _has_scalar_value(value):
+        return None
+    try:
+        return float(value)
     except (TypeError, ValueError):
         return None
 

@@ -11,5 +11,7 @@ class OddsSnapshot(ModelBase):
     market_type: MarketType
     home_odds: AmericanOdds
     away_odds: AmericanOdds
+    home_point: float | None = None
+    away_point: float | None = None
     fetched_at: UtcDatetime
     is_frozen: bool = False

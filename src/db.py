@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 DEFAULT_DB_PATH = Path("data") / "mlb.db"
 BUILDER_SQLITE_CACHE_SIZE_KB = 64_000
 
@@ -73,6 +73,8 @@ SCHEMA_STATEMENTS = (
         market_type TEXT NOT NULL CHECK (market_type IN ('f5_ml', 'f5_rl')),
         home_odds INTEGER NOT NULL,
         away_odds INTEGER NOT NULL,
+        home_point REAL,
+        away_point REAL,
         fetched_at TEXT NOT NULL,
         is_frozen INTEGER NOT NULL DEFAULT 0 CHECK (is_frozen IN (0, 1)),
         FOREIGN KEY (game_pk) REFERENCES games (game_pk)
@@ -167,6 +169,18 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
         connection.execute(
             "ALTER TABLE bet_performance ADD COLUMN book_name TEXT NOT NULL DEFAULT 'manual'"
         )
+    if _table_exists(connection, "odds_snapshots") and not _column_exists(
+        connection,
+        "odds_snapshots",
+        "home_point",
+    ):
+        connection.execute("ALTER TABLE odds_snapshots ADD COLUMN home_point REAL")
+    if _table_exists(connection, "odds_snapshots") and not _column_exists(
+        connection,
+        "odds_snapshots",
+        "away_point",
+    ):
+        connection.execute("ALTER TABLE odds_snapshots ADD COLUMN away_point REAL")
 
 
 def init_db(db_path: str | Path = DEFAULT_DB_PATH) -> Path:

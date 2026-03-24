@@ -68,6 +68,49 @@ def _synthetic_training_frame() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _build_historical_odds_db(frame: pd.DataFrame, db_path: Path) -> Path:
+    with sqlite3.connect(init_db(db_path)) as connection:
+        for row in frame.to_dict(orient="records"):
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO games (
+                    game_pk, date, home_team, away_team, venue, is_dome, is_abs_active,
+                    f5_home_score, f5_away_score, final_home_score, final_away_score, status
+                )
+                VALUES (?, ?, ?, ?, ?, 0, 1, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(row["game_pk"]),
+                    str(row["scheduled_start"]),
+                    str(row["home_team"]),
+                    str(row["away_team"]),
+                    str(row["venue"]),
+                    int(row["f5_ml_result"]),
+                    int(1 - row["f5_ml_result"]),
+                    int(row["f5_ml_result"]),
+                    int(1 - row["f5_ml_result"]),
+                    "final",
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO odds_snapshots (
+                    game_pk, book_name, market_type, home_odds, away_odds, fetched_at, is_frozen
+                )
+                VALUES (?, ?, 'f5_ml', ?, ?, ?, 1)
+                """,
+                (
+                    int(row["game_pk"]),
+                    "archive-book",
+                    -120,
+                    110,
+                    str(row["scheduled_start"]),
+                ),
+            )
+        connection.commit()
+    return db_path
+
+
 def test_create_walk_forward_windows_uses_six_month_train_and_one_month_test_stride() -> None:
     frame = _synthetic_training_frame()
 
@@ -117,6 +160,7 @@ def test_create_walk_forward_windows_supports_anchored_expanding_mode() -> None:
 
 def test_run_walk_forward_backtest_writes_metrics_and_is_byte_reproducible(tmp_path) -> None:
     frame = _synthetic_training_frame()
+    db_path = _build_historical_odds_db(frame, tmp_path / "historical_odds.db")
 
     first_result = run_walk_forward_backtest(
         training_data=frame,
@@ -124,6 +168,8 @@ def test_run_walk_forward_backtest_writes_metrics_and_is_byte_reproducible(tmp_p
         end_date="2022-03-31",
         output_dir=tmp_path / "run_a",
         calibration_fraction=0.15,
+        historical_odds_db_path=db_path,
+        historical_odds_book_name="archive-book",
         estimator_kwargs={"max_depth": 1, "n_estimators": 8, "learning_rate": 0.2},
     )
     second_result = run_walk_forward_backtest(
@@ -132,6 +178,8 @@ def test_run_walk_forward_backtest_writes_metrics_and_is_byte_reproducible(tmp_p
         end_date="2022-03-31",
         output_dir=tmp_path / "run_b",
         calibration_fraction=0.15,
+        historical_odds_db_path=db_path,
+        historical_odds_book_name="archive-book",
         estimator_kwargs={"max_depth": 1, "n_estimators": 8, "learning_rate": 0.2},
     )
 
@@ -150,10 +198,12 @@ def test_run_walk_forward_backtest_writes_metrics_and_is_byte_reproducible(tmp_p
     assert predictions["bet_side"].isin(["home", "away", "none"]).all()
     assert predictions["market_home_fair_prob"].between(0.0, 1.0).all()
     assert predictions["model_home_prob"].between(0.0, 1.0).all()
+    assert first_result.profitability_metrics_valid is True
 
 
 def test_run_walk_forward_backtest_tracks_bankroll_for_flat_staking(tmp_path) -> None:
     frame = _synthetic_training_frame()
+    db_path = _build_historical_odds_db(frame, tmp_path / "historical_odds.db")
 
     result = run_walk_forward_backtest(
         training_data=frame,
@@ -164,6 +214,8 @@ def test_run_walk_forward_backtest_tracks_bankroll_for_flat_staking(tmp_path) ->
         estimator_kwargs={"max_depth": 1, "n_estimators": 8, "learning_rate": 0.2},
         window_mode="anchored_expanding",
         anchored_train_start="2021-07-01",
+        historical_odds_db_path=db_path,
+        historical_odds_book_name="archive-book",
         starting_bankroll_units=100.0,
         staking_mode="flat",
         flat_bet_size_units=2.0,
@@ -181,6 +233,7 @@ def test_run_walk_forward_backtest_tracks_bankroll_for_flat_staking(tmp_path) ->
 
 def test_run_walk_forward_backtest_supports_edge_scaled_staking(tmp_path) -> None:
     frame = _synthetic_training_frame()
+    db_path = _build_historical_odds_db(frame, tmp_path / "historical_odds.db")
 
     result = run_walk_forward_backtest(
         training_data=frame,
@@ -188,6 +241,8 @@ def test_run_walk_forward_backtest_supports_edge_scaled_staking(tmp_path) -> Non
         end_date="2022-01-01",
         output_dir=tmp_path / "edge_scaled",
         calibration_fraction=0.15,
+        historical_odds_db_path=db_path,
+        historical_odds_book_name="archive-book",
         estimator_kwargs={"max_depth": 1, "n_estimators": 8, "learning_rate": 0.2},
         starting_bankroll_units=100.0,
         staking_mode="edge_scaled",
@@ -204,6 +259,7 @@ def test_run_walk_forward_backtest_supports_edge_scaled_staking(tmp_path) -> Non
 
 def test_run_walk_forward_backtest_supports_edge_bucketed_staking(tmp_path) -> None:
     frame = _synthetic_training_frame()
+    db_path = _build_historical_odds_db(frame, tmp_path / "historical_odds.db")
 
     result = run_walk_forward_backtest(
         training_data=frame,
@@ -211,6 +267,8 @@ def test_run_walk_forward_backtest_supports_edge_bucketed_staking(tmp_path) -> N
         end_date="2022-01-01",
         output_dir=tmp_path / "edge_bucketed",
         calibration_fraction=0.15,
+        historical_odds_db_path=db_path,
+        historical_odds_book_name="archive-book",
         estimator_kwargs={"max_depth": 1, "n_estimators": 8, "learning_rate": 0.2},
         starting_bankroll_units=100.0,
         staking_mode="edge_bucketed",
@@ -225,6 +283,7 @@ def test_run_walk_forward_backtest_supports_edge_bucketed_staking(tmp_path) -> N
 
 def test_run_walk_forward_backtest_can_filter_extreme_edges(tmp_path) -> None:
     frame = _synthetic_training_frame()
+    db_path = _build_historical_odds_db(frame, tmp_path / "historical_odds.db")
 
     unfiltered = run_walk_forward_backtest(
         training_data=frame,
@@ -232,6 +291,8 @@ def test_run_walk_forward_backtest_can_filter_extreme_edges(tmp_path) -> None:
         end_date="2022-01-01",
         output_dir=tmp_path / "unfiltered_edges",
         calibration_fraction=0.15,
+        historical_odds_db_path=db_path,
+        historical_odds_book_name="archive-book",
         estimator_kwargs={"max_depth": 1, "n_estimators": 8, "learning_rate": 0.2},
         edge_threshold=0.05,
     )
@@ -241,6 +302,8 @@ def test_run_walk_forward_backtest_can_filter_extreme_edges(tmp_path) -> None:
         end_date="2022-01-01",
         output_dir=tmp_path / "filtered_edges",
         calibration_fraction=0.15,
+        historical_odds_db_path=db_path,
+        historical_odds_book_name="archive-book",
         estimator_kwargs={"max_depth": 1, "n_estimators": 8, "learning_rate": 0.2},
         edge_threshold=0.05,
         max_edge_to_bet=0.30,
@@ -250,6 +313,41 @@ def test_run_walk_forward_backtest_can_filter_extreme_edges(tmp_path) -> None:
     filtered_bets = filtered.predictions.loc[filtered.predictions["is_bet"] == 1]
     if not filtered_bets.empty:
         assert filtered_bets["bet_edge"].max() <= 0.30
+
+
+def test_run_walk_forward_backtest_can_filter_bettable_odds_range(tmp_path) -> None:
+    frame = _synthetic_training_frame()
+    db_path = _build_historical_odds_db(frame, tmp_path / "historical_odds.db")
+
+    unrestricted = run_walk_forward_backtest(
+        training_data=frame,
+        start_date="2022-01-01",
+        end_date="2022-01-01",
+        output_dir=tmp_path / "unrestricted_odds",
+        calibration_fraction=0.15,
+        historical_odds_db_path=db_path,
+        historical_odds_book_name="archive-book",
+        estimator_kwargs={"max_depth": 1, "n_estimators": 8, "learning_rate": 0.2},
+        edge_threshold=0.05,
+    )
+    restricted = run_walk_forward_backtest(
+        training_data=frame,
+        start_date="2022-01-01",
+        end_date="2022-01-01",
+        output_dir=tmp_path / "restricted_odds",
+        calibration_fraction=0.15,
+        historical_odds_db_path=db_path,
+        historical_odds_book_name="archive-book",
+        estimator_kwargs={"max_depth": 1, "n_estimators": 8, "learning_rate": 0.2},
+        edge_threshold=0.05,
+        min_bet_odds=-130,
+        max_bet_odds=-110,
+    )
+
+    assert int(restricted.predictions["is_bet"].sum()) <= int(unrestricted.predictions["is_bet"].sum())
+    restricted_bets = restricted.predictions.loc[restricted.predictions["is_bet"] == 1]
+    if not restricted_bets.empty:
+        assert restricted_bets["bet_odds"].between(-130, -110).all()
 
 
 def test_run_walk_forward_backtest_rebuilds_window_data_and_records_build_log(
@@ -426,46 +524,7 @@ def test_configure_cli_logging_suppresses_http_client_info_noise() -> None:
 
 def test_run_walk_forward_backtest_uses_historical_odds_when_available(tmp_path) -> None:
     frame = _synthetic_training_frame()
-    db_path = tmp_path / "historical_odds.db"
-    with sqlite3.connect(init_db(db_path)) as connection:
-        for row in frame.to_dict(orient="records"):
-            connection.execute(
-                """
-                INSERT OR REPLACE INTO games (
-                    game_pk, date, home_team, away_team, venue, is_dome, is_abs_active,
-                    f5_home_score, f5_away_score, final_home_score, final_away_score, status
-                )
-                VALUES (?, ?, ?, ?, ?, 0, 1, ?, ?, ?, ?, ?)
-                """,
-                (
-                    int(row["game_pk"]),
-                    str(row["scheduled_start"]),
-                    str(row["home_team"]),
-                    str(row["away_team"]),
-                    str(row["venue"]),
-                    int(row["f5_ml_result"]),
-                    int(1 - row["f5_ml_result"]),
-                    int(row["f5_ml_result"]),
-                    int(1 - row["f5_ml_result"]),
-                    "final",
-                ),
-            )
-            connection.execute(
-                """
-                INSERT INTO odds_snapshots (
-                    game_pk, book_name, market_type, home_odds, away_odds, fetched_at, is_frozen
-                )
-                VALUES (?, ?, 'f5_ml', ?, ?, ?, 1)
-                """,
-                (
-                    int(row["game_pk"]),
-                    "archive-book",
-                    -120,
-                    110,
-                    str(row["scheduled_start"]),
-                ),
-            )
-        connection.commit()
+    db_path = _build_historical_odds_db(frame, tmp_path / "historical_odds.db")
 
     result = run_walk_forward_backtest(
         training_data=frame,
@@ -480,3 +539,27 @@ def test_run_walk_forward_backtest_uses_historical_odds_when_available(tmp_path)
 
     assert result.predictions["market_source"].eq("historical").all()
     assert result.window_metrics["historical_odds_coverage"].eq(1.0).all()
+    assert result.profitability_metrics_valid is True
+
+
+def test_run_walk_forward_backtest_disables_profitability_metrics_without_historical_odds(tmp_path) -> None:
+    frame = _synthetic_training_frame()
+
+    result = run_walk_forward_backtest(
+        training_data=frame,
+        start_date="2022-01-01",
+        end_date="2022-01-01",
+        output_dir=tmp_path / "synthetic_only",
+        calibration_fraction=0.15,
+        estimator_kwargs={"max_depth": 1, "n_estimators": 8, "learning_rate": 0.2},
+    )
+
+    assert result.predictions["market_source"].eq("synthetic").all()
+    assert result.predictions["is_bet"].sum() == 0
+    assert result.total_bets == 0
+    assert result.aggregate_roi == 0.0
+    assert result.bankroll_return_pct == 0.0
+    assert result.profitability_metrics_valid is False
+
+    summary_payload = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    assert summary_payload["profitability_metrics_valid"] is False

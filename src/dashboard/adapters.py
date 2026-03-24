@@ -4,6 +4,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 from src.dashboard.schemas import (
     BinItem,
@@ -19,6 +20,7 @@ from src.ops.experiment_report import build_experiment_metrics_dataframe
 
 
 logger = logging.getLogger(__name__)
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _normalize_path(value: str) -> str:
@@ -52,12 +54,34 @@ class ExperimentDataAdapter:
             Path(experiments_dir) if experiments_dir is not None else Path("data") / "experiments"
         )
         self._runs_cache: dict[str, tuple[float | None, list[RunSummary]]] = {}
+        self._catalog_cache: dict[str, tuple[float | None, dict[str, Any]]] = {}
 
     def _resolve_models_dir(self, models_dir: str | Path | None) -> Path:
         return Path(models_dir) if models_dir is not None else self.models_dir
 
     def _resolve_experiments_dir(self, experiments_dir: str | Path | None) -> Path:
         return Path(experiments_dir) if experiments_dir is not None else self.experiments_dir
+
+    def _load_dashboard_catalog(self, experiments_dir: Path) -> dict[str, Any]:
+        catalog_path = experiments_dir / "dashboard_catalog.json"
+        cache_key = _normalize_path(str(catalog_path.resolve()))
+        try:
+            current_mtime = catalog_path.stat().st_mtime
+        except OSError:
+            current_mtime = None
+
+        cached = self._catalog_cache.get(cache_key)
+        if cached and cached[0] == current_mtime:
+            return dict(cached[1])
+
+        if not catalog_path.exists():
+            payload: dict[str, Any] = {}
+        else:
+            raw_payload = self._safe_json_load(catalog_path)
+            payload = raw_payload if isinstance(raw_payload, dict) else {}
+
+        self._catalog_cache[cache_key] = (current_mtime, dict(payload))
+        return payload
 
     def _safe_json_load(self, path: Path) -> dict[str, Any] | list[Any] | None:
         try:
@@ -72,8 +96,57 @@ class ExperimentDataAdapter:
             logger.warning("Skipping malformed JSON file %s: %s", path, exc)
             return None
 
+    def _resolve_summary_path(self, models_dir: Path, summary_path: str | Path) -> Path | None:
+        raw_value = unquote(str(summary_path)).strip()
+        if not raw_value:
+            return None
+
+        requested_path = Path(raw_value)
+        candidates: list[Path] = []
+
+        if requested_path.is_absolute():
+            candidates.append(requested_path)
+        else:
+            candidates.append(REPO_ROOT / requested_path)
+            candidates.append(models_dir / requested_path)
+
+            normalized_parts = [part for part in requested_path.parts if part not in (".", "")]
+            if len(normalized_parts) >= 2 and normalized_parts[0] == "data" and normalized_parts[1] == "models":
+                candidates.append(models_dir / Path(*normalized_parts[2:]))
+
+        seen: set[str] = set()
+        for candidate in candidates:
+            normalized = _normalize_path(str(candidate))
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            if candidate.exists():
+                return candidate
+
+        return None
+
+    def _candidate_summary_keys(self, models_dir: Path, requested_path: Path, raw_summary_path: str) -> set[str]:
+        keys = {_normalize_path(raw_summary_path), _normalize_path(str(requested_path))}
+        try:
+            keys.add(_normalize_path(str(requested_path.resolve())))
+        except OSError:
+            pass
+
+        try:
+            keys.add(_normalize_path(str(requested_path.relative_to(REPO_ROOT))))
+        except ValueError:
+            pass
+
+        try:
+            keys.add(_normalize_path(str(requested_path.relative_to(models_dir))))
+        except ValueError:
+            pass
+
+        return keys
+
     def get_all_runs(self, models_dir: str | Path | None = None) -> list[RunSummary]:
         resolved_models_dir = self._resolve_models_dir(models_dir)
+        resolved_experiments_dir = self._resolve_experiments_dir(None)
         if not resolved_models_dir.exists():
             return []
 
@@ -95,6 +168,14 @@ class ExperimentDataAdapter:
             )
             return []
 
+        catalog = self._load_dashboard_catalog(resolved_experiments_dir)
+        include_folders = {
+            str(value)
+            for value in (catalog.get("include_folders") or [])
+            if isinstance(value, str) and value.strip()
+        }
+        aliases = catalog.get("aliases") if isinstance(catalog.get("aliases"), dict) else {}
+
         runs: list[RunSummary] = []
         for row in frame.to_dict("records"):
             payload = {
@@ -103,7 +184,14 @@ class ExperimentDataAdapter:
             }
             summary_path = payload.get("summary_path")
             if isinstance(summary_path, str):
-                payload["summary_path"] = _normalize_path(summary_path)
+                normalized_summary = _normalize_path(summary_path)
+                payload["summary_path"] = normalized_summary
+                folder_name = Path(normalized_summary).parent.name
+                if include_folders and folder_name not in include_folders:
+                    continue
+                alias = aliases.get(folder_name)
+                if isinstance(alias, str) and alias.strip():
+                    payload["experiment_name"] = alias.strip()
             try:
                 runs.append(RunSummary.model_validate(payload))
             except Exception as exc:
@@ -167,17 +255,19 @@ class ExperimentDataAdapter:
         self, models_dir: str | Path | None, summary_path: str | Path
     ) -> RunDetail | None:
         resolved_models_dir = self._resolve_models_dir(models_dir)
-        requested_path = Path(str(summary_path))
-        if not requested_path.is_absolute():
-            requested_path = resolved_models_dir / requested_path
-
-        if not requested_path.exists():
+        requested_path = self._resolve_summary_path(resolved_models_dir, summary_path)
+        if requested_path is None:
             return None
 
         runs = self.get_all_runs(resolved_models_dir)
-        normalized_summary_path = _normalize_path(str(summary_path))
+        requested_keys = self._candidate_summary_keys(
+            resolved_models_dir,
+            requested_path,
+            unquote(str(summary_path)),
+        )
         run_summary = next(
-            (run for run in runs if run.summary_path == normalized_summary_path), None
+            (run for run in runs if _normalize_path(run.summary_path) in requested_keys),
+            None,
         )
 
         payload = self._safe_json_load(requested_path)
@@ -244,6 +334,29 @@ class ExperimentDataAdapter:
             stacking_metrics=holdout_metrics or None,
         )
         return detail
+
+    def get_lane_runs(
+        self,
+        runs: list[RunSummary],
+        lane_id: str,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[RunSummary]:
+        try:
+            holdout_raw, target_column, variant = lane_id.split(":", 2)
+            holdout_season = int(holdout_raw)
+        except ValueError:
+            return []
+
+        matched = [
+            run
+            for run in runs
+            if run.holdout_season == holdout_season
+            and run.target_column == target_column
+            and run.variant == variant
+        ]
+        matched.sort(key=lambda run: _timestamp_key(run.run_timestamp), reverse=True)
+        return matched[skip : skip + limit]
 
     def _pick_best_run(self, runs: list[RunSummary]) -> RunSummary | None:
         if not runs:

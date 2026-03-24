@@ -4,9 +4,11 @@ import sqlite3
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from src.clients.historical_f5_acquirer import (
     normalize_sbr_f5_moneyline,
+    normalize_sbr_f5_runline,
     seed_games_from_training_data,
 )
 
@@ -142,3 +144,110 @@ def test_normalize_sbr_f5_moneyline_collapses_duplicate_team_tokens(tmp_path: Pa
     assert len(normalized) == 2
     assert set(normalized["game_pk"].astype(int)) == {789}
     assert set(normalized["book_name"]) == {"sbr:caesars"}
+
+
+def test_normalize_sbr_f5_moneyline_filters_absurd_odds(tmp_path: Path) -> None:
+    training_path = tmp_path / "training.parquet"
+    pd.DataFrame(
+        [
+            {
+                "game_pk": 790,
+                "season": 2025,
+                "game_date": "2025-04-03",
+                "scheduled_start": "2025-04-03T19:35:00Z",
+                "home_team": "NYY",
+                "away_team": "BOS",
+                "venue": "Yankee Stadium",
+                "status": "final",
+                "f5_home_score": 0,
+                "f5_away_score": 0,
+                "final_home_score": 0,
+                "final_away_score": 0,
+                "abs_active": True,
+            }
+        ]
+    ).to_parquet(training_path, index=False)
+
+    raw_games = [
+        {
+            "gameView": {
+                "gameId": 222,
+                "startDate": "2025-04-03T19:35:00Z",
+                "homeTeam": {"fullName": "New York Yankees"},
+                "awayTeam": {"fullName": "Boston Red Sox"},
+            },
+            "oddsViews": [
+                {
+                    "sportsbook": "Caesars",
+                    "openingLine": {"homeOdds": -110, "awayOdds": 100},
+                    "currentLine": {"homeOdds": -10000, "awayOdds": 2800},
+                }
+            ],
+        }
+    ]
+
+    normalized, unmatched = normalize_sbr_f5_moneyline(raw_games, training_path=training_path)
+
+    assert unmatched.empty
+    assert len(normalized) == 1
+    assert normalized["is_opening"].tolist() == [True]
+
+
+def test_normalize_sbr_f5_runline_carries_points(tmp_path: Path) -> None:
+    training_path = tmp_path / "training.parquet"
+    pd.DataFrame(
+        [
+            {
+                "game_pk": 901,
+                "season": 2024,
+                "game_date": "2024-04-01",
+                "scheduled_start": "2024-04-01T19:05:00Z",
+                "home_team": "NYY",
+                "away_team": "BOS",
+                "venue": "Yankee Stadium",
+                "status": "final",
+                "f5_home_score": 0,
+                "f5_away_score": 0,
+                "final_home_score": 0,
+                "final_away_score": 0,
+                "abs_active": True,
+            }
+        ]
+    ).to_parquet(training_path, index=False)
+
+    raw_games = [
+        {
+            "gameView": {
+                "gameId": 1234,
+                "startDate": "2024-04-01T19:05:00Z",
+                "homeTeam": {"fullName": "New York Yankees"},
+                "awayTeam": {"fullName": "Boston Red Sox"},
+            },
+            "oddsViews": [
+                {
+                    "sportsbook": "Bovada",
+                    "openingLine": {
+                        "homeOdds": 105,
+                        "awayOdds": -125,
+                        "homeSpread": 0.5,
+                        "awaySpread": -0.5,
+                    },
+                    "currentLine": {
+                        "homeOdds": 115,
+                        "awayOdds": -135,
+                        "homeSpread": 1.5,
+                        "awaySpread": -1.5,
+                    },
+                }
+            ],
+        }
+    ]
+
+    normalized, unmatched = normalize_sbr_f5_runline(raw_games, training_path=training_path)
+
+    assert unmatched.empty
+    assert len(normalized) == 2
+    assert set(normalized["market_type"]) == {"f5_rl"}
+    assert set(normalized["book_name"]) == {"sbr:bovada"}
+    assert normalized.loc[normalized["is_opening"], "home_point"].iloc[0] == pytest.approx(0.5)
+    assert normalized.loc[~normalized["is_opening"], "away_point"].iloc[0] == pytest.approx(-1.5)

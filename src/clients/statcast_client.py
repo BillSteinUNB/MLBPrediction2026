@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import os
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -24,6 +25,8 @@ from pybaseball.team_game_logs import get_table as _pybaseball_team_game_logs_ta
 
 from src.config import _load_settings_yaml
 
+
+logger = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RAW_DATA_ROOT = REPO_ROOT / "data" / "raw"
@@ -192,7 +195,13 @@ def fetch_pitcher_stats(
     if parquet_path.exists() and not refresh:
         return pd.read_parquet(parquet_path)
 
-    dataframe = _stringify_columns(pitching_stats(season, qual=min_ip).copy())
+    try:
+        dataframe = _stringify_columns(pitching_stats(season, qual=min_ip).copy())
+    except Exception:
+        if season < datetime.now().year:
+            raise
+        logger.info("No pitching leaderboard available yet for %s; returning empty frame", season)
+        dataframe = pd.DataFrame()
     _write_parquet(dataframe, parquet_path)
     return dataframe
 
@@ -213,7 +222,13 @@ def fetch_batting_stats(
     if parquet_path.exists() and not refresh:
         return pd.read_parquet(parquet_path)
 
-    dataframe = _stringify_columns(batting_stats(season, qual=min_pa).copy())
+    try:
+        dataframe = _stringify_columns(batting_stats(season, qual=min_pa).copy())
+    except Exception:
+        if season < datetime.now().year:
+            raise
+        logger.info("No batting leaderboard available yet for %s; returning empty frame", season)
+        dataframe = pd.DataFrame()
     _write_parquet(dataframe, parquet_path)
     return dataframe
 
@@ -239,9 +254,15 @@ def fetch_fielding_stats(
     if cached_frame is not None:
         return cached_frame
 
-    fangraphs_frame = _stringify_columns(
-        fielding_stats(season, qual=UNQUALIFIED_LEADERBOARD_MINIMUM).copy()
-    )
+    try:
+        fangraphs_frame = _stringify_columns(
+            fielding_stats(season, qual=UNQUALIFIED_LEADERBOARD_MINIMUM).copy()
+        )
+    except Exception:
+        if season < datetime.now().year:
+            raise
+        logger.info("No fielding leaderboard available yet for %s; returning empty frame", season)
+        fangraphs_frame = pd.DataFrame()
     oaa_frame = _load_oaa_totals(season).rename(columns={"OAA": "statcast_oaa"})
 
     merged = fangraphs_frame.copy()
@@ -343,6 +364,19 @@ def fetch_team_game_logs(
             team=resolved_team,
             log_type=log_type,
         )
+    except RuntimeError as exc:
+        if (
+            "Table with expected id not found on scraped page." not in str(exc)
+            or season < datetime.now().year
+        ):
+            raise
+        logger.info(
+            "No %s team game logs available yet for %s %s; returning empty frame",
+            log_type,
+            resolved_team,
+            season,
+        )
+        dataframe = pd.DataFrame()
     dataframe = _stringify_columns(dataframe)
     _write_parquet(dataframe, parquet_path)
     return dataframe

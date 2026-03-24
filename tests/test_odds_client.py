@@ -114,6 +114,29 @@ def test_devig_probabilities_sum_to_one() -> None:
     assert home_fair + away_fair == pytest.approx(1.0)
 
 
+def test_build_estimated_f5_ml_snapshots_creates_labeled_preview_odds() -> None:
+    from src.clients.odds_client import build_estimated_f5_ml_snapshots
+
+    snapshots = build_estimated_f5_ml_snapshots(
+        {
+            12345: {
+                "full_game_ml_pairs": [
+                    {"book_name": "DraftKings", "home_odds": -150, "away_odds": 130}
+                ]
+            }
+        },
+        fetched_at=datetime(2026, 4, 15, 16, 0, tzinfo=UTC),
+    )
+
+    assert len(snapshots) == 1
+    snapshot = snapshots[0]
+    assert snapshot.game_pk == 12345
+    assert snapshot.market_type == "f5_ml"
+    assert snapshot.book_name == "estimate:full-game:DraftKings"
+    assert snapshot.home_odds > -150
+    assert snapshot.away_odds < 130
+
+
 def test_fetch_mlb_odds_returns_snapshots_and_updates_usage_tracking(tmp_path: Path) -> None:
     from src.clients.odds_client import fetch_mlb_odds
 
@@ -168,10 +191,17 @@ def test_fetch_mlb_odds_returns_snapshots_and_updates_usage_tracking(tmp_path: P
     assert len(snapshots) == 2
     assert {snapshot.market_type for snapshot in snapshots} == {"f5_ml", "f5_rl"}
     assert {snapshot.game_pk for snapshot in snapshots} == {12345}
+    rl_snapshot = next(snapshot for snapshot in snapshots if snapshot.market_type == "f5_rl")
+    assert rl_snapshot.home_point == pytest.approx(-0.5)
+    assert rl_snapshot.away_point == pytest.approx(0.5)
 
     with sqlite3.connect(db_path) as connection:
         stored_snapshots = connection.execute(
             "SELECT COUNT(*) FROM odds_snapshots WHERE game_pk = ?",
+            (12345,),
+        ).fetchone()
+        stored_points = connection.execute(
+            "SELECT home_point, away_point FROM odds_snapshots WHERE game_pk = ? AND market_type = 'f5_rl'",
             (12345,),
         ).fetchone()
         usage_row = connection.execute(
@@ -179,6 +209,7 @@ def test_fetch_mlb_odds_returns_snapshots_and_updates_usage_tracking(tmp_path: P
         ).fetchone()
 
     assert stored_snapshots == (2,)
+    assert stored_points == (-0.5, 0.5)
     assert usage_row == (2,)
 
 

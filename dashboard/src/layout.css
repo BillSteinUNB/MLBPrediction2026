@@ -1,10 +1,5 @@
 /* Neutral, plain CSS inspired by experiment_dashboard.html (white bg, light gray borders, Arial/sans-serif) */
 :root {
-  --bg: #ffffff;
-  --border: #e5e4e7;
-  --text: #6b6375;
-  --text-h: #08060d;
-  --muted: #9ca3af;
   --sidebar-width: 220px;
   --gap: 20px;
   --radius: 6px;
@@ -27,7 +22,8 @@
   border-right: 1px solid var(--border);
   padding: 20px;
   box-sizing: border-box;
-  background: var(--bg);
+  background: rgba(11, 18, 32, 0.82);
+  backdrop-filter: blur(12px);
   position: sticky;
   top: 0;
   align-self: flex-start;
@@ -63,12 +59,12 @@
 }
 
 .mlb-nav a:hover {
-  background: #f7f7f8;
+  background: var(--bg-hover);
   color: var(--text-h);
 }
 
 .mlb-nav a.active {
-  background: #f4f4f5;
+  background: var(--surface-2);
   color: var(--text-h);
   font-weight: 600;
   border-color: var(--border);
@@ -83,10 +79,11 @@
 
 /* Page card */
 .page {
-  background: var(--bg);
+  background: linear-gradient(180deg, rgba(16, 25, 43, 0.92), rgba(13, 20, 33, 0.94));
   border: 1px solid var(--border);
   padding: 20px;
-  border-radius: 8px;
+  border-radius: 14px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
   box-sizing: border-box;
 }
 

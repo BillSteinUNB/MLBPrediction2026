@@ -106,6 +106,64 @@ ROTOBALLER_HTML = """
 """
 
 
+ROTOWIRE_HTML = """
+<div class="lineup is-mlb not-in-slate">
+  <div class="lineup__box">
+    <div class="lineup__top">
+      <div class="lineup__teams">
+        <div class="lineup__team is-visit">
+          <div class="lineup__abbr">BOS</div>
+        </div>
+        <div class="lineup__team is-home">
+          <div class="lineup__abbr">NYY</div>
+        </div>
+      </div>
+    </div>
+    <div class="lineup__main">
+      <ul class="lineup__list is-visit">
+        <li class="lineup__player-highlight mb-0">
+          <div class="lineup__player-highlight-name">
+            <a href="/baseball/player/chris-sale-1">Chris Sale</a>
+            <span class="lineup__throws">L</span>
+          </div>
+        </li>
+        <li class="lineup__status is-expected">
+          <div class="dot is-medium is-yellow"></div>Expected Lineup
+        </li>
+        <li class="lineup__player">
+          <div class="lineup__pos">LF</div>
+          <a title="Jarren Duran" href="/baseball/player/jarren-duran-1">J. Duran</a>
+        </li>
+        <li class="lineup__player">
+          <div class="lineup__pos">3B</div>
+          <a title="Rafael Devers" href="/baseball/player/rafael-devers-1">R. Devers</a>
+        </li>
+      </ul>
+      <ul class="lineup__list is-home">
+        <li class="lineup__player-highlight mb-0">
+          <div class="lineup__player-highlight-name">
+            <a href="/baseball/player/clarke-schmidt-1">Clarke Schmidt</a>
+            <span class="lineup__throws">R</span>
+          </div>
+        </li>
+        <li class="lineup__status is-expected">
+          <div class="dot is-medium is-yellow"></div>Expected Lineup
+        </li>
+        <li class="lineup__player">
+          <div class="lineup__pos">RF</div>
+          <a title="Aaron Judge" href="/baseball/player/aaron-judge-1">A. Judge</a>
+        </li>
+        <li class="lineup__player">
+          <div class="lineup__pos">1B</div>
+          <a title="Paul Goldschmidt" href="/baseball/player/paul-goldschmidt-1">P. Goldschmidt</a>
+        </li>
+      </ul>
+    </div>
+  </div>
+</div>
+"""
+
+
 def _schedule_payload() -> dict:
     return {
         "dates": [
@@ -206,8 +264,10 @@ def _build_transport(
     live_feed_payload: dict | None = None,
     rotogrinders_status: int = 200,
     rotoballer_status: int = 200,
+    rotowire_status: int = 200,
     rotogrinders_html: str = ROTROGRINDERS_HTML,
     rotoballer_html: str = "<html></html>",
+    rotowire_html: str = "<html></html>",
     pitcher_logs: dict[int, dict] | None = None,
     request_log: list[str] | None = None,
 ) -> httpx.MockTransport:
@@ -223,6 +283,8 @@ def _build_transport(
             return httpx.Response(rotogrinders_status, text=rotogrinders_html)
         if request.url.host == "www.rotoballer.com":
             return httpx.Response(rotoballer_status, text=rotoballer_html)
+        if request.url.host == "www.rotowire.com" and request.url.path == "/baseball/daily-lineups.php":
+            return httpx.Response(rotowire_status, text=rotowire_html)
         if request.url.path == "/api/v1.1/game/12345/feed/live":
             return httpx.Response(200, json=live_feed_payload or _live_feed_payload(home_confirmed=True, away_confirmed=True, home_pitcher_id=2002))
         if request.url.path.startswith("/api/v1/people/") and request.url.path.endswith("/stats"):
@@ -274,6 +336,20 @@ def test_parse_rotoballer_html_extracts_projected_lineups_and_ignores_unknown_te
     assert [player.player_name for player in parsed["BOS"].players] == ["Jarren Duran", "Rafael Devers"]
     assert parsed["NYY"].projected_starting_pitcher_id == 1003
     assert [player.batting_order for player in parsed["NYY"].players] == [1, 2]
+
+
+def test_parse_rotowire_html_extracts_projected_lineups(
+    player_id_resolver: Callable[[str], int | None],
+) -> None:
+    from src.clients.lineup_client import _parse_rotowire_html
+
+    parsed = _parse_rotowire_html(ROTOWIRE_HTML, player_id_resolver=player_id_resolver)
+
+    assert set(parsed) == {"BOS", "NYY"}
+    assert parsed["BOS"].projected_starting_pitcher_id == 1001
+    assert [player.player_name for player in parsed["BOS"].players] == ["Jarren Duran", "Rafael Devers"]
+    assert parsed["NYY"].projected_starting_pitcher_id == 1003
+    assert [player.player_name for player in parsed["NYY"].players] == ["Aaron Judge", "Paul Goldschmidt"]
 
 
 def test_fetch_confirmed_lineups_prefers_primary_projection_and_detects_starter_change(
@@ -466,6 +542,46 @@ def test_fetch_confirmed_lineups_skips_projected_sources_for_non_matching_date(
     assert all(lineup.players == [] for lineup in lineups)
     assert not any(url.endswith("/lineups/mlb") for url in request_log)
     assert not any("rotoballer.com" in url for url in request_log)
+    assert not any("rotowire.com" in url for url in request_log)
+
+
+def test_fetch_confirmed_lineups_uses_rotowire_for_tomorrow_projection(
+    monkeypatch: pytest.MonkeyPatch,
+    player_id_resolver: Callable[[str], int | None],
+) -> None:
+    from src.clients.lineup_client import fetch_confirmed_lineups
+
+    monkeypatch.setattr(
+        "src.clients.lineup_client._projected_source_game_date",
+        lambda: "2025-09-15",
+    )
+    monkeypatch.setattr(
+        "src.clients.lineup_client._projected_source_tomorrow_date",
+        lambda: "2025-09-16",
+    )
+
+    transport = _build_transport(
+        rotowire_html=ROTOWIRE_HTML,
+        live_feed_payload=_live_feed_payload(home_confirmed=False, away_confirmed=False, home_pitcher_id=2002),
+        pitcher_logs={
+            1001: _pitcher_game_log_payload("5.0", "6.0"),
+            1003: _pitcher_game_log_payload("4.0", "4.0"),
+        },
+    )
+
+    with httpx.Client(transport=transport, base_url="https://statsapi.mlb.com") as client:
+        lineups = fetch_confirmed_lineups(
+            "2025-09-16",
+            client=client,
+            player_id_resolver=player_id_resolver,
+        )
+
+    lineup_by_team = {lineup.team: lineup for lineup in lineups}
+    assert lineup_by_team["BOS"].source == "rotowire"
+    assert lineup_by_team["NYY"].source == "rotowire"
+    assert lineup_by_team["BOS"].confirmed is False
+    assert [player.player_id for player in lineup_by_team["BOS"].players] == [8001, 8002]
+    assert lineup_by_team["NYY"].projected_starting_pitcher_id == 1003
 
 
 def test_fetch_confirmed_lineups_handles_rotoballer_parse_failure_gracefully(

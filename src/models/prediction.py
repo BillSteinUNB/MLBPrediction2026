@@ -12,4 +12,8 @@ class Prediction(ModelBase):
     f5_ml_away_prob: Probability
     f5_rl_home_prob: Probability
     f5_rl_away_prob: Probability
+    projected_f5_home_runs: float | None = None
+    projected_f5_away_runs: float | None = None
+    projected_f5_total_runs: float | None = None
+    projected_f5_home_margin: float | None = None
     predicted_at: UtcDatetime

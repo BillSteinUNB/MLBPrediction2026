@@ -41,8 +41,8 @@ const FeatureImportance: React.FC<FeatureImportanceProps> = ({ title, features, 
     };
 
     const layout: Partial<Plotly.Layout> = {
-      title,
-      xaxis: { title: 'Importance' },
+      title: { text: title },
+      xaxis: { title: { text: 'Importance' } },
       autosize: true,
       margin: { t: 40, l: 150, r: 20, b: 60 },
     };

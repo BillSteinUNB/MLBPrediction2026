@@ -157,3 +157,33 @@ export function getLaneRuns(
 ): Promise<t.RunSummary[]> {
   return fetchGet(`/lanes/${laneId}/runs?skip=${skip}&limit=${limit}`)
 }
+
+/**
+ * GET /slate - Run the dry-run daily pipeline for a target date.
+ */
+export function getSlate(pipelineDate?: string): Promise<t.SlateResponse> {
+  const params = new URLSearchParams()
+  if (pipelineDate) {
+    params.set('pipeline_date', pipelineDate)
+  }
+  const query = params.toString()
+  return fetchGet(`/slate${query ? `?${query}` : ''}`)
+}
+
+export function getLiveSeasonSummary(
+  season: number = 2026
+): Promise<t.LiveSeasonSummaryResponse> {
+  return fetchGet(`/live-season/summary?season=${season}`)
+}
+
+export function getLiveSeasonGames(
+  season: number = 2026,
+  pipelineDate?: string
+): Promise<t.LiveSeasonGameResponse[]> {
+  const params = new URLSearchParams()
+  params.set('season', String(season))
+  if (pipelineDate) {
+    params.set('pipeline_date', pipelineDate)
+  }
+  return fetchGet(`/live-season/games?${params.toString()}`)
+}

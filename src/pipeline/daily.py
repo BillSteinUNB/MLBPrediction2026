@@ -7,14 +7,21 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
-from typing import Any, Callable, Literal, Protocol, Sequence
+from typing import Any, Callable, Literal, Mapping, Protocol, Sequence
 
 import httpx
 import joblib
 import pandas as pd
 
 from src.clients.lineup_client import fetch_confirmed_lineups
-from src.clients.odds_client import fetch_mlb_odds, freeze_odds
+from src.clients.odds_client import (
+    build_estimated_f5_ml_snapshots,
+    devig_probabilities,
+    fetch_mlb_full_game_odds_context,
+    fetch_mlb_odds,
+    fetch_sbr_f5_odds,
+    freeze_odds,
+)
 from src.clients.weather_client import fetch_game_weather
 from src.config import _load_settings_yaml
 from src.db import DEFAULT_DB_PATH, init_db
@@ -32,6 +39,8 @@ from src.model.data_builder import (
     _prepare_schedule_frame,
     build_live_feature_frame,
 )
+from src.model.market_recalibration import shrink_probability_toward_market
+from src.model.margin_pricing import margin_to_cover_probability
 from src.model.xgboost_trainer import DEFAULT_MODEL_OUTPUT_DIR
 from src.models.bet import BetDecision
 from src.models.lineup import Lineup
@@ -55,6 +64,27 @@ from src.ops.performance_tracker import sync_closing_lines_from_snapshots
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_PROJECTED_F5_TOTAL_RUNS = 4.6
+DEFAULT_OFFICIAL_MIN_BET_ODDS = -175
+DEFAULT_OFFICIAL_MAX_BET_ODDS = 150
+DEFAULT_OFFICIAL_MAX_TRUSTED_EDGE = 0.15
+DEFAULT_OFFICIAL_ML_MIN_EDGE = 0.08
+DEFAULT_OFFICIAL_RL_MIN_EDGE = 0.06
+DEFAULT_OFFICIAL_RL_SELECTION_PENALTY = 0.02
+DEFAULT_OFFICIAL_EDGE_SCALE_CAP = 0.05
+DEFAULT_OFFICIAL_MIN_UNITS = 0.25
+DEFAULT_OFFICIAL_MAX_UNITS = 3.0
+DEFAULT_OFFICIAL_ML_MARKET_BASE_MULTIPLIER = 0.70
+DEFAULT_OFFICIAL_ML_MARKET_PLUS_MONEY_MULTIPLIER = 1.0
+DEFAULT_OFFICIAL_ML_MARKET_HIGH_EDGE_THRESHOLD = 0.10
+DEFAULT_OFFICIAL_ML_MARKET_HIGH_EDGE_MULTIPLIER = 0.60
+DEFAULT_RLV2_DIRECT_EXPERIMENTS: tuple[str, ...] = ("rlv2-direct-longhorizon", "rlv2-direct-tuned")
+DEFAULT_RLV2_MARGIN_EXPERIMENTS: tuple[str, ...] = ("rlv2-margin-longhorizon", "rlv2-margin-tuned")
+DEFAULT_RLV2_BLEND_EVAL_PATHS: tuple[tuple[str, str], ...] = (
+    ("rlv2-blend-longhorizon", "rl_v2_blend_eval_2021_2025.json"),
+    ("rlv2-blend-tuned", "rl_v2_blend_eval_2025.json"),
+)
+
 _SCHEDULE_CIRCUIT = CircuitBreaker(name="schedule")
 _HISTORY_CIRCUIT = CircuitBreaker(name="history")
 _LINEUPS_CIRCUIT = CircuitBreaker(name="lineups")
@@ -69,6 +99,7 @@ ScheduleFetcher = Callable[[date, Mode], pd.DataFrame]
 HistoryFetcher = Callable[[int, date], pd.DataFrame]
 LineupsFetcher = Callable[[str], list[Lineup]]
 OddsFetcher = Callable[[date, Mode, str | Path], list[OddsSnapshot]]
+FullGameOddsContextFetcher = Callable[[date, Mode, str | Path], dict[int, dict[str, Any]]]
 FeatureFrameBuilder = Callable[..., pd.DataFrame]
 
 
@@ -94,10 +125,37 @@ class PipelineDependencies:
     history_fetcher: HistoryFetcher | None = None
     lineups_fetcher: LineupsFetcher | None = None
     odds_fetcher: OddsFetcher | None = None
+    full_game_odds_fetcher: FullGameOddsContextFetcher | None = None
     feature_frame_builder: FeatureFrameBuilder | None = None
     prediction_engine: PredictionEngine | None = None
     notifier: PipelineNotifier | None = None
     weather_fetcher: Callable[..., Any] | None = fetch_game_weather
+
+
+@dataclass(frozen=True, slots=True)
+class StructuredModelBundle:
+    model: Any
+    feature_columns: list[str]
+    model_version: str
+    metadata_path: Path
+    extra_metadata: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class LegacyModelBundle:
+    model: Any
+    model_path: Path
+    metadata_path: Path
+    model_version: str
+    target_key: Literal["ml", "rl"]
+    variant: Literal["base", "stacking", "calibrated"]
+    feature_columns: list[str]
+    raw_meta_feature_columns: list[str]
+    holdout_season: int
+    holdout_log_loss: float
+    holdout_roc_auc: float | None
+    holdout_accuracy: float | None
+    holdout_brier: float | None
 
 
 @dataclass(slots=True)
@@ -107,9 +165,12 @@ class GameProcessingResult:
     status: Literal["pick", "no_pick", "error"]
     prediction: Prediction | None = None
     selected_decision: BetDecision | None = None
+    forced_decision: BetDecision | None = None
     no_pick_reason: str | None = None
     error_message: str | None = None
     notified: bool = False
+    paper_fallback: bool = False
+    input_status: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -120,9 +181,14 @@ class GameProcessingResult:
             "selected_decision": (
                 self.selected_decision.model_dump(mode="json") if self.selected_decision else None
             ),
+            "forced_decision": (
+                self.forced_decision.model_dump(mode="json") if self.forced_decision else None
+            ),
             "no_pick_reason": self.no_pick_reason,
             "error_message": self.error_message,
             "notified": self.notified,
+            "paper_fallback": self.paper_fallback,
+            "input_status": self.input_status,
         }
 
 
@@ -173,9 +239,20 @@ class DiscordNotifier:
 class ArtifactOrFallbackPredictionEngine:
     def __init__(self, model_dir: str | Path = DEFAULT_MODEL_OUTPUT_DIR) -> None:
         self.model_dir = Path(model_dir)
-        self.ml_model_path, self.rl_model_path, self.model_version = self._resolve_model_bundle()
-        self.ml_model = self._load_model(self.ml_model_path)
-        self.rl_model = self._load_model(self.rl_model_path)
+        self.ml_bundle, self.rl_bundle, self.model_version = self._resolve_model_bundle()
+        self.ml_model_path = self.ml_bundle.model_path if self.ml_bundle is not None else None
+        self.rl_model_path = self.rl_bundle.model_path if self.rl_bundle is not None else None
+        self.ml_model = self.ml_bundle.model if self.ml_bundle is not None else None
+        self.rl_model = self.rl_bundle.model if self.rl_bundle is not None else None
+        self.rlv2_direct = self._load_structured_model_bundle(
+            experiment_names=DEFAULT_RLV2_DIRECT_EXPERIMENTS,
+            model_prefix="f5_rl_direct_model",
+        )
+        self.rlv2_margin = self._load_structured_model_bundle(
+            experiment_names=DEFAULT_RLV2_MARGIN_EXPERIMENTS,
+            model_prefix="f5_margin_v2_model",
+        )
+        self.rlv2_blend_weight = self._resolve_rlv2_blend_weight()
 
     def predict(self, inference_frame: pd.DataFrame) -> Prediction:
         resolved_frame = inference_frame.copy().reset_index(drop=True)
@@ -186,15 +263,24 @@ class ArtifactOrFallbackPredictionEngine:
         prediction_time = datetime.now(UTC)
         resolved_frame = self._ensure_required_columns(resolved_frame)
 
-        if self.ml_model is not None and self.rl_model is not None:
-            ml_home_probability = float(self.ml_model.predict_calibrated(resolved_frame)[0])
-            rl_home_probability = float(self.rl_model.predict_calibrated(resolved_frame)[0])
+        if self.ml_bundle is not None and self.rl_bundle is not None:
+            ml_home_probability = float(self._predict_legacy_home_probability(self.ml_bundle, resolved_frame))
+            rl_home_probability = float(self._predict_legacy_home_probability(self.rl_bundle, resolved_frame))
         else:
             ml_home_probability = _fallback_ml_home_probability(resolved_frame.iloc[0])
             rl_home_probability = _fallback_rl_home_probability(
                 resolved_frame.iloc[0],
                 ml_home_probability=ml_home_probability,
             )
+
+        projected_home_margin = self._predict_rlv2_margin_value(resolved_frame)
+        if projected_home_margin is None:
+            projected_home_margin = float((ml_home_probability - 0.5) * 2.0)
+        projected_total_runs = self._estimate_projected_f5_total_runs(resolved_frame.iloc[0])
+        projected_home_runs, projected_away_runs = _margin_total_to_team_runs(
+            home_margin=projected_home_margin,
+            total_runs=projected_total_runs,
+        )
 
         return Prediction(
             game_pk=game_pk,
@@ -203,72 +289,483 @@ class ArtifactOrFallbackPredictionEngine:
             f5_ml_away_prob=1.0 - ml_home_probability,
             f5_rl_home_prob=rl_home_probability,
             f5_rl_away_prob=1.0 - rl_home_probability,
+            projected_f5_home_runs=projected_home_runs,
+            projected_f5_away_runs=projected_away_runs,
+            projected_f5_total_runs=projected_total_runs,
+            projected_f5_home_margin=projected_home_margin,
             predicted_at=prediction_time,
         )
+
+    def build_candidate_decisions(
+        self,
+        *,
+        inference_frame: pd.DataFrame,
+        prediction: Prediction,
+        snapshots: Sequence[OddsSnapshot],
+        db_path: str | Path,
+    ) -> list[BetDecision]:
+        candidates: list[BetDecision] = []
+        resolved_frame = inference_frame.copy().reset_index(drop=True)
+        legacy_frame = self._ensure_required_columns(resolved_frame)
+
+        for snapshot in snapshots:
+            if snapshot.market_type == "f5_ml":
+                adjusted_home_probability, adjusted_away_probability = _recalibrate_ml_market_pair(
+                    home_probability=float(prediction.f5_ml_home_prob),
+                    away_probability=float(prediction.f5_ml_away_prob),
+                    home_odds=snapshot.home_odds,
+                    away_odds=snapshot.away_odds,
+                )
+                candidates.extend(
+                    self._build_market_candidates(
+                        game_pk=prediction.game_pk,
+                        market_type=snapshot.market_type,
+                        home_probability=adjusted_home_probability,
+                        away_probability=adjusted_away_probability,
+                        snapshot=snapshot,
+                        db_path=db_path,
+                        source_model="legacy_f5_ml",
+                        source_model_version=self.model_version,
+                    )
+                )
+                continue
+
+            legacy_home_probability = float(prediction.f5_rl_home_prob)
+            legacy_source_model = "legacy_f5_rl"
+            if _is_ml_equivalent_f5_runline(snapshot):
+                legacy_home_probability = float(prediction.f5_ml_home_prob)
+                legacy_source_model = "legacy_f5_ml_equiv"
+
+            candidates.extend(
+                self._build_market_candidates(
+                    game_pk=prediction.game_pk,
+                    market_type=snapshot.market_type,
+                    home_probability=legacy_home_probability,
+                    away_probability=1.0 - legacy_home_probability,
+                    snapshot=snapshot,
+                    db_path=db_path,
+                    source_model=legacy_source_model,
+                    source_model_version=self.model_version,
+                )
+            )
+
+            direct_probability = self._predict_rlv2_direct_home_probability(
+                inference_frame=legacy_frame,
+                snapshot=snapshot,
+            )
+            margin_probability = self._predict_rlv2_margin_home_probability(
+                inference_frame=legacy_frame,
+                snapshot=snapshot,
+            )
+            if direct_probability is not None:
+                candidates.extend(
+                    self._build_market_candidates(
+                        game_pk=prediction.game_pk,
+                        market_type=snapshot.market_type,
+                        home_probability=direct_probability,
+                        away_probability=1.0 - direct_probability,
+                        snapshot=snapshot,
+                        db_path=db_path,
+                        source_model="rlv2_direct",
+                        source_model_version=self.rlv2_direct.model_version if self.rlv2_direct else None,
+                    )
+                )
+            if margin_probability is not None:
+                candidates.extend(
+                    self._build_market_candidates(
+                        game_pk=prediction.game_pk,
+                        market_type=snapshot.market_type,
+                        home_probability=margin_probability,
+                        away_probability=1.0 - margin_probability,
+                        snapshot=snapshot,
+                        db_path=db_path,
+                        source_model="rlv2_margin",
+                        source_model_version=self.rlv2_margin.model_version if self.rlv2_margin else None,
+                    )
+                )
+            if direct_probability is not None and margin_probability is not None:
+                blend_probability = (
+                    self.rlv2_blend_weight * direct_probability
+                    + (1.0 - self.rlv2_blend_weight) * margin_probability
+                )
+                candidates.extend(
+                    self._build_market_candidates(
+                        game_pk=prediction.game_pk,
+                        market_type=snapshot.market_type,
+                        home_probability=blend_probability,
+                        away_probability=1.0 - blend_probability,
+                        snapshot=snapshot,
+                        db_path=db_path,
+                        source_model="rlv2_blend",
+                        source_model_version=(
+                            f"direct={self.rlv2_direct.model_version if self.rlv2_direct else 'na'};"
+                            f"margin={self.rlv2_margin.model_version if self.rlv2_margin else 'na'};"
+                            f"weight={self.rlv2_blend_weight:.2f}"
+                        ),
+                    )
+                )
+
+        return candidates
 
     def _ensure_required_columns(self, inference_frame: pd.DataFrame) -> pd.DataFrame:
         resolved = inference_frame.copy()
         required_columns: set[str] = set()
-        for model in (self.ml_model, self.rl_model):
-            if model is None:
+        for bundle in (self.ml_bundle, self.rl_bundle):
+            if bundle is None:
                 continue
-            required_columns.update(model.stacking_model.base_feature_columns)
-            required_columns.update(model.stacking_model.raw_meta_feature_columns)
+            required_columns.update(bundle.feature_columns)
+            required_columns.update(bundle.raw_meta_feature_columns)
 
-        for column in required_columns:
-            if column not in resolved.columns:
-                resolved[column] = _default_feature_fill_value(column)
+        missing_columns = {
+            column: _default_feature_fill_value(column)
+            for column in required_columns
+            if column not in resolved.columns
+        }
+        if missing_columns:
+            resolved = pd.concat(
+                [resolved, pd.DataFrame([missing_columns], index=resolved.index)],
+                axis=1,
+            )
 
         return resolved
 
-    def _resolve_model_bundle(self) -> tuple[Path | None, Path | None, str]:
-        ml_candidates = self._collect_model_candidates("f5_ml_calibrated_model")
-        rl_candidates = self._collect_model_candidates("f5_rl_calibrated_model")
-        shared_versions = set(ml_candidates) & set(rl_candidates)
+    def _resolve_model_bundle(
+        self,
+    ) -> tuple[LegacyModelBundle | None, LegacyModelBundle | None, str]:
+        ml_bundle = self._resolve_best_legacy_bundle("ml")
+        rl_bundle = self._resolve_best_legacy_bundle("rl")
 
-        if not shared_versions:
+        if ml_bundle is None or rl_bundle is None:
             logger.warning(
-                "No complete calibrated model bundle found under %s; daily pipeline will use baseline fallback",
+                "No complete legacy model bundle found under %s; daily pipeline will use baseline fallback",
                 self.model_dir,
             )
             return None, None, "baseline-fallback"
 
-        selected_version = max(
-            shared_versions,
-            key=lambda version: (
-                max(
-                    ml_candidates[version].stat().st_mtime,
-                    rl_candidates[version].stat().st_mtime,
-                ),
-                version,
-            ),
+        resolved_version = (
+            f"ml={ml_bundle.model_version}:{ml_bundle.variant};"
+            f"rl={rl_bundle.model_version}:{rl_bundle.variant}"
         )
-        ml_model_path = ml_candidates[selected_version]
-        rl_model_path = rl_candidates[selected_version]
         logger.info(
-            "Loaded calibrated model bundle version=%s ml=%s rl=%s",
-            selected_version,
-            ml_model_path,
-            rl_model_path,
+            "Loaded legacy model bundles version=%s ml=%s (%s) rl=%s (%s)",
+            resolved_version,
+            ml_bundle.model_path,
+            ml_bundle.variant,
+            rl_bundle.model_path,
+            rl_bundle.variant,
         )
-        return ml_model_path, rl_model_path, selected_version
+        return ml_bundle, rl_bundle, resolved_version
 
-    def _collect_model_candidates(self, prefix: str) -> dict[str, Path]:
-        candidates: dict[str, Path] = {}
-        pattern = f"{prefix}_*.joblib"
-        for path in self.model_dir.rglob(pattern):
-            version = path.name.removeprefix(f"{prefix}_").removesuffix(".joblib")
-            current = candidates.get(version)
-            if current is None or path.stat().st_mtime > current.stat().st_mtime:
-                candidates[version] = path
-        return candidates
+    def _resolve_best_legacy_bundle(self, target_key: Literal["ml", "rl"]) -> LegacyModelBundle | None:
+        resolved_candidates: list[LegacyModelBundle] = []
+        target_prefix = f"f5_{target_key}"
+        variant_patterns: tuple[tuple[str, Literal["base", "stacking", "calibrated"]], ...] = (
+            (f"{target_prefix}_model_*.joblib", "base"),
+            (f"{target_prefix}_stacking_model_*.joblib", "stacking"),
+            (f"{target_prefix}_calibrated_model_*.joblib", "calibrated"),
+        )
 
-    def _load_model(self, path: Path | None) -> CalibratedStackingModel | None:
-        if path is None:
+        for pattern, variant in variant_patterns:
+            for model_path in self.model_dir.rglob(pattern):
+                candidate = self._load_legacy_model_bundle(
+                    model_path=model_path,
+                    target_key=target_key,
+                    variant=variant,
+                )
+                if candidate is not None:
+                    resolved_candidates.append(candidate)
+
+        if not resolved_candidates:
             return None
 
-        loaded = joblib.load(path)
-        return loaded if isinstance(loaded, CalibratedStackingModel) else None
+        latest_holdout_season = max(candidate.holdout_season for candidate in resolved_candidates)
+        season_candidates = [
+            candidate for candidate in resolved_candidates if candidate.holdout_season == latest_holdout_season
+        ]
+        return min(
+            season_candidates,
+            key=lambda candidate: (
+                candidate.holdout_log_loss,
+                float("inf") if candidate.holdout_brier is None else candidate.holdout_brier,
+                -(candidate.holdout_roc_auc if candidate.holdout_roc_auc is not None else float("-inf")),
+                -(candidate.holdout_accuracy if candidate.holdout_accuracy is not None else float("-inf")),
+                _legacy_variant_priority(candidate.variant),
+                -candidate.model_path.stat().st_mtime,
+            ),
+        )
+
+    def _load_legacy_model_bundle(
+        self,
+        *,
+        model_path: Path,
+        target_key: Literal["ml", "rl"],
+        variant: Literal["base", "stacking", "calibrated"],
+    ) -> LegacyModelBundle | None:
+        metadata_path = model_path.with_suffix(".metadata.json")
+        if not metadata_path.exists():
+            return None
+
+        try:
+            metadata_payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return None
+
+        holdout_metrics = metadata_payload.get("holdout_metrics", {})
+        if variant == "base":
+            holdout_log_loss = holdout_metrics.get("log_loss")
+            holdout_roc_auc = holdout_metrics.get("roc_auc")
+            holdout_accuracy = holdout_metrics.get("accuracy")
+            holdout_brier = holdout_metrics.get("brier")
+            feature_columns = list(metadata_payload.get("feature_columns", []))
+            raw_meta_feature_columns: list[str] = []
+        elif variant == "stacking":
+            holdout_log_loss = holdout_metrics.get("stacked_log_loss")
+            holdout_roc_auc = holdout_metrics.get("stacked_roc_auc")
+            holdout_accuracy = holdout_metrics.get("stacked_accuracy")
+            holdout_brier = holdout_metrics.get("stacked_brier")
+            feature_columns = list(metadata_payload.get("feature_columns", []))
+            raw_meta_feature_columns = list(metadata_payload.get("raw_meta_feature_columns", []))
+        else:
+            holdout_log_loss = holdout_metrics.get("calibrated_log_loss")
+            holdout_roc_auc = holdout_metrics.get("calibrated_roc_auc")
+            holdout_accuracy = holdout_metrics.get("calibrated_accuracy")
+            holdout_brier = holdout_metrics.get("calibrated_brier")
+            loaded_model = joblib.load(model_path)
+            if not isinstance(loaded_model, CalibratedStackingModel):
+                return None
+            return LegacyModelBundle(
+                model=loaded_model,
+                model_path=model_path,
+                metadata_path=metadata_path,
+                model_version=str(metadata_payload.get("model_version", model_path.stem)),
+                target_key=target_key,
+                variant=variant,
+                feature_columns=list(loaded_model.stacking_model.base_feature_columns),
+                raw_meta_feature_columns=list(loaded_model.stacking_model.raw_meta_feature_columns),
+                holdout_season=int(metadata_payload.get("holdout_season", 0)),
+                holdout_log_loss=float(holdout_log_loss),
+                holdout_roc_auc=(
+                    None if holdout_roc_auc is None else float(holdout_roc_auc)
+                ),
+                holdout_accuracy=(
+                    None if holdout_accuracy is None else float(holdout_accuracy)
+                ),
+                holdout_brier=None if holdout_brier is None else float(holdout_brier),
+            )
+
+        if holdout_log_loss is None:
+            return None
+
+        loaded_model = joblib.load(model_path)
+        return LegacyModelBundle(
+            model=loaded_model,
+            model_path=model_path,
+            metadata_path=metadata_path,
+            model_version=str(metadata_payload.get("model_version", model_path.stem)),
+            target_key=target_key,
+            variant=variant,
+            feature_columns=feature_columns,
+            raw_meta_feature_columns=raw_meta_feature_columns,
+            holdout_season=int(metadata_payload.get("holdout_season", 0)),
+            holdout_log_loss=float(holdout_log_loss),
+            holdout_roc_auc=None if holdout_roc_auc is None else float(holdout_roc_auc),
+            holdout_accuracy=None if holdout_accuracy is None else float(holdout_accuracy),
+            holdout_brier=None if holdout_brier is None else float(holdout_brier),
+        )
+
+    def _predict_legacy_home_probability(
+        self,
+        bundle: LegacyModelBundle,
+        inference_frame: pd.DataFrame,
+    ) -> float:
+        if bundle.variant == "calibrated":
+            return float(bundle.model.predict_calibrated(inference_frame)[0])
+        probability = bundle.model.predict_proba(inference_frame[bundle.feature_columns])[:, 1][0]
+        return float(probability)
+
+    def _load_structured_model_bundle(
+        self,
+        *,
+        experiment_names: Sequence[str],
+        model_prefix: str,
+    ) -> StructuredModelBundle | None:
+        for experiment_name in experiment_names:
+            experiment_dir = self.model_dir / experiment_name
+            if not experiment_dir.exists():
+                continue
+
+            model_candidates = sorted(experiment_dir.glob(f"{model_prefix}_*.joblib"))
+            if not model_candidates:
+                continue
+
+            model_path = max(model_candidates, key=lambda path: path.stat().st_mtime)
+            metadata_path = model_path.with_suffix(".metadata.json")
+            if not metadata_path.exists():
+                continue
+
+            metadata_payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+            model = joblib.load(model_path)
+            return StructuredModelBundle(
+                model=model,
+                feature_columns=list(metadata_payload.get("feature_columns", [])),
+                model_version=str(metadata_payload.get("model_version", model_path.stem)),
+                metadata_path=metadata_path,
+                extra_metadata=metadata_payload,
+            )
+        return None
+
+    def _resolve_rlv2_blend_weight(self) -> float:
+        for experiment_name, filename in DEFAULT_RLV2_BLEND_EVAL_PATHS:
+            payload_path = self.model_dir / experiment_name / filename
+            if not payload_path.exists():
+                continue
+            try:
+                payload = json.loads(payload_path.read_text(encoding="utf-8"))
+                best_blend = payload.get("best_blend") or {}
+                weight = float(best_blend.get("direct_weight", 0.8))
+                return max(0.0, min(1.0, weight))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+        return 0.8
+
+    def _predict_rlv2_direct_home_probability(
+        self,
+        *,
+        inference_frame: pd.DataFrame,
+        snapshot: OddsSnapshot,
+    ) -> float | None:
+        if self.rlv2_direct is None or snapshot.market_type != "f5_rl":
+            return None
+        frame = self._prepare_rlv2_frame(
+            inference_frame=inference_frame,
+            snapshot=snapshot,
+            feature_columns=self.rlv2_direct.feature_columns,
+        )
+        probability = self.rlv2_direct.model.predict_proba(frame[self.rlv2_direct.feature_columns])[:, 1][0]
+        return max(0.0, min(1.0, float(probability)))
+
+    def _predict_rlv2_margin_home_probability(
+        self,
+        *,
+        inference_frame: pd.DataFrame,
+        snapshot: OddsSnapshot,
+    ) -> float | None:
+        if self.rlv2_margin is None or snapshot.market_type != "f5_rl":
+            return None
+        residual_std = float(self.rlv2_margin.extra_metadata.get("residual_std", 0.0) or 0.0)
+        if residual_std <= 0:
+            return None
+        frame = self._prepare_rlv2_frame(
+            inference_frame=inference_frame,
+            snapshot=snapshot,
+            feature_columns=self.rlv2_margin.feature_columns,
+        )
+        predicted_margin = float(self.rlv2_margin.model.predict(frame[self.rlv2_margin.feature_columns])[0])
+        return margin_to_cover_probability(
+            predicted_margin=predicted_margin,
+            home_point=snapshot.home_point,
+            residual_std=residual_std,
+        )
+
+    def _predict_rlv2_margin_value(self, inference_frame: pd.DataFrame) -> float | None:
+        if self.rlv2_margin is None:
+            return None
+        frame = inference_frame.copy().reset_index(drop=True)
+        missing_columns = {
+            column: _default_feature_fill_value(column)
+            for column in self.rlv2_margin.feature_columns
+            if column not in frame.columns
+        }
+        if missing_columns:
+            frame = pd.concat(
+                [frame, pd.DataFrame([missing_columns], index=frame.index)],
+                axis=1,
+            )
+        return float(self.rlv2_margin.model.predict(frame[self.rlv2_margin.feature_columns])[0])
+
+    def _estimate_projected_f5_total_runs(self, inference_row: pd.Series) -> float:
+        park_runs_factor = float(inference_row.get("park_runs_factor", 1.0) or 1.0)
+        weather_composite = float(inference_row.get("weather_composite", 1.0) or 1.0)
+        adjusted_total = DEFAULT_PROJECTED_F5_TOTAL_RUNS * park_runs_factor * weather_composite
+        return float(min(max(adjusted_total, 2.5), 7.5))
+
+    def _prepare_rlv2_frame(
+        self,
+        *,
+        inference_frame: pd.DataFrame,
+        snapshot: OddsSnapshot,
+        feature_columns: Sequence[str],
+    ) -> pd.DataFrame:
+        frame = inference_frame.copy().reset_index(drop=True)
+        frame["posted_f5_rl_home_point"] = snapshot.home_point
+        frame["posted_f5_rl_away_point"] = snapshot.away_point
+        frame["posted_f5_rl_home_odds"] = snapshot.home_odds
+        frame["posted_f5_rl_away_odds"] = snapshot.away_odds
+        frame["posted_f5_rl_home_implied_prob"] = _american_to_implied_probability(snapshot.home_odds)
+        frame["posted_f5_rl_away_implied_prob"] = _american_to_implied_probability(snapshot.away_odds)
+        frame["posted_f5_rl_point_abs"] = abs(float(snapshot.home_point or 0.0))
+        frame["posted_f5_rl_home_is_favorite"] = (
+            1.0 if int(snapshot.home_odds) < int(snapshot.away_odds) else 0.0
+        )
+        missing_columns = {
+            column: _default_feature_fill_value(column)
+            for column in feature_columns
+            if column not in frame.columns
+        }
+        if missing_columns:
+            frame = pd.concat(
+                [frame, pd.DataFrame([missing_columns], index=frame.index)],
+                axis=1,
+            )
+        return frame
+
+    def _build_market_candidates(
+        self,
+        *,
+        game_pk: int,
+        market_type: str,
+        home_probability: float,
+        away_probability: float,
+        snapshot: OddsSnapshot,
+        db_path: str | Path,
+        source_model: str,
+        source_model_version: str | None,
+    ) -> list[BetDecision]:
+        decisions = [
+            calculate_edge(
+                game_pk=game_pk,
+                market_type=market_type,
+                side="home",
+                model_probability=home_probability,
+                home_odds=snapshot.home_odds,
+                away_odds=snapshot.away_odds,
+                home_point=snapshot.home_point,
+                away_point=snapshot.away_point,
+                book_name=snapshot.book_name,
+                db_path=db_path,
+            ),
+            calculate_edge(
+                game_pk=game_pk,
+                market_type=market_type,
+                side="away",
+                model_probability=away_probability,
+                home_odds=snapshot.home_odds,
+                away_odds=snapshot.away_odds,
+                home_point=snapshot.home_point,
+                away_point=snapshot.away_point,
+                book_name=snapshot.book_name,
+                db_path=db_path,
+            ),
+        ]
+        return [
+            decision.model_copy(
+                update={
+                    "source_model": source_model,
+                    "source_model_version": source_model_version,
+                }
+            )
+            for decision in decisions
+        ]
 
 def run_daily_pipeline(
     *,
@@ -290,6 +787,9 @@ def run_daily_pipeline(
     history_fetcher = resolved_dependencies.history_fetcher or _default_history_fetcher
     lineups_fetcher = resolved_dependencies.lineups_fetcher or _default_lineups_fetcher
     odds_fetcher = resolved_dependencies.odds_fetcher or _default_odds_fetcher
+    full_game_odds_fetcher = (
+        resolved_dependencies.full_game_odds_fetcher or _default_full_game_odds_context_fetcher
+    )
     feature_frame_builder = (
         resolved_dependencies.feature_frame_builder or _default_feature_frame_builder
     )
@@ -328,7 +828,26 @@ def run_daily_pipeline(
 
     lineups = lineups_fetcher(pipeline_day.isoformat())
     odds = odds_fetcher(pipeline_day, mode, database_path)
+    full_game_odds_context = full_game_odds_fetcher(pipeline_day, mode, database_path)
     _persist_odds_snapshots(database_path, odds)
+    if dry_run:
+        existing_f5_games = {
+            snapshot.game_pk for snapshot in odds if snapshot.market_type == "f5_ml"
+        }
+        estimated_odds = [
+            snapshot
+            for snapshot in build_estimated_f5_ml_snapshots(full_game_odds_context)
+            if snapshot.game_pk not in existing_f5_games
+        ]
+        if estimated_odds:
+            logger.info(
+                "Added %s preview-only estimated F5 odds snapshots from full-game markets",
+                len(estimated_odds),
+            )
+            odds = sorted(
+                [*odds, *estimated_odds],
+                key=lambda snapshot: (snapshot.game_pk, snapshot.book_name, snapshot.market_type),
+            )
 
     inference_frame = feature_frame_builder(
         target_date=pipeline_day,
@@ -358,37 +877,59 @@ def run_daily_pipeline(
         game = schedule_lookup[game_pk]
         matchup = f"{game['away_team']} @ {game['home_team']}"
         row_frame = inference_frame.loc[inference_frame["game_pk"] == game_pk].reset_index(drop=True)
+        input_status: dict[str, Any] | None = None
 
         try:
             if row_frame.empty:
                 raise ValueError(f"No feature row available for game_pk={game_pk}")
             inference_row = row_frame.iloc[0]
+            input_status = _build_input_status(
+                game=game,
+                inference_row=inference_row,
+                lineups_by_game_team=lineups_by_game_team,
+                odds_by_game=odds_by_game,
+                full_game_odds_context_by_game=full_game_odds_context,
+            )
 
             prediction = prediction_engine.predict(row_frame)
             _upsert_prediction(database_path, prediction)
+            candidate_decisions = _build_candidate_decisions(
+                inference_frame=row_frame,
+                prediction=prediction,
+                snapshots=odds_by_game.get(game_pk, []),
+                db_path=database_path,
+                prediction_engine=prediction_engine,
+            )
+            forced_decision = _select_forced_game_decision(candidate_decisions)
 
-            validation_reason = _validation_no_pick_reason(
+            validation_reasons = _collect_validation_reasons(
                 game=game,
                 inference_row=inference_row,
                 lineups_by_game_team=lineups_by_game_team,
                 odds_by_game=odds_by_game,
             )
-            if validation_reason is not None:
+            lineup_only_block = bool(validation_reasons) and set(validation_reasons) <= {
+                "lineup unavailable"
+            }
+            allow_paper_fallback = dry_run and lineup_only_block and bool(
+                input_status["odds_available"]
+            )
+            if validation_reasons and not allow_paper_fallback:
                 results.append(
                     GameProcessingResult(
                         game_pk=game_pk,
                         matchup=matchup,
                         status="no_pick",
                         prediction=prediction,
-                        no_pick_reason=validation_reason,
+                        forced_decision=forced_decision,
+                        no_pick_reason="; ".join(validation_reasons),
+                        input_status=input_status,
                     )
                 )
                 continue
 
             decision, kill_switch_active = _select_game_decision(
-                prediction=prediction,
-                snapshots=odds_by_game.get(game_pk, []),
-                db_path=database_path,
+                candidates=candidate_decisions,
                 current_bankroll=virtual_bankroll,
                 peak_bankroll=peak_bankroll,
             )
@@ -401,7 +942,9 @@ def run_daily_pipeline(
                         status="no_pick",
                         prediction=prediction,
                         selected_decision=decision,
+                        forced_decision=forced_decision,
                         no_pick_reason="kill-switch active",
+                        input_status=input_status,
                     )
                 )
                 continue
@@ -413,7 +956,9 @@ def run_daily_pipeline(
                         matchup=matchup,
                         status="no_pick",
                         prediction=prediction,
+                        forced_decision=forced_decision,
                         no_pick_reason="edge below threshold",
+                        input_status=input_status,
                     )
                 )
                 continue
@@ -426,6 +971,9 @@ def run_daily_pipeline(
                     status="pick",
                     prediction=prediction,
                     selected_decision=decision,
+                    forced_decision=forced_decision,
+                    paper_fallback=allow_paper_fallback,
+                    input_status=input_status,
                 )
             )
         except Exception as exc:
@@ -436,6 +984,7 @@ def run_daily_pipeline(
                     matchup=matchup,
                     status="error",
                     error_message=str(exc),
+                    input_status=input_status if "input_status" in locals() else None,
                 )
             )
 
@@ -529,10 +1078,30 @@ def _fetch_live_odds_with_retry(
     commence_time_from: datetime,
     commence_time_to: datetime,
 ) -> list[OddsSnapshot]:
-    return fetch_mlb_odds(
+    primary_snapshots = fetch_mlb_odds(
         db_path=db_path,
         commence_time_from=commence_time_from,
         commence_time_to=commence_time_to,
+    )
+    sbr_snapshots = fetch_sbr_f5_odds(
+        target_date=commence_time_from,
+        db_path=db_path,
+    )
+    if not sbr_snapshots:
+        return primary_snapshots
+
+    existing_f5_games = {
+        snapshot.game_pk for snapshot in primary_snapshots if snapshot.market_type == "f5_ml"
+    }
+    merged = list(primary_snapshots)
+    merged.extend(
+        snapshot
+        for snapshot in sbr_snapshots
+        if snapshot.game_pk not in existing_f5_games
+    )
+    return sorted(
+        merged,
+        key=lambda snapshot: (snapshot.game_pk, snapshot.book_name, snapshot.market_type),
     )
 
 
@@ -588,7 +1157,10 @@ def _default_lineups_fetcher(target_date: str) -> list[Lineup]:
 def _default_odds_fetcher(target_date: date, mode: Mode, db_path: str | Path) -> list[OddsSnapshot]:
     if mode == "prod":
         start = datetime.combine(target_date, time.min, tzinfo=UTC)
-        end = start + timedelta(days=1)
+        # MLB official game dates routinely spill past midnight UTC, especially
+        # for West Coast starts and overseas openers. Extend the fetch window so
+        # same official-date games still pick up live odds.
+        end = start + timedelta(days=1, hours=8)
         return call_with_graceful_degradation(
             lambda: _retry_with_circuit_breaker(
                 _fetch_live_odds_with_retry,
@@ -603,6 +1175,26 @@ def _default_odds_fetcher(target_date: date, mode: Mode, db_path: str | Path) ->
         )
 
     return _load_odds_from_db_for_date(db_path, target_date)
+
+
+def _default_full_game_odds_context_fetcher(
+    target_date: date, mode: Mode, db_path: str | Path
+) -> dict[int, dict[str, Any]]:
+    if mode != "prod":
+        return {}
+
+    start = datetime.combine(target_date, time.min, tzinfo=UTC)
+    end = start + timedelta(days=1, hours=8)
+    return call_with_graceful_degradation(
+        lambda: fetch_mlb_full_game_odds_context(
+            db_path=db_path,
+            commence_time_from=start,
+            commence_time_to=end,
+        ),
+        operation_name=f"full-game odds context fetch for {target_date.isoformat()}",
+        fallback=lambda _exc: {},
+        logger_=logger,
+    )
 
 
 def _default_feature_frame_builder(
@@ -631,6 +1223,7 @@ def _parse_schedule_game(game: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
     scheduled_start = _coerce_timestamp(game.get("gameDate"))
+    official_date = str(game.get("officialDate") or scheduled_start.date().isoformat())
     home_payload = game.get("teams", {}).get("home", {})
     away_payload = game.get("teams", {}).get("away", {})
     home_team = _normalize_team_code(
@@ -656,7 +1249,7 @@ def _parse_schedule_game(game: dict[str, Any]) -> dict[str, Any] | None:
     return {
         "game_pk": int(game["gamePk"]),
         "season": int(scheduled_start.year),
-        "game_date": scheduled_start.date().isoformat(),
+        "game_date": official_date,
         "scheduled_start": scheduled_start.isoformat(),
         "home_team": home_team,
         "away_team": away_team,
@@ -779,10 +1372,12 @@ def _persist_odds_snapshots(db_path: str | Path, snapshots: Sequence[OddsSnapsho
                 market_type,
                 home_odds,
                 away_odds,
+                home_point,
+                away_point,
                 fetched_at,
                 is_frozen
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -791,6 +1386,8 @@ def _persist_odds_snapshots(db_path: str | Path, snapshots: Sequence[OddsSnapsho
                     snapshot.market_type,
                     snapshot.home_odds,
                     snapshot.away_odds,
+                    snapshot.home_point,
+                    snapshot.away_point,
                     snapshot.fetched_at.isoformat(),
                     int(snapshot.is_frozen),
                 )
@@ -815,7 +1412,7 @@ def _load_odds_from_db_for_date(db_path: str | Path, target_date: date) -> list[
     with sqlite3.connect(database_path) as connection:
         rows = connection.execute(
             """
-            SELECT o.game_pk, o.book_name, o.market_type, o.home_odds, o.away_odds, o.fetched_at, o.is_frozen
+            SELECT o.game_pk, o.book_name, o.market_type, o.home_odds, o.away_odds, o.home_point, o.away_point, o.fetched_at, o.is_frozen
             FROM odds_snapshots AS o
             INNER JOIN games AS g ON g.game_pk = o.game_pk
             WHERE substr(g.date, 1, 10) = ?
@@ -831,8 +1428,10 @@ def _load_odds_from_db_for_date(db_path: str | Path, target_date: date) -> list[
             market_type=row[2],
             home_odds=row[3],
             away_odds=row[4],
-            fetched_at=_coerce_timestamp(row[5]),
-            is_frozen=bool(row[6]),
+            home_point=row[5],
+            away_point=row[6],
+            fetched_at=_coerce_timestamp(row[7]),
+            is_frozen=bool(row[8]),
         )
         for row in rows
     ]
@@ -886,6 +1485,22 @@ def _validation_no_pick_reason(
     lineups_by_game_team: dict[tuple[int, str], Lineup],
     odds_by_game: dict[int, list[OddsSnapshot]],
 ) -> str | None:
+    reasons = _collect_validation_reasons(
+        game=game,
+        inference_row=inference_row,
+        lineups_by_game_team=lineups_by_game_team,
+        odds_by_game=odds_by_game,
+    )
+    return "; ".join(reasons) if reasons else None
+
+
+def _collect_validation_reasons(
+    *,
+    game: dict[str, Any],
+    inference_row: pd.Series,
+    lineups_by_game_team: dict[tuple[int, str], Lineup],
+    odds_by_game: dict[int, list[OddsSnapshot]],
+) -> list[str]:
     game_pk = int(game["game_pk"])
     reasons: list[str] = []
 
@@ -900,24 +1515,87 @@ def _validation_no_pick_reason(
             break
 
     if not odds_by_game.get(game_pk):
-        reasons.append("odds unavailable")
+        reasons.append("f5 odds unavailable")
 
     if (not bool(game.get("is_dome", False))) and float(
         inference_row.get("weather_data_missing", 0.0) or 0.0
     ) >= 1.0:
         reasons.append("weather unavailable")
 
-    return "; ".join(reasons) if reasons else None
+    return reasons
 
 
-def _select_game_decision(
+def _build_input_status(
     *,
+    game: dict[str, Any],
+    inference_row: pd.Series,
+    lineups_by_game_team: dict[tuple[int, str], Lineup],
+    odds_by_game: dict[int, list[OddsSnapshot]],
+    full_game_odds_context_by_game: dict[int, dict[str, Any]],
+) -> dict[str, Any]:
+    game_pk = int(game["game_pk"])
+    home_lineup = lineups_by_game_team.get((game_pk, str(game["home_team"])))
+    away_lineup = lineups_by_game_team.get((game_pk, str(game["away_team"])))
+    snapshots = odds_by_game.get(game_pk, [])
+    full_game_context = full_game_odds_context_by_game.get(game_pk, {})
+    odds_sources = sorted({_odds_source_label(snapshot.book_name) for snapshot in snapshots})
+
+    return {
+        "home_lineup_available": bool(home_lineup and home_lineup.players),
+        "home_lineup_confirmed": bool(home_lineup and home_lineup.confirmed),
+        "home_lineup_source": home_lineup.source if home_lineup is not None else None,
+        "away_lineup_available": bool(away_lineup and away_lineup.players),
+        "away_lineup_confirmed": bool(away_lineup and away_lineup.confirmed),
+        "away_lineup_source": away_lineup.source if away_lineup is not None else None,
+        "odds_available": bool(snapshots),
+        "odds_books": sorted({snapshot.book_name for snapshot in snapshots}),
+        "f5_odds_estimated": any(
+            snapshot.book_name.startswith("estimate:") for snapshot in snapshots
+        ),
+        "f5_odds_sources": odds_sources,
+        "full_game_odds_available": bool(full_game_context.get("full_game_odds_available")),
+        "full_game_odds_books": list(full_game_context.get("full_game_odds_books") or []),
+        "full_game_home_ml": full_game_context.get("full_game_home_ml"),
+        "full_game_home_ml_book": full_game_context.get("full_game_home_ml_book"),
+        "full_game_away_ml": full_game_context.get("full_game_away_ml"),
+        "full_game_away_ml_book": full_game_context.get("full_game_away_ml_book"),
+        "full_game_home_spread": full_game_context.get("full_game_home_spread"),
+        "full_game_home_spread_odds": full_game_context.get("full_game_home_spread_odds"),
+        "full_game_home_spread_book": full_game_context.get("full_game_home_spread_book"),
+        "full_game_away_spread": full_game_context.get("full_game_away_spread"),
+        "full_game_away_spread_odds": full_game_context.get("full_game_away_spread_odds"),
+        "full_game_away_spread_book": full_game_context.get("full_game_away_spread_book"),
+        "weather_available": not (
+            (not bool(game.get("is_dome", False)))
+            and float(inference_row.get("weather_data_missing", 0.0) or 0.0) >= 1.0
+        ),
+    }
+
+
+def _odds_source_label(book_name: str) -> str:
+    if book_name.startswith("estimate:"):
+        return "estimated from full-game market"
+    if book_name.startswith("sbr:"):
+        return "sportsbookreview fallback"
+    return "odds api"
+
+
+def _build_candidate_decisions(
+    *,
+    inference_frame: pd.DataFrame,
     prediction: Prediction,
     snapshots: Sequence[OddsSnapshot],
     db_path: str | Path,
-    current_bankroll: float,
-    peak_bankroll: float,
-) -> tuple[BetDecision | None, bool]:
+    prediction_engine: PredictionEngine | Any,
+) -> list[BetDecision]:
+    if hasattr(prediction_engine, "build_candidate_decisions"):
+        return prediction_engine.build_candidate_decisions(
+            inference_frame=inference_frame,
+            prediction=prediction,
+            snapshots=snapshots,
+            db_path=db_path,
+        )
+
     candidates: list[BetDecision] = []
     for snapshot in snapshots:
         if snapshot.market_type == "f5_ml":
@@ -936,8 +1614,17 @@ def _select_game_decision(
                     model_probability=home_probability,
                     home_odds=snapshot.home_odds,
                     away_odds=snapshot.away_odds,
+                    home_point=snapshot.home_point,
+                    away_point=snapshot.away_point,
                     book_name=snapshot.book_name,
                     db_path=db_path,
+                ).model_copy(
+                    update={
+                        "source_model": (
+                            "legacy_f5_ml" if snapshot.market_type == "f5_ml" else "legacy_f5_rl"
+                        ),
+                        "source_model_version": prediction.model_version,
+                    }
                 ),
                 calculate_edge(
                     game_pk=prediction.game_pk,
@@ -946,64 +1633,140 @@ def _select_game_decision(
                     model_probability=away_probability,
                     home_odds=snapshot.home_odds,
                     away_odds=snapshot.away_odds,
+                    home_point=snapshot.home_point,
+                    away_point=snapshot.away_point,
                     book_name=snapshot.book_name,
                     db_path=db_path,
+                ).model_copy(
+                    update={
+                        "source_model": (
+                            "legacy_f5_ml" if snapshot.market_type == "f5_ml" else "legacy_f5_rl"
+                        ),
+                        "source_model_version": prediction.model_version,
+                    }
                 ),
             ]
         )
+    return candidates
 
-    positive_candidates = [candidate for candidate in candidates if candidate.is_positive_ev]
+
+def _select_game_decision(
+    *,
+    candidates: Sequence[BetDecision],
+    current_bankroll: float,
+    peak_bankroll: float,
+) -> tuple[BetDecision | None, bool]:
+    positive_candidates = [
+        candidate
+        for candidate in candidates
+        if candidate.is_positive_ev and _is_official_live_candidate(candidate)
+    ]
     if not positive_candidates:
         return None, False
 
-    grouped_by_side: dict[str, list[BetDecision]] = {}
+    drawdown_pct = ((peak_bankroll - current_bankroll) / peak_bankroll) if peak_bankroll > 0 else 0.0
+    kill_switch_active = drawdown_pct >= float(_SETTINGS["thresholds"]["max_drawdown"])
+
+    ranked_candidates: list[tuple[int, float, float, BetDecision]] = []
     for candidate in positive_candidates:
-        grouped_by_side.setdefault(candidate.side, []).append(candidate)
-
-    ranked_groups: list[tuple[float, float, BetDecision]] = []
-    kill_switch_recommendations: list[tuple[float, BetDecision]] = []
-    kill_switch_active = False
-    for decisions in grouped_by_side.values():
-        kelly = calculate_kelly_stake(
-            current_bankroll,
-            correlated_decisions=decisions,
-            peak_bankroll=peak_bankroll,
-        )
-        selected_market_type = kelly.selected_market_type or decisions[0].market_type
-        selected_side = kelly.selected_side or decisions[0].side
-        selected_decision = next(
-            decision
-            for decision in decisions
-            if decision.market_type == selected_market_type and decision.side == selected_side
-        )
-        if kelly.kill_switch_active:
-            kill_switch_active = True
-            kill_switch_recommendations.append(
-                (
-                    float(selected_decision.edge_pct),
-                    selected_decision.model_copy(update={"kelly_stake": 0.0}),
-                )
-            )
-            continue
-        if kelly.stake <= 0:
-            continue
-
-        ranked_groups.append(
+        threshold = _official_edge_threshold(candidate)
+        passes_threshold = float(candidate.edge_pct) >= threshold
+        selection_score = _official_selection_score(candidate)
+        stake_units = 0.0 if kill_switch_active else _official_stake_units(candidate, bankroll=current_bankroll)
+        ranked_candidates.append(
             (
-                float(kelly.stake),
-                float(selected_decision.edge_pct),
-                selected_decision.model_copy(update={"kelly_stake": float(kelly.stake)}),
+                int(passes_threshold),
+                float(selection_score),
+                float(candidate.model_probability),
+                candidate.model_copy(update={"kelly_stake": float(stake_units)}),
             )
         )
 
-    if not ranked_groups:
-        if kill_switch_recommendations:
-            kill_switch_recommendations.sort(key=lambda item: item[0], reverse=True)
-            return kill_switch_recommendations[0][1], True
+    ranked_candidates.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+    if not ranked_candidates:
         return None, kill_switch_active
 
-    ranked_groups.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    return ranked_groups[0][2], False
+    selected = ranked_candidates[0][3]
+    if ranked_candidates[0][0] == 0:
+        return None, kill_switch_active
+    if kill_switch_active:
+        return selected.model_copy(update={"kelly_stake": 0.0}), True
+    return selected, False
+
+
+def _select_forced_game_decision(candidates: Sequence[BetDecision]) -> BetDecision | None:
+    if not candidates:
+        return None
+    return max(
+        candidates,
+        key=lambda decision: (
+            float(decision.edge_pct),
+            float(decision.model_probability),
+            float(decision.ev),
+        ),
+    ).model_copy(update={"kelly_stake": 1.0})
+
+
+def _is_official_live_candidate(candidate: BetDecision) -> bool:
+    if candidate.odds_at_bet < DEFAULT_OFFICIAL_MIN_BET_ODDS:
+        return False
+    if candidate.odds_at_bet > DEFAULT_OFFICIAL_MAX_BET_ODDS:
+        return False
+    if not str(candidate.book_name or "").startswith("estimate:") and float(candidate.edge_pct) > DEFAULT_OFFICIAL_MAX_TRUSTED_EDGE:
+        return False
+    if candidate.market_type == "f5_ml":
+        return candidate.source_model == "legacy_f5_ml"
+    return candidate.market_type == "f5_rl" and candidate.source_model == "rlv2_direct"
+
+
+def _official_edge_threshold(candidate: BetDecision) -> float:
+    return DEFAULT_OFFICIAL_ML_MIN_EDGE if candidate.market_type == "f5_ml" else DEFAULT_OFFICIAL_RL_MIN_EDGE
+
+
+def _official_selection_score(candidate: BetDecision) -> float:
+    score = float(candidate.edge_pct)
+    if candidate.market_type == "f5_rl":
+        score -= DEFAULT_OFFICIAL_RL_SELECTION_PENALTY
+    return score
+
+
+def _official_stake_units(candidate: BetDecision, *, bankroll: float) -> float:
+    threshold = _official_edge_threshold(candidate)
+    effective_edge = max(0.0, float(candidate.edge_pct) - threshold)
+    scale = min(1.0, effective_edge / DEFAULT_OFFICIAL_EDGE_SCALE_CAP)
+    units = DEFAULT_OFFICIAL_MIN_UNITS + (
+        (DEFAULT_OFFICIAL_MAX_UNITS - DEFAULT_OFFICIAL_MIN_UNITS) * scale
+    )
+    return min(float(units), float(bankroll))
+
+
+def _recalibrate_ml_market_pair(
+    *,
+    home_probability: float,
+    away_probability: float,
+    home_odds: int,
+    away_odds: int,
+) -> tuple[float, float]:
+    home_fair, away_fair = devig_probabilities(home_odds, away_odds)
+    adjusted_home = shrink_probability_toward_market(
+        model_probability=float(home_probability),
+        fair_probability=float(home_fair),
+        odds=int(home_odds),
+        base_multiplier=DEFAULT_OFFICIAL_ML_MARKET_BASE_MULTIPLIER,
+        plus_money_multiplier=DEFAULT_OFFICIAL_ML_MARKET_PLUS_MONEY_MULTIPLIER,
+        high_edge_threshold=DEFAULT_OFFICIAL_ML_MARKET_HIGH_EDGE_THRESHOLD,
+        high_edge_multiplier=DEFAULT_OFFICIAL_ML_MARKET_HIGH_EDGE_MULTIPLIER,
+    )
+    adjusted_away = shrink_probability_toward_market(
+        model_probability=float(away_probability),
+        fair_probability=float(away_fair),
+        odds=int(away_odds),
+        base_multiplier=DEFAULT_OFFICIAL_ML_MARKET_BASE_MULTIPLIER,
+        plus_money_multiplier=DEFAULT_OFFICIAL_ML_MARKET_PLUS_MONEY_MULTIPLIER,
+        high_edge_threshold=DEFAULT_OFFICIAL_ML_MARKET_HIGH_EDGE_THRESHOLD,
+        high_edge_multiplier=DEFAULT_OFFICIAL_ML_MARKET_HIGH_EDGE_MULTIPLIER,
+    )
+    return adjusted_home, adjusted_away
 
 
 def _load_bankroll_state(
@@ -1107,6 +1870,8 @@ def _build_pick_payload_item(
         "matchup": result.matchup,
         "scheduled_start": str(game["scheduled_start"]),
         "market": f"{decision.market_type} {decision.side}",
+        "source_model": decision.source_model,
+        "source_model_version": decision.source_model_version,
         "odds": str(decision.odds_at_bet),
         "model_probability": float(decision.model_probability),
         "edge_pct": float(decision.edge_pct),
@@ -1323,6 +2088,50 @@ def _optional_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _american_to_implied_probability(value: Any) -> float | None:
+    if value is None or pd.isna(value):
+        return None
+    odds = float(value)
+    if odds == 0:
+        return None
+    if odds > 0:
+        return 100.0 / (odds + 100.0)
+    return abs(odds) / (abs(odds) + 100.0)
+
+
+def _margin_total_to_team_runs(*, home_margin: float, total_runs: float) -> tuple[float, float]:
+    home_runs = (float(total_runs) + float(home_margin)) / 2.0
+    away_runs = float(total_runs) - home_runs
+    if home_runs < 0.1:
+        home_runs = 0.1
+        away_runs = max(0.1, float(total_runs) - home_runs)
+    if away_runs < 0.1:
+        away_runs = 0.1
+        home_runs = max(0.1, float(total_runs) - away_runs)
+    return round(home_runs, 2), round(away_runs, 2)
+
+
+def _is_ml_equivalent_f5_runline(snapshot: OddsSnapshot) -> bool:
+    if snapshot.market_type != "f5_rl":
+        return False
+    if snapshot.home_point is None or snapshot.away_point is None:
+        return False
+    try:
+        home_point = float(snapshot.home_point)
+        away_point = float(snapshot.away_point)
+    except (TypeError, ValueError):
+        return False
+    return abs(home_point) == 0.5 and abs(away_point) == 0.5 and home_point == -away_point
+
+
+def _legacy_variant_priority(variant: Literal["base", "stacking", "calibrated"]) -> int:
+    if variant == "base":
+        return 0
+    if variant == "calibrated":
+        return 1
+    return 2
 
 
 def _fallback_ml_home_probability(row: pd.Series) -> float:

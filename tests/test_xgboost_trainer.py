@@ -96,6 +96,7 @@ def test_train_f5_models_trains_two_models_and_saves_versioned_joblib(tmp_path) 
         loaded_model = joblib.load(artifact.model_path)
         assert loaded_model.__class__.__name__ == "XGBClassifier"
         assert artifact.holdout_metrics["accuracy"] >= 0.5
+        assert artifact.promoted_variant == "base"
 
 
 def test_train_f5_models_records_best_params_feature_importance_and_filters_ml_ties(tmp_path) -> None:
@@ -126,6 +127,7 @@ def test_train_f5_models_records_best_params_feature_importance_and_filters_ml_t
     }
     assert metadata["train_row_count"] == 12
     assert metadata["holdout_row_count"] == 5
+    assert metadata["promoted_variant"] == "base"
     assert metadata["feature_importance_rankings"]
     assert metadata["feature_importance_rankings"][0]["importance"] >= 0.0
     assert ml_artifact.feature_importance_rankings == metadata["feature_importance_rankings"]

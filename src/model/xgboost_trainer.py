@@ -24,6 +24,7 @@ from src.model.data_builder import (
     _feature_columns,
     build_training_dataset,
 )
+from src.model.promotion import build_promotion_reason
 from src.ops.experiment_tracker import log_training_run
 
 
@@ -80,6 +81,8 @@ class ModelTrainingArtifact:
     train_row_count: int
     holdout_row_count: int
     holdout_season: int
+    promoted_variant: str
+    promotion_reason: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +138,13 @@ def train_f5_models(
 
     artifacts: dict[str, ModelTrainingArtifact] = {}
     for spec in _MODEL_SPECS:
+        logger.info(
+            "Training %s for holdout season %s with %s search iterations and %s time-series splits",
+            str(spec["model_name"]),
+            effective_holdout_season,
+            _resolve_search_iterations(search_space, search_iterations),
+            min(time_series_splits, max(len(dataset) - 1, 1)),
+        )
         artifact = _train_single_model(
             dataset=dataset,
             model_name=str(spec["model_name"]),
@@ -159,6 +169,9 @@ def train_f5_models(
         "data_version_hash": data_version_hash,
         "holdout_season": effective_holdout_season,
         "feature_columns": feature_columns,
+        "promoted_variants": {
+            name: artifact.promoted_variant for name, artifact in artifacts.items()
+        },
         "models": {name: _artifact_to_json_ready(artifact) for name, artifact in artifacts.items()},
     }
     summary_path.write_text(json.dumps(summary_payload, indent=2), encoding="utf-8")
@@ -267,6 +280,7 @@ def _train_single_model(
         random_state=random_state,
         refit=True,
         n_jobs=1,
+        verbose=2,
     )
 
     search.fit(train_frame[feature_columns], train_frame[target_column])
@@ -306,6 +320,18 @@ def _train_single_model(
         "best_params": best_params,
         "cv_best_log_loss": cv_best_log_loss,
         "holdout_metrics": holdout_metrics,
+        "promoted_variant": "base",
+        "promotion_reason": build_promotion_reason(
+            promoted_variant="base",
+            metrics_by_variant={
+                "base": {
+                    "log_loss": holdout_metrics["log_loss"],
+                    "roc_auc": holdout_metrics["roc_auc"],
+                    "accuracy": holdout_metrics["accuracy"],
+                    "brier": None,
+                }
+            },
+        ),
         "feature_importance_rankings": feature_importance_rankings,
         "search_space": {key: list(values) for key, values in search_space.items()},
         "time_series_splits": int(search.cv.n_splits),
@@ -326,6 +352,18 @@ def _train_single_model(
         train_row_count=len(train_frame),
         holdout_row_count=len(holdout_frame),
         holdout_season=holdout_season,
+        promoted_variant="base",
+        promotion_reason=build_promotion_reason(
+            promoted_variant="base",
+            metrics_by_variant={
+                "base": {
+                    "log_loss": holdout_metrics["log_loss"],
+                    "roc_auc": holdout_metrics["roc_auc"],
+                    "accuracy": holdout_metrics["accuracy"],
+                    "brier": None,
+                }
+            },
+        ),
     )
 
 
@@ -360,8 +398,16 @@ def _resolve_numeric_feature_columns(dataframe: pd.DataFrame) -> list[str]:
         column
         for column in _feature_columns(dataframe)
         if pd.api.types.is_numeric_dtype(dataframe[column])
-        and dataframe[column].nunique(dropna=False) > 1
+        and _has_numeric_variation(dataframe[column])
     ]
+
+
+def _has_numeric_variation(series: pd.Series) -> bool:
+    non_null = series.dropna()
+    if non_null.empty:
+        return False
+    first_value = non_null.iloc[0]
+    return bool((non_null != first_value).any())
 
 
 def _prepare_training_frame(

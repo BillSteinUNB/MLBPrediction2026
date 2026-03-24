@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,12 +13,15 @@ import pytest
 
 from src.db import init_db
 from src.model.calibration import CalibratedStackingModel, IdentityProbabilityCalibrator
+from src.models.bet import BetDecision
 from src.models.lineup import Lineup, LineupPlayer
 from src.models.odds import OddsSnapshot
 from src.models.prediction import Prediction
 from src.pipeline.daily import (
     ArtifactOrFallbackPredictionEngine,
     PipelineDependencies,
+    _parse_schedule_game,
+    _select_game_decision,
     _default_feature_frame_builder,
     run_daily_pipeline,
 )
@@ -200,30 +204,146 @@ def _dummy_calibrated_model() -> CalibratedStackingModel:
     )
 
 
-def test_artifact_engine_loads_latest_recursive_calibrated_bundle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    older_dir = tmp_path / "older-exp"
-    newer_dir = tmp_path / "newer-exp"
-    older_dir.mkdir()
-    newer_dir.mkdir()
-    older_version = "20260320T010000Z_aaaa1111"
-    newer_version = "20260321T010000Z_bbbb2222"
-    older_ml = older_dir / f"f5_ml_calibrated_model_{older_version}.joblib"
-    older_rl = older_dir / f"f5_rl_calibrated_model_{older_version}.joblib"
-    newer_ml = newer_dir / f"f5_ml_calibrated_model_{newer_version}.joblib"
-    newer_rl = newer_dir / f"f5_rl_calibrated_model_{newer_version}.joblib"
-    for path in (older_ml, older_rl, newer_ml, newer_rl):
+def _dummy_base_model() -> SimpleNamespace:
+    return SimpleNamespace(
+        predict_proba=lambda dataframe: [[0.4, 0.6] for _ in range(len(dataframe))],
+    )
+
+
+def _write_legacy_metadata(
+    path: Path,
+    *,
+    variant: str,
+    version: str,
+    holdout_season: int = 2025,
+    log_loss: float,
+    roc_auc: float,
+    accuracy: float,
+    brier: float | None = None,
+) -> None:
+    if variant == "base":
+        payload = {
+            "model_version": version,
+            "holdout_season": holdout_season,
+            "feature_columns": ["park_runs_factor"],
+            "holdout_metrics": {
+                "log_loss": log_loss,
+                "roc_auc": roc_auc,
+                "accuracy": accuracy,
+                **({"brier": brier} if brier is not None else {}),
+            },
+        }
+    elif variant == "stacking":
+        payload = {
+            "model_version": version,
+            "holdout_season": holdout_season,
+            "feature_columns": ["park_runs_factor"],
+            "raw_meta_feature_columns": ["home_team_log5_30g"],
+            "holdout_metrics": {
+                "stacked_log_loss": log_loss,
+                "stacked_roc_auc": roc_auc,
+                "stacked_accuracy": accuracy,
+                "stacked_brier": brier,
+            },
+            "persisted": True,
+        }
+    else:
+        payload = {
+            "model_version": version,
+            "holdout_season": holdout_season,
+            "holdout_metrics": {
+                "calibrated_log_loss": log_loss,
+                "calibrated_roc_auc": roc_auc,
+                "calibrated_accuracy": accuracy,
+                "calibrated_brier": brier,
+            },
+        }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_artifact_engine_prefers_best_holdout_variant_over_calibrated_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    experiment_dir = tmp_path / "exp"
+    experiment_dir.mkdir()
+    version = "20260321T010000Z_bbbb2222"
+
+    ml_base = experiment_dir / f"f5_ml_model_{version}.joblib"
+    ml_stack = experiment_dir / f"f5_ml_stacking_model_{version}.joblib"
+    ml_cal = experiment_dir / f"f5_ml_calibrated_model_{version}.joblib"
+    rl_base = experiment_dir / f"f5_rl_model_{version}.joblib"
+    rl_stack = experiment_dir / f"f5_rl_stacking_model_{version}.joblib"
+    rl_cal = experiment_dir / f"f5_rl_calibrated_model_{version}.joblib"
+    for path in (ml_base, ml_stack, ml_cal, rl_base, rl_stack, rl_cal):
         path.write_text("placeholder", encoding="utf-8")
 
-    def _fake_load(path: Path) -> CalibratedStackingModel:
-        return _dummy_calibrated_model()
+    _write_legacy_metadata(
+        ml_base.with_suffix(".metadata.json"),
+        variant="base",
+        version=version,
+        log_loss=0.60,
+        roc_auc=0.61,
+        accuracy=0.58,
+    )
+    _write_legacy_metadata(
+        ml_stack.with_suffix(".metadata.json"),
+        variant="stacking",
+        version=version,
+        log_loss=0.62,
+        roc_auc=0.60,
+        accuracy=0.57,
+        brier=0.24,
+    )
+    _write_legacy_metadata(
+        ml_cal.with_suffix(".metadata.json"),
+        variant="calibrated",
+        version=version,
+        log_loss=0.62,
+        roc_auc=0.60,
+        accuracy=0.57,
+        brier=0.24,
+    )
+    _write_legacy_metadata(
+        rl_base.with_suffix(".metadata.json"),
+        variant="base",
+        version=version,
+        log_loss=0.55,
+        roc_auc=0.63,
+        accuracy=0.68,
+    )
+    _write_legacy_metadata(
+        rl_stack.with_suffix(".metadata.json"),
+        variant="stacking",
+        version=version,
+        log_loss=0.58,
+        roc_auc=0.61,
+        accuracy=0.67,
+        brier=0.21,
+    )
+    _write_legacy_metadata(
+        rl_cal.with_suffix(".metadata.json"),
+        variant="calibrated",
+        version=version,
+        log_loss=0.58,
+        roc_auc=0.61,
+        accuracy=0.67,
+        brier=0.21,
+    )
+
+    def _fake_load(path: Path) -> object:
+        if "calibrated" in path.name:
+            return _dummy_calibrated_model()
+        return _dummy_base_model()
 
     monkeypatch.setattr(joblib, "load", _fake_load)
 
     engine = ArtifactOrFallbackPredictionEngine(model_dir=tmp_path)
 
-    assert engine.ml_model_path == newer_ml
-    assert engine.rl_model_path == newer_rl
-    assert engine.model_version == newer_version
+    assert engine.ml_model_path == ml_base
+    assert engine.rl_model_path == rl_base
+    assert "ml=" in engine.model_version
+    assert "base" in engine.model_version
     assert engine.ml_model is not None
     assert engine.rl_model is not None
 
@@ -235,12 +355,21 @@ def test_artifact_engine_falls_back_without_complete_recursive_bundle(
     incomplete_dir = tmp_path / "incomplete-exp"
     incomplete_dir.mkdir()
     version = "20260321T010000Z_onlyml"
-    (incomplete_dir / f"f5_ml_calibrated_model_{version}.joblib").write_text(
+    ml_path = incomplete_dir / f"f5_ml_model_{version}.joblib"
+    ml_path.write_text(
         "placeholder",
         encoding="utf-8",
     )
+    _write_legacy_metadata(
+        ml_path.with_suffix(".metadata.json"),
+        variant="base",
+        version=version,
+        log_loss=0.6,
+        roc_auc=0.6,
+        accuracy=0.57,
+    )
 
-    monkeypatch.setattr(joblib, "load", lambda path: _dummy_calibrated_model())
+    monkeypatch.setattr(joblib, "load", lambda path: _dummy_base_model())
 
     engine = ArtifactOrFallbackPredictionEngine(model_dir=tmp_path)
 
@@ -332,7 +461,77 @@ def test_run_daily_pipeline_records_explicit_no_pick_when_odds_are_missing(tmp_p
         ).fetchone()[0]
 
     assert prediction_count == 1
-    assert stored_reason == "odds unavailable"
+    assert stored_reason == "f5 odds unavailable"
+
+
+def test_run_daily_pipeline_uses_preview_estimated_f5_odds_in_dry_run(tmp_path: Path) -> None:
+    db_path = tmp_path / "preview_estimate.db"
+    schedule = _schedule_frame(game_pks=[1001])
+    notifier = _RecordingNotifier()
+    prediction_engine = _RecordingPredictionEngine({1001: _prediction(1001, ml_home=0.72, rl_home=0.53)})
+    dependencies = PipelineDependencies(
+        schedule_fetcher=lambda target_date, mode: schedule.copy(),
+        history_fetcher=lambda season, before_date: pd.DataFrame(),
+        lineups_fetcher=lambda target_date: [],
+        odds_fetcher=lambda target_date, mode, db_path: [],
+        full_game_odds_fetcher=lambda target_date, mode, db_path: {
+            1001: {
+                "full_game_odds_available": True,
+                "full_game_odds_books": ["DraftKings"],
+                "full_game_home_ml": -150,
+                "full_game_home_ml_book": "DraftKings",
+                "full_game_away_ml": 130,
+                "full_game_away_ml_book": "DraftKings",
+                "full_game_home_spread": -1.5,
+                "full_game_home_spread_odds": 160,
+                "full_game_home_spread_book": "DraftKings",
+                "full_game_away_spread": 1.5,
+                "full_game_away_spread_odds": -180,
+                "full_game_away_spread_book": "DraftKings",
+                "full_game_ml_pairs": [
+                    {"book_name": "DraftKings", "home_odds": -150, "away_odds": 130}
+                ],
+            }
+        },
+        feature_frame_builder=_feature_frame_builder,
+        prediction_engine=prediction_engine,
+        notifier=notifier,
+    )
+
+    result = run_daily_pipeline(
+        target_date="2025-09-15",
+        mode="prod",
+        dry_run=True,
+        db_path=db_path,
+        dependencies=dependencies,
+    )
+
+    assert result.pick_count == 1
+    assert result.games[0].paper_fallback is True
+    assert result.games[0].input_status is not None
+    assert result.games[0].input_status["f5_odds_estimated"] is True
+    assert "estimated from full-game market" in result.games[0].input_status["f5_odds_sources"]
+
+
+def test_parse_schedule_game_prefers_official_date_over_utc_rollover() -> None:
+    game = {
+        "gamePk": 823244,
+        "gameType": "R",
+        "officialDate": "2026-03-25",
+        "gameDate": "2026-03-26T00:05:00Z",
+        "status": {"detailedState": "Scheduled"},
+        "teams": {
+            "home": {"team": {"abbreviation": "SF"}, "probablePitcher": {"id": 657277}},
+            "away": {"team": {"abbreviation": "NYY"}, "probablePitcher": {"id": 608331}},
+        },
+        "venue": {"name": "Oracle Park"},
+        "linescore": {"innings": []},
+    }
+
+    row = _parse_schedule_game(game)
+
+    assert row is not None
+    assert row["game_date"] == "2026-03-25"
 
 
 def test_run_daily_pipeline_records_explicit_no_pick_when_weather_is_missing(tmp_path: Path) -> None:
@@ -608,6 +807,181 @@ def test_run_daily_pipeline_sends_drawdown_alert_when_kill_switch_is_active(tmp_
 
     assert stored_reason == ("no_pick", "f5_ml", "home", 0.0, "kill-switch active")
     assert bet_count == 0
+
+
+def test_half_runline_candidates_use_ml_equivalent_probability(tmp_path: Path) -> None:
+    engine = ArtifactOrFallbackPredictionEngine(model_dir=tmp_path)
+    frame = pd.DataFrame([{"game_pk": 1001}])
+    prediction = _prediction(1001, ml_home=0.62, rl_home=0.30)
+    db_path = init_db(tmp_path / "edge.db")
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO games (game_pk, date, home_team, away_team, venue, status)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (1001, "2025-09-15", "NYY", "BOS", "Stadium 1", "scheduled"),
+        )
+        connection.commit()
+    snapshot = OddsSnapshot(
+        game_pk=1001,
+        book_name="TestBook",
+        market_type="f5_rl",
+        home_odds=-110,
+        away_odds=100,
+        home_point=-0.5,
+        away_point=0.5,
+        fetched_at=datetime(2025, 9, 15, tzinfo=UTC),
+    )
+
+    candidates = engine.build_candidate_decisions(
+        inference_frame=frame,
+        prediction=prediction,
+        snapshots=[snapshot],
+        db_path=db_path,
+    )
+
+    legacy_home = next(
+        candidate
+        for candidate in candidates
+        if candidate.source_model == "legacy_f5_ml_equiv" and candidate.side == "home"
+    )
+    legacy_away = next(
+        candidate
+        for candidate in candidates
+        if candidate.source_model == "legacy_f5_ml_equiv" and candidate.side == "away"
+    )
+
+    assert legacy_home.model_probability == pytest.approx(0.62)
+    assert legacy_away.model_probability == pytest.approx(0.38)
+
+
+def test_official_selector_prefers_promoted_direct_runline_candidates() -> None:
+    ml_candidate = BetDecision(
+        game_pk=1001,
+        market_type="f5_ml",
+        side="away",
+        source_model="legacy_f5_ml",
+        source_model_version="test-model-v1",
+        book_name="TestBook",
+        model_probability=0.58,
+        fair_probability=0.48,
+        edge_pct=0.10,
+        ev=0.15,
+        is_positive_ev=True,
+        odds_at_bet=110,
+    )
+    experimental_rl_candidate = BetDecision(
+        game_pk=1001,
+        market_type="f5_rl",
+        side="away",
+        source_model="rlv2_direct",
+        source_model_version="rlv2-test",
+        book_name="TestBook",
+        model_probability=0.67,
+        fair_probability=0.45,
+        edge_pct=0.13,
+        ev=0.20,
+        is_positive_ev=True,
+        odds_at_bet=115,
+        line_at_bet=-0.5,
+    )
+
+    selected, kill_switch = _select_game_decision(
+        candidates=[ml_candidate, experimental_rl_candidate],
+        current_bankroll=100.0,
+        peak_bankroll=100.0,
+    )
+
+    assert kill_switch is False
+    assert selected is not None
+    assert selected.market_type == "f5_rl"
+    assert selected.source_model == "rlv2_direct"
+    assert selected.kelly_stake > 0.0
+
+
+def test_official_selector_rejects_out_of_range_odds() -> None:
+    wide_dog_candidate = BetDecision(
+        game_pk=1001,
+        market_type="f5_ml",
+        side="away",
+        source_model="legacy_f5_ml",
+        source_model_version="test-model-v1",
+        book_name="TestBook",
+        model_probability=0.51,
+        fair_probability=0.40,
+        edge_pct=0.11,
+        ev=0.20,
+        is_positive_ev=True,
+        odds_at_bet=200,
+    )
+    short_favorite_candidate = BetDecision(
+        game_pk=1001,
+        market_type="f5_ml",
+        side="home",
+        source_model="legacy_f5_ml",
+        source_model_version="test-model-v1",
+        book_name="TestBook",
+        model_probability=0.56,
+        fair_probability=0.48,
+        edge_pct=0.08,
+        ev=0.10,
+        is_positive_ev=True,
+        odds_at_bet=-120,
+    )
+
+    selected, kill_switch = _select_game_decision(
+        candidates=[wide_dog_candidate, short_favorite_candidate],
+        current_bankroll=100.0,
+        peak_bankroll=100.0,
+    )
+
+    assert kill_switch is False
+    assert selected is not None
+    assert selected.side == "home"
+    assert selected.odds_at_bet == -120
+
+
+def test_official_selector_rejects_untrusted_edge_spikes() -> None:
+    suspicious_candidate = BetDecision(
+        game_pk=1001,
+        market_type="f5_ml",
+        side="away",
+        source_model="legacy_f5_ml",
+        source_model_version="test-model-v1",
+        book_name="TestBook",
+        model_probability=0.72,
+        fair_probability=0.44,
+        edge_pct=0.28,
+        ev=0.55,
+        is_positive_ev=True,
+        odds_at_bet=115,
+    )
+    trusted_candidate = BetDecision(
+        game_pk=1001,
+        market_type="f5_ml",
+        side="home",
+        source_model="legacy_f5_ml",
+        source_model_version="test-model-v1",
+        book_name="TestBook",
+        model_probability=0.55,
+        fair_probability=0.47,
+        edge_pct=0.08,
+        ev=0.09,
+        is_positive_ev=True,
+        odds_at_bet=-105,
+    )
+
+    selected, kill_switch = _select_game_decision(
+        candidates=[suspicious_candidate, trusted_candidate],
+        current_bankroll=100.0,
+        peak_bankroll=100.0,
+    )
+
+    assert kill_switch is False
+    assert selected is not None
+    assert selected.side == "home"
+    assert selected.edge_pct == pytest.approx(0.08)
 
 
 def test_default_feature_frame_builder_uses_live_feature_assembly_output(

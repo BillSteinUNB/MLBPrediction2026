@@ -2,6 +2,7 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import type { RunSummary } from "../api/types";
 import { DeltaIndicator } from "./DeltaIndicator";
+import { TooltipLabel } from "./TooltipLabel";
 
 export interface RunTableProps {
   /** Array of run summaries to display */
@@ -53,16 +54,16 @@ const tableStyle: React.CSSProperties = {
   borderCollapse: "collapse",
   fontFamily: "Arial, Helvetica, sans-serif",
   fontSize: 13,
-  color: "#08060d",
+  color: "var(--text-h)",
 };
 
 const thStyle: React.CSSProperties = {
   textAlign: "left",
   padding: "8px 10px",
-  borderBottom: "2px solid #e5e4e7",
+  borderBottom: "2px solid var(--border)",
   fontSize: 11,
   fontWeight: 600,
-  color: "#6b6375",
+  color: "var(--text)",
   textTransform: "uppercase",
   letterSpacing: "0.04em",
   whiteSpace: "nowrap",
@@ -70,24 +71,24 @@ const thStyle: React.CSSProperties = {
 
 const tdStyle: React.CSSProperties = {
   padding: "7px 10px",
-  borderBottom: "1px solid #e5e4e7",
+  borderBottom: "1px solid var(--border)",
   verticalAlign: "middle",
   whiteSpace: "nowrap",
 };
 
-const rowHoverBg = "#f7f7f8";
+const rowHoverBg = "var(--bg-hover)";
 
 const titleStyle: React.CSSProperties = {
   fontSize: 14,
   fontWeight: 600,
-  color: "#08060d",
+  color: "var(--text-h)",
   margin: "0 0 8px 0",
 };
 
 const emptyStyle: React.CSSProperties = {
   padding: 20,
   textAlign: "center",
-  color: "#9ca3af",
+  color: "var(--muted)",
   fontSize: 13,
 };
 
@@ -135,15 +136,21 @@ export const RunTable: React.FC<RunTableProps> = ({
         <table style={tableStyle}>
           <thead>
             <tr>
-              <th style={thStyle}>Experiment</th>
-              <th style={thStyle}>Variant</th>
+              <th style={thStyle}>
+                <TooltipLabel label="Experiment" />
+              </th>
+              <th style={thStyle}>
+                <TooltipLabel label="Variant" />
+              </th>
               {METRIC_COLS.map((col) => (
                 <React.Fragment key={col.key}>
                   <th style={{ ...thStyle, textAlign: "right" }}>
-                    {col.label}
+                    <TooltipLabel label={col.label} />
                   </th>
                   {!hideDelta && col.deltaKey ? (
-                    <th style={{ ...thStyle, textAlign: "center" }}>\u0394</th>
+                    <th style={{ ...thStyle, textAlign: "center" }}>
+                      <TooltipLabel label="Δ" helpText="Change versus the previous run in the same lane. Positive is good for ROC AUC and Accuracy. Negative is good for Log Loss and Brier." />
+                    </th>
                   ) : null}
                 </React.Fragment>
               ))}
@@ -196,9 +203,9 @@ const RunRow: React.FC<RunRowProps> = ({ run, hideDelta, onClick }) => {
             display: "inline-block",
             padding: "2px 8px",
             borderRadius: 10,
-            background: "#eef2f6",
+            background: "var(--surface-2)",
             fontSize: 12,
-            color: "#495464",
+            color: "var(--text)",
           }}
         >
           {run.variant}
@@ -223,7 +230,7 @@ const RunRow: React.FC<RunRowProps> = ({ run, hideDelta, onClick }) => {
                     higherIsBetter={col.higherIsBetter}
                   />
                 ) : (
-                  <span style={{ color: "#9ca3af" }}>{"\u2014"}</span>
+                  <span style={{ color: "var(--muted)" }}>{"\u2014"}</span>
                 )}
               </td>
             ) : null}

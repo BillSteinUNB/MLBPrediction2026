@@ -6,7 +6,7 @@ const Layout: React.FC = () => {
   return (
     <div className="mlb-layout">
       <aside className="mlb-sidebar" role="navigation" aria-label="Main">
-        <div className="mlb-brand">MLB Experiment Dashboard</div>
+        <div className="mlb-brand">MLB Live Dashboard</div>
         <nav>
           <ul className="mlb-nav">
             <li>
@@ -15,23 +15,13 @@ const Layout: React.FC = () => {
               </NavLink>
             </li>
             <li>
-              <NavLink to="/lanes" className={({ isActive }) => (isActive ? "active" : "")}>
-                Lane Explorer
+              <NavLink to="/slate" className={({ isActive }) => (isActive ? "active" : "")}>
+                Live Slate
               </NavLink>
             </li>
             <li>
-              <NavLink to="/compare" className={({ isActive }) => (isActive ? "active" : "")}>
-                Compare
-              </NavLink>
-            </li>
-            <li>
-              <NavLink to="/promotions" className={({ isActive }) => (isActive ? "active" : "")}>
-                Promotion Board
-              </NavLink>
-            </li>
-            <li>
-              <NavLink to="/runs/test" className={({ isActive }) => (isActive ? "active" : "")}>
-                Run Detail (example)
+              <NavLink to="/live-season" className={({ isActive }) => (isActive ? "active" : "")}>
+                Live Season
               </NavLink>
             </li>
           </ul>

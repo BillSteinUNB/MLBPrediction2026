@@ -1,10 +1,22 @@
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --muted: #9ca3af;
+  --text: #b8c0cf;
+  --text-h: #f3f6fb;
+  --bg: #0b1220;
+  --bg-elevated: #10192b;
+  --bg-panel: #131d31;
+  --bg-hover: #18243b;
+  --surface-2: #18243b;
+  --surface-3: #21304d;
+  --border: #2b3a56;
+  --code-bg: #10192b;
+  --muted: #7f92b2;
+  --accent: #7cc7ff;
+  --good-bg: #0f2a1e;
+  --good-fg: #7fe0a8;
+  --warn-bg: #31240f;
+  --warn-fg: #f3bf6c;
+  --bad-bg: #35171a;
+  --bad-fg: #ff8a8a;
 
   --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
   --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
@@ -12,7 +24,7 @@
 
   font: 16px/145% var(--sans);
   letter-spacing: 0.18px;
-  color-scheme: light;
+  color-scheme: dark;
   color: var(--text);
   background: var(--bg);
   font-synthesis: none;
@@ -33,6 +45,10 @@
 
 body {
   margin: 0;
+  background:
+    radial-gradient(circle at top left, rgba(124, 199, 255, 0.08), transparent 22%),
+    radial-gradient(circle at top right, rgba(74, 222, 128, 0.05), transparent 20%),
+    linear-gradient(180deg, #09101b 0%, var(--bg) 100%);
 }
 
 h1,
@@ -67,4 +83,10 @@ code {
   background: var(--code-bg);
   border-radius: 4px;
   color: var(--text-h);
+}
+
+button,
+input,
+select {
+  color: inherit;
 }

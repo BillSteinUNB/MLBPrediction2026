@@ -28,6 +28,7 @@ from src.clients.chadwick_client import fetch_chadwick_register
 from src.clients.retrosheet_client import fetch_retrosheet_starting_lineups
 from src.clients.retrosheet_client import fetch_retrosheet_umpires
 from src.clients.weather_client import _get_default_weather, fetch_game_weather
+from src.clients.historical_odds_client import load_historical_odds_for_games
 from src.config import _load_settings_yaml
 from src.db import DEFAULT_DB_PATH, init_db, sqlite_connection
 from src.features.adjustments.abs_adjustment import (
@@ -272,6 +273,8 @@ def build_training_dataset(
     bullpen_metrics_fetcher: BullpenMetricsFetcher | None = None,
     weather_fetcher: WeatherFetcher | None = None,
     lineup_player_ids_by_date: LineupPlayerIdsByDate | None = None,
+    historical_odds_db_path: str | Path | None = None,
+    historical_rl_book_name: str | None = None,
 ) -> TrainingDataBuildResult:
     """Build historical training data using the same feature modules as inference."""
 
@@ -414,6 +417,8 @@ def build_training_dataset(
                 feature_frame=feature_frame,
                 database_path=working_db_path,
                 weather_fetcher=resolved_weather_fetcher,
+                historical_odds_db_path=historical_odds_db_path,
+                historical_rl_book_name=historical_rl_book_name,
             )
         finally:
             try:
@@ -432,6 +437,8 @@ def build_training_dataset(
                 feature_frame=feature_frame,
                 database_path=weather_db_path,
                 weather_fetcher=resolved_weather_fetcher,
+                historical_odds_db_path=historical_odds_db_path,
+                historical_rl_book_name=historical_rl_book_name,
             )
         finally:
             try:
@@ -509,14 +516,14 @@ def build_live_feature_frame(
     target_day = _coerce_date(target_date)
     prepared_schedule = _prepare_schedule_frame(schedule, require_final_scores=False)
     prepared_schedule = prepared_schedule.loc[
-        pd.to_datetime(prepared_schedule["scheduled_start"], utc=True).dt.date == target_day
+        pd.to_datetime(prepared_schedule["game_date"], errors="coerce").dt.date == target_day
     ].reset_index(drop=True)
     if prepared_schedule.empty:
         return pd.DataFrame(columns=["game_pk"])
 
     prepared_history = _prepare_schedule_frame(historical_games)
     prepared_history = prepared_history.loc[
-        pd.to_datetime(prepared_history["scheduled_start"], utc=True).dt.date < target_day
+        pd.to_datetime(prepared_history["game_date"], errors="coerce").dt.date < target_day
     ].reset_index(drop=True)
 
     lineup_list = list(lineups)
@@ -713,6 +720,7 @@ def _schedule_game_to_row(game: Mapping[str, Any]) -> dict[str, Any] | None:
         return None
 
     scheduled_start = pd.Timestamp(game.get("gameDate"), tz="UTC")
+    official_date = str(game.get("officialDate") or scheduled_start.date().isoformat())
     venue = str(game.get("venue", {}).get("name") or game.get("venue", {}).get("locationName") or home_team)
     park_factors = get_park_factors(team_code=home_team, venue=venue)
 
@@ -726,7 +734,7 @@ def _schedule_game_to_row(game: Mapping[str, Any]) -> dict[str, Any] | None:
     return {
         "game_pk": int(game["gamePk"]),
         "season": int(scheduled_start.year),
-        "game_date": scheduled_start.date().isoformat(),
+        "game_date": official_date,
         "scheduled_start": scheduled_start.isoformat(),
         "home_team": home_team,
         "away_team": away_team,
@@ -1394,9 +1402,9 @@ def _load_feature_rows(database_path: Path) -> pd.DataFrame:
     with sqlite_connection(database_path, builder_optimized=True) as connection:
         feature_rows = pd.read_sql_query(
             """
-            SELECT game_pk, feature_name, feature_value
+            SELECT id, game_pk, feature_name, feature_value, as_of_timestamp
             FROM features
-            ORDER BY game_pk, feature_name
+            ORDER BY game_pk, feature_name, as_of_timestamp, id
             """,
             connection,
         )
@@ -1408,11 +1416,19 @@ def _feature_rows_to_frame(feature_rows: pd.DataFrame) -> pd.DataFrame:
     if feature_rows.empty:
         return pd.DataFrame(columns=["game_pk"])
 
-    feature_frame = feature_rows.pivot_table(
+    working = feature_rows.copy()
+    if "as_of_timestamp" in working.columns:
+        working["as_of_timestamp"] = pd.to_datetime(working["as_of_timestamp"], utc=True, errors="coerce")
+    sort_columns = [column for column in ("game_pk", "feature_name", "as_of_timestamp", "id") if column in working.columns]
+    if sort_columns:
+        working = working.sort_values(sort_columns)
+    working = working.drop_duplicates(subset=["game_pk", "feature_name"], keep="last")
+
+    feature_frame = working.pivot_table(
         index="game_pk",
         columns="feature_name",
         values="feature_value",
-        aggfunc="last",
+        aggfunc="first",
     ).reset_index()
     feature_frame.columns.name = None
     return feature_frame
@@ -1424,6 +1440,8 @@ def _assemble_training_rows(
     feature_frame: pd.DataFrame,
     database_path: Path,
     weather_fetcher: WeatherFetcher | None,
+    historical_odds_db_path: str | Path | None,
+    historical_rl_book_name: str | None,
 ) -> pd.DataFrame:
     feature_lookup = (
         feature_frame.set_index("game_pk")
@@ -1490,7 +1508,111 @@ def _assemble_training_rows(
         rows.append(row)
 
     dataset = pd.DataFrame(rows).sort_values(["scheduled_start", "game_pk"]).reset_index(drop=True)
-    return _fill_missing_feature_values(dataset)
+    dataset = _fill_missing_feature_values(dataset)
+    return _attach_historical_runline_targets(
+        dataset,
+        historical_odds_db_path=historical_odds_db_path,
+        historical_rl_book_name=historical_rl_book_name,
+    )
+
+
+def _attach_historical_runline_targets(
+    dataset: pd.DataFrame,
+    *,
+    historical_odds_db_path: str | Path | None,
+    historical_rl_book_name: str | None,
+) -> pd.DataFrame:
+    attached = dataset.copy()
+
+    if historical_odds_db_path is None or attached.empty:
+        return _initialize_posted_runline_columns(attached)
+
+    rl_market = load_historical_odds_for_games(
+        db_path=historical_odds_db_path,
+        game_pks=attached["game_pk"].astype(int).tolist(),
+        market_type="f5_rl",
+        book_name=historical_rl_book_name,
+        snapshot_selection="opening",
+    )
+    if rl_market.empty:
+        return _initialize_posted_runline_columns(attached)
+
+    rl_market = rl_market.copy()
+
+    attached = attached.merge(
+        rl_market.rename(
+            columns={
+                "book_name": "posted_f5_rl_book_name",
+                "home_point": "posted_f5_rl_home_point",
+                "away_point": "posted_f5_rl_away_point",
+                "home_odds": "posted_f5_rl_home_odds",
+                "away_odds": "posted_f5_rl_away_odds",
+            }
+        )[
+            [
+                "game_pk",
+                "posted_f5_rl_book_name",
+                "posted_f5_rl_home_point",
+                "posted_f5_rl_away_point",
+                "posted_f5_rl_home_odds",
+                "posted_f5_rl_away_odds",
+            ]
+        ],
+        on="game_pk",
+        how="left",
+        suffixes=("", "_imported"),
+    )
+
+    for column in (
+        "posted_f5_rl_home_point",
+        "posted_f5_rl_away_point",
+        "posted_f5_rl_home_odds",
+        "posted_f5_rl_away_odds",
+    ):
+        attached[column] = pd.to_numeric(attached[column], errors="coerce")
+
+    cover_margin = attached["f5_margin"] + attached["posted_f5_rl_home_point"]
+    attached["push_at_posted_line"] = cover_margin.eq(0).where(
+        attached["posted_f5_rl_home_point"].notna(),
+        pd.NA,
+    )
+    attached["home_cover_at_posted_line"] = cover_margin.gt(0).where(
+        attached["posted_f5_rl_home_point"].notna(),
+        pd.NA,
+    )
+    attached["away_cover_at_posted_line"] = cover_margin.lt(0).where(
+        attached["posted_f5_rl_home_point"].notna(),
+        pd.NA,
+    )
+
+    for column in (
+        "push_at_posted_line",
+        "home_cover_at_posted_line",
+        "away_cover_at_posted_line",
+    ):
+        attached[column] = attached[column].map(
+            lambda value: int(bool(value)) if pd.notna(value) else pd.NA
+        )
+
+    return _initialize_posted_runline_columns(attached)
+
+
+def _initialize_posted_runline_columns(dataframe: pd.DataFrame) -> pd.DataFrame:
+    initialized = dataframe.copy()
+    default_columns: dict[str, Any] = {
+        "posted_f5_rl_book_name": None,
+        "posted_f5_rl_home_point": pd.NA,
+        "posted_f5_rl_away_point": pd.NA,
+        "posted_f5_rl_home_odds": pd.NA,
+        "posted_f5_rl_away_odds": pd.NA,
+        "home_cover_at_posted_line": pd.NA,
+        "away_cover_at_posted_line": pd.NA,
+        "push_at_posted_line": pd.NA,
+    }
+    for column, default_value in default_columns.items():
+        if column not in initialized.columns:
+            initialized[column] = default_value
+    return initialized
 
 
 def _assemble_inference_rows(
@@ -2056,6 +2178,14 @@ def _feature_columns(dataframe: pd.DataFrame) -> list[str]:
         "f5_tied_after_5",
         "f5_ml_result",
         "f5_rl_result",
+        "posted_f5_rl_book_name",
+        "posted_f5_rl_home_point",
+        "posted_f5_rl_away_point",
+        "posted_f5_rl_home_odds",
+        "posted_f5_rl_away_odds",
+        "home_cover_at_posted_line",
+        "away_cover_at_posted_line",
+        "push_at_posted_line",
     }
     return [column for column in dataframe.columns if column not in non_feature_columns]
 

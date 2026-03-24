@@ -6,6 +6,7 @@ import { MetricCard } from "../components/MetricCard";
 import { WarningBadge } from "../components/WarningBadge";
 import { FeatureImportanceChart } from "../charts/FeatureImportanceChart";
 import { ReliabilityDiagramChart } from "../charts/ReliabilityDiagramChart";
+import { TooltipLabel } from "../components/TooltipLabel";
 
 /* ============================================================================
  * METRIC DEFINITIONS
@@ -42,12 +43,12 @@ const headerStyle: React.CSSProperties = {
 
 const backBtnStyle: React.CSSProperties = {
   background: "none",
-  border: "1px solid #e5e4e7",
-  borderRadius: 6,
+  border: "1px solid var(--border)",
+  borderRadius: 8,
   padding: "6px 14px",
   fontSize: 13,
   fontFamily: "Arial, Helvetica, sans-serif",
-  color: "#6b6375",
+  color: "var(--text)",
   cursor: "pointer",
   transition: "background 0.15s, color 0.15s",
   whiteSpace: "nowrap",
@@ -64,10 +65,10 @@ const kindBadgeStyle: React.CSSProperties = {
   display: "inline-block",
   padding: "3px 10px",
   borderRadius: 10,
-  background: "#eef2f6",
+  background: "var(--surface-2)",
   fontSize: 12,
   fontWeight: 500,
-  color: "#495464",
+  color: "var(--text)",
   fontFamily: "Arial, Helvetica, sans-serif",
   textTransform: "capitalize",
 };
@@ -77,14 +78,14 @@ const metaRowStyle: React.CSSProperties = {
   flexWrap: "wrap",
   gap: 20,
   fontSize: 13,
-  color: "#6b6375",
+  color: "var(--text)",
   fontFamily: "Arial, Helvetica, sans-serif",
   marginBottom: 20,
 };
 
 const metaLabelStyle: React.CSSProperties = {
   fontWeight: 600,
-  color: "#08060d",
+  color: "var(--text-h)",
   marginRight: 4,
 };
 
@@ -109,7 +110,7 @@ const sectionStyle: React.CSSProperties = {
 const sectionTitleStyle: React.CSSProperties = {
   fontSize: 14,
   fontWeight: 600,
-  color: "#08060d",
+  color: "var(--text-h)",
   fontFamily: "Arial, Helvetica, sans-serif",
   margin: "0 0 10px 0",
 };
@@ -118,13 +119,13 @@ const preStyle: React.CSSProperties = {
   fontFamily: "ui-monospace, Consolas, monospace",
   fontSize: 13,
   lineHeight: "145%",
-  background: "#f4f3ec",
-  border: "1px solid #e5e4e7",
-  borderRadius: 6,
+  background: "var(--bg-elevated)",
+  border: "1px solid var(--border)",
+  borderRadius: 10,
   padding: 14,
   margin: 0,
   overflowX: "auto",
-  color: "#08060d",
+  color: "var(--text-h)",
 };
 
 const centerStyle: React.CSSProperties = {
@@ -132,17 +133,17 @@ const centerStyle: React.CSSProperties = {
   justifyContent: "center",
   alignItems: "center",
   minHeight: 200,
-  color: "#6b6375",
+  color: "var(--text)",
   fontSize: 14,
   fontFamily: "Arial, Helvetica, sans-serif",
 };
 
 const errorBoxStyle: React.CSSProperties = {
   background: "#fdecea",
-  border: "1px solid #f5c6c6",
-  borderRadius: 6,
+  border: "1px solid #693039",
+  borderRadius: 10,
   padding: 20,
-  color: "#9f1f1f",
+  color: "var(--bad-fg)",
   fontSize: 14,
   fontFamily: "Arial, Helvetica, sans-serif",
   textAlign: "center",
@@ -169,7 +170,7 @@ const RunDetailPage: React.FC = () => {
     setLoading(true);
     setError(null);
 
-    getRunDetail(encodeURIComponent(decodedPath))
+    getRunDetail(decodedPath)
       .then((data) => {
         if (!cancelled) setRun(data);
       })
@@ -286,50 +287,50 @@ const RunDetailPage: React.FC = () => {
       {/* Meta row */}
       <div style={metaRowStyle}>
         <span>
-          <span style={metaLabelStyle}>Model:</span>
+          <TooltipLabel label="Model" as="span" style={metaLabelStyle} />
           {run.model_name}
         </span>
         <span>
-          <span style={metaLabelStyle}>Variant:</span>
+          <TooltipLabel label="Variant" as="span" style={metaLabelStyle} />
           {run.variant}
         </span>
         <span>
-          <span style={metaLabelStyle}>Version:</span>
+          <TooltipLabel label="Version" as="span" style={metaLabelStyle} />
           {run.model_version}
         </span>
         <span>
-          <span style={metaLabelStyle}>Target:</span>
+          <TooltipLabel label="Target" as="span" style={metaLabelStyle} />
           {run.target_column}
         </span>
         <span>
-          <span style={metaLabelStyle}>Holdout:</span>
+          <TooltipLabel label="Holdout" as="span" style={metaLabelStyle} />
           {run.holdout_season}
         </span>
         <span>
-          <span style={metaLabelStyle}>Timestamp:</span>
+          <TooltipLabel label="Timestamp" as="span" style={metaLabelStyle} />
           {run.run_timestamp}
         </span>
         {run.train_row_count != null && (
           <span>
-            <span style={metaLabelStyle}>Train rows:</span>
+            <TooltipLabel label="Train rows" as="span" style={metaLabelStyle} />
             {run.train_row_count.toLocaleString()}
           </span>
         )}
         {run.holdout_row_count != null && (
           <span>
-            <span style={metaLabelStyle}>Holdout rows:</span>
+            <TooltipLabel label="Holdout rows" as="span" style={metaLabelStyle} />
             {run.holdout_row_count.toLocaleString()}
           </span>
         )}
         {run.feature_column_count != null && (
           <span>
-            <span style={metaLabelStyle}>Features:</span>
+            <TooltipLabel label="Features" as="span" style={metaLabelStyle} />
             {run.feature_column_count}
           </span>
         )}
         {run.calibration_method != null && (
           <span>
-            <span style={metaLabelStyle}>Calibration:</span>
+            <TooltipLabel label="Calibration" as="span" style={metaLabelStyle} />
             {run.calibration_method}
           </span>
         )}

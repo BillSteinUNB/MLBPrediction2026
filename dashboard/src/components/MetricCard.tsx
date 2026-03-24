@@ -1,5 +1,6 @@
 import React from "react";
 import { DeltaIndicator } from "./DeltaIndicator";
+import { TooltipLabel } from "./TooltipLabel";
 
 export interface MetricCardProps {
   /** Metric display name (e.g. "ROC AUC") */
@@ -20,13 +21,13 @@ export interface MetricCardProps {
 /* ---- Style tokens (aligned to layout.css variables) ---- */
 const containerStyle: React.CSSProperties = {
   minWidth: 180,
-  background: "#ffffff",
-  border: "1px solid #e5e4e7",
-  borderRadius: 6,
+  background: "var(--bg-panel)",
+  border: "1px solid var(--border)",
+  borderRadius: 10,
   padding: 14,
   boxSizing: "border-box",
   fontFamily: "Arial, Helvetica, sans-serif",
-  color: "#08060d",
+  color: "var(--text-h)",
   display: "grid",
   gridTemplateRows: "auto 1fr auto",
   gap: 6,
@@ -35,7 +36,7 @@ const containerStyle: React.CSSProperties = {
 const nameStyle: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 500,
-  color: "#6b6375",
+  color: "var(--text)",
   margin: 0,
   textTransform: "uppercase",
   letterSpacing: "0.04em",
@@ -50,14 +51,14 @@ const valueRowStyle: React.CSSProperties = {
 const valueStyle: React.CSSProperties = {
   fontSize: 24,
   fontWeight: 600,
-  color: "#08060d",
+  color: "var(--text-h)",
   margin: 0,
   fontFamily: "ui-monospace, Consolas, monospace",
 };
 
 const unitStyle: React.CSSProperties = {
   fontSize: 12,
-  color: "#9ca3af",
+  color: "var(--muted)",
   margin: 0,
 };
 
@@ -79,7 +80,7 @@ export const MetricCard: React.FC<MetricCardProps> = ({
 }) => {
   return (
     <div style={containerStyle} data-metric={name}>
-      <p style={nameStyle}>{name}</p>
+      <TooltipLabel label={name} as="p" style={nameStyle} />
       <div style={valueRowStyle}>
         <p style={valueStyle}>{formatValue(value)}</p>
         {unit ? <span style={unitStyle}>{unit}</span> : null}

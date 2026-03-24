@@ -8,9 +8,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.dashboard.dependencies import get_experiments_dir, get_models_dir
 from src.dashboard.routes import lanes_router
 from src.dashboard.routes.compare import create_compare_router
+from src.dashboard.routes.live_season import router as live_season_router
 from src.dashboard.routes.overview import router as overview_router
 from src.dashboard.routes.promotions import router as promotions_router
 from src.dashboard.routes.runs import router as runs_router
+from src.dashboard.routes.slate import router as slate_router
 
 app = FastAPI(
     title="MLB Prediction Dashboard API",
@@ -36,6 +38,8 @@ app.include_router(lanes_router)
 app.include_router(runs_router)
 app.include_router(promotions_router)
 app.include_router(create_compare_router())
+app.include_router(slate_router)
+app.include_router(live_season_router)
 
 
 def _count_experiment_rows(experiments_dir: Path) -> int:

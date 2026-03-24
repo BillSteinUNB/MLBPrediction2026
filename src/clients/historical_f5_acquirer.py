@@ -21,8 +21,15 @@ DEFAULT_TRAINING_DATA_PATH = REPO_ROOT / "data" / "training" / "training_data_20
 DEFAULT_NORMALIZED_OUTPUT_PATH = DEFAULT_HISTORICAL_ODDS_ROOT / "sbr_f5_ml_2018_2025.parquet"
 DEFAULT_CLOSING_OUTPUT_PATH = DEFAULT_HISTORICAL_ODDS_ROOT / "sbr_f5_ml_closing_2018_2025.parquet"
 DEFAULT_RAW_OUTPUT_PATH = DEFAULT_HISTORICAL_ODDS_ROOT / "sbr_f5_ml_2018_2025.raw.json"
+DEFAULT_RL_NORMALIZED_OUTPUT_PATH = DEFAULT_HISTORICAL_ODDS_ROOT / "sbr_f5_rl_2018_2025.parquet"
+DEFAULT_RL_CLOSING_OUTPUT_PATH = DEFAULT_HISTORICAL_ODDS_ROOT / "sbr_f5_rl_closing_2018_2025.parquet"
+DEFAULT_RL_RAW_OUTPUT_PATH = DEFAULT_HISTORICAL_ODDS_ROOT / "sbr_f5_rl_2018_2025.raw.json"
 SBR_F5_ML_URL_TEMPLATE = (
     "https://www.sportsbookreview.com/betting-odds/mlb-baseball/money-line/1st-half/"
+    "?date={game_date}"
+)
+SBR_F5_RL_URL_TEMPLATE = (
+    "https://www.sportsbookreview.com/betting-odds/mlb-baseball/pointspread/1st-half/"
     "?date={game_date}"
 )
 SBR_TIMEOUT = 30.0
@@ -38,6 +45,8 @@ REQUEST_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 F5_MARKET_TYPE = "f5_ml"
+F5_RL_MARKET_TYPE = "f5_rl"
+DEFAULT_MAX_ABS_AMERICAN_ODDS = 800
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,7 +150,40 @@ def fetch_sbr_f5_moneyline_raw(
     results: list[DateFetchResult] = []
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as executor:
         futures = {
-            executor.submit(_fetch_sbr_date, game_date=game_date): game_date for game_date in dates
+            executor.submit(
+                _fetch_sbr_date,
+                game_date=game_date,
+                url_template=SBR_F5_ML_URL_TEMPLATE,
+            ): game_date
+            for game_date in dates
+        }
+        for future in as_completed(futures):
+            results.append(future.result())
+
+    raw_games: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+    for result in results:
+        if result.error:
+            errors.append({"game_date": result.game_date, "error": result.error})
+            continue
+        raw_games.extend(result.raw_games)
+    return raw_games, errors
+
+
+def fetch_sbr_f5_runline_raw(
+    *,
+    dates: Sequence[str],
+    concurrency: int = 8,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    results: list[DateFetchResult] = []
+    with ThreadPoolExecutor(max_workers=max(1, concurrency)) as executor:
+        futures = {
+            executor.submit(
+                _fetch_sbr_date,
+                game_date=game_date,
+                url_template=SBR_F5_RL_URL_TEMPLATE,
+            ): game_date
+            for game_date in dates
         }
         for future in as_completed(futures):
             results.append(future.result())
@@ -260,6 +302,116 @@ def normalize_sbr_f5_moneyline(
     return normalized, unmatched
 
 
+def normalize_sbr_f5_runline(
+    raw_games: Sequence[dict[str, Any]],
+    *,
+    training_path: str | Path = DEFAULT_TRAINING_DATA_PATH,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    schedule = load_training_schedule(training_path)
+    schedule_lookup = _build_schedule_lookup(schedule)
+    code_to_full_name = _build_code_to_full_name()
+    team_alias_to_code = _build_team_alias_to_code(code_to_full_name)
+
+    rows: list[dict[str, Any]] = []
+    unmatched_games: list[dict[str, Any]] = []
+    for raw_game in raw_games:
+        game_view = raw_game.get("gameView", {})
+        home_name = str(game_view.get("homeTeam", {}).get("fullName") or "").strip()
+        away_name = str(game_view.get("awayTeam", {}).get("fullName") or "").strip()
+        home_code = team_alias_to_code.get(_normalize_name(home_name))
+        away_code = team_alias_to_code.get(_normalize_name(away_name))
+        start_time = pd.to_datetime(game_view.get("startDate"), utc=True, errors="coerce")
+        if pd.isna(start_time):
+            unmatched_games.append(
+                {
+                    "home_team": home_name,
+                    "away_team": away_name,
+                    "start_time": str(game_view.get("startDate") or ""),
+                    "reason": "invalid_start_time",
+                }
+            )
+            continue
+        if home_code is None or away_code is None:
+            unmatched_games.append(
+                {
+                    "home_team": home_name,
+                    "away_team": away_name,
+                    "start_time": start_time.isoformat(),
+                    "reason": "unmapped_team",
+                }
+            )
+            continue
+
+        schedule_row = _match_schedule_row(
+            schedule_lookup,
+            game_date=str(start_time.date()),
+            home_team=home_code,
+            away_team=away_code,
+            start_time=start_time,
+        )
+        if schedule_row is None:
+            unmatched_games.append(
+                {
+                    "home_team": home_name,
+                    "away_team": away_name,
+                    "start_time": start_time.isoformat(),
+                    "reason": "schedule_miss",
+                }
+            )
+            continue
+
+        canonical_home_name = code_to_full_name[home_code]
+        canonical_away_name = code_to_full_name[away_code]
+        game_pk = int(schedule_row["game_pk"])
+        commence_time = pd.to_datetime(schedule_row["scheduled_start"], utc=True)
+        for odds_view in raw_game.get("oddsViews", []):
+            if not isinstance(odds_view, dict):
+                continue
+            sportsbook = _normalize_book_name(str(odds_view.get("sportsbook") or "unknown"))
+            opening_line = odds_view.get("openingLine") or {}
+            current_line = odds_view.get("currentLine") or {}
+            for is_opening, line, fetched_at in (
+                (True, opening_line, commence_time - pd.Timedelta(days=1)),
+                (False, current_line, commence_time),
+            ):
+                home_odds = _coerce_nullable_int(line.get("homeOdds"))
+                away_odds = _coerce_nullable_int(line.get("awayOdds"))
+                home_point = _coerce_nullable_float(line.get("homeSpread"))
+                away_point = _coerce_nullable_float(line.get("awaySpread"))
+                if home_odds is None or away_odds is None:
+                    continue
+                if home_point is None or away_point is None:
+                    continue
+                if not _is_valid_american_odds(home_odds) or not _is_valid_american_odds(away_odds):
+                    continue
+                rows.append(
+                    {
+                        "game_pk": game_pk,
+                        "commence_time": commence_time.isoformat(),
+                        "game_date": str(commence_time.date()),
+                        "home_team": canonical_home_name,
+                        "away_team": canonical_away_name,
+                        "market_type": F5_RL_MARKET_TYPE,
+                        "book_name": f"sbr:{sportsbook}",
+                        "home_odds": home_odds,
+                        "away_odds": away_odds,
+                        "home_point": home_point,
+                        "away_point": away_point,
+                        "fetched_at": fetched_at.isoformat(),
+                        "is_opening": is_opening,
+                        "source_name": "sbr",
+                        "source_event_id": game_view.get("gameId"),
+                        "source_start_time": start_time.isoformat(),
+                    }
+                )
+
+    normalized = pd.DataFrame(rows)
+    if not normalized.empty:
+        normalized = _dedupe_normalized_rows(normalized)
+    unmatched = pd.DataFrame(unmatched_games)
+    return normalized, unmatched
+
+
 def write_outputs(
     *,
     raw_games: Sequence[dict[str, Any]],
@@ -281,24 +433,27 @@ def write_outputs(
 
     raw_payload = {"games": list(raw_games), "errors": list(errors), "source_name": "sbr"}
     raw_path.write_text(json.dumps(raw_payload, indent=2), encoding="utf-8")
-    normalized.to_parquet(normalized_path, index=False)
-    closing_frame = normalized.loc[~normalized["is_opening"]].reset_index(drop=True)
+    normalized_frame = normalized.copy()
+    if normalized_frame.empty:
+        normalized_frame = _empty_normalized_frame()
+    normalized_frame.to_parquet(normalized_path, index=False)
+    closing_frame = normalized_frame.loc[~normalized_frame["is_opening"]].reset_index(drop=True)
     closing_frame.to_parquet(closing_path, index=False)
     unmatched.to_csv(unmatched_path, index=False)
 
     metadata = {
         "raw_games": len(raw_games),
         "errors": len(errors),
-        "normalized_rows": int(len(normalized)),
+        "normalized_rows": int(len(normalized_frame)),
         "closing_rows": int(len(closing_frame)),
-        "opening_rows": int(len(normalized.loc[normalized["is_opening"]]))
-        if not normalized.empty
+        "opening_rows": int(len(normalized_frame.loc[normalized_frame["is_opening"]]))
+        if not normalized_frame.empty
         else 0,
-        "unique_games": int(len(normalized["game_pk"].drop_duplicates()))
-        if not normalized.empty
+        "unique_games": int(len(normalized_frame["game_pk"].drop_duplicates()))
+        if not normalized_frame.empty
         else 0,
-        "books": sorted(normalized["book_name"].dropna().unique().tolist())
-        if not normalized.empty
+        "books": sorted(normalized_frame["book_name"].dropna().unique().tolist())
+        if not normalized_frame.empty
         else [],
         "unmatched_games": int(len(unmatched)),
     }
@@ -316,29 +471,31 @@ def import_closing_lines(
     *,
     closing_output_path: str | Path = DEFAULT_CLOSING_OUTPUT_PATH,
     db_path: str | Path = DEFAULT_DB_PATH,
+    market_type: str = F5_MARKET_TYPE,
 ) -> int:
     from src.clients.historical_odds_client import import_historical_odds
 
     return import_historical_odds(
         source_path=closing_output_path,
         db_path=db_path,
-        default_market_type=F5_MARKET_TYPE,
+        default_market_type=market_type,
         default_book_name="sbr",
     )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Acquire historical MLB F5 moneyline odds from SBR"
+        description="Acquire historical MLB F5 odds from SBR"
     )
     parser.add_argument("--training-path", default=str(DEFAULT_TRAINING_DATA_PATH))
     parser.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
     parser.add_argument("--start-date")
     parser.add_argument("--end-date")
+    parser.add_argument("--market-type", choices=["f5_ml", "f5_rl"], default="f5_ml")
     parser.add_argument("--concurrency", type=int, default=8)
-    parser.add_argument("--raw-output", default=str(DEFAULT_RAW_OUTPUT_PATH))
-    parser.add_argument("--normalized-output", default=str(DEFAULT_NORMALIZED_OUTPUT_PATH))
-    parser.add_argument("--closing-output", default=str(DEFAULT_CLOSING_OUTPUT_PATH))
+    parser.add_argument("--raw-output")
+    parser.add_argument("--normalized-output")
+    parser.add_argument("--closing-output")
     parser.add_argument("--seed-games", action="store_true")
     parser.add_argument("--import-closing", action="store_true")
     args = parser.parse_args(argv)
@@ -350,16 +507,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         schedule = schedule.loc[schedule["game_date"] <= args.end_date].copy()
     dates = sorted(schedule["game_date"].astype(str).unique().tolist())
 
-    raw_games, errors = fetch_sbr_f5_moneyline_raw(dates=dates, concurrency=args.concurrency)
-    normalized, unmatched = normalize_sbr_f5_moneyline(raw_games, training_path=args.training_path)
+    if args.market_type == F5_RL_MARKET_TYPE:
+        raw_output = args.raw_output or str(DEFAULT_RL_RAW_OUTPUT_PATH)
+        normalized_output = args.normalized_output or str(DEFAULT_RL_NORMALIZED_OUTPUT_PATH)
+        closing_output = args.closing_output or str(DEFAULT_RL_CLOSING_OUTPUT_PATH)
+        raw_games, errors = fetch_sbr_f5_runline_raw(dates=dates, concurrency=args.concurrency)
+        normalized, unmatched = normalize_sbr_f5_runline(raw_games, training_path=args.training_path)
+    else:
+        raw_output = args.raw_output or str(DEFAULT_RAW_OUTPUT_PATH)
+        normalized_output = args.normalized_output or str(DEFAULT_NORMALIZED_OUTPUT_PATH)
+        closing_output = args.closing_output or str(DEFAULT_CLOSING_OUTPUT_PATH)
+        raw_games, errors = fetch_sbr_f5_moneyline_raw(dates=dates, concurrency=args.concurrency)
+        normalized, unmatched = normalize_sbr_f5_moneyline(raw_games, training_path=args.training_path)
+
     outputs = write_outputs(
         raw_games=raw_games,
         errors=errors,
         normalized=normalized,
         unmatched=unmatched,
-        raw_output_path=args.raw_output,
-        normalized_output_path=args.normalized_output,
-        closing_output_path=args.closing_output,
+        raw_output_path=raw_output,
+        normalized_output_path=normalized_output,
+        closing_output_path=closing_output,
     )
 
     seeded_games = 0
@@ -371,7 +539,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     imported_rows = 0
     if args.import_closing:
         imported_rows = import_closing_lines(
-            closing_output_path=outputs["closing"], db_path=args.db_path
+            closing_output_path=outputs["closing"],
+            db_path=args.db_path,
+            market_type=args.market_type,
         )
 
     print(
@@ -380,6 +550,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "dates_requested": len(dates),
                 "raw_games": len(raw_games),
                 "errors": len(errors),
+                "market_type": args.market_type,
                 "normalized_rows": int(len(normalized)),
                 "unique_games": (
                     int(len(normalized["game_pk"].drop_duplicates())) if not normalized.empty else 0
@@ -395,8 +566,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def _fetch_sbr_date(*, game_date: str) -> DateFetchResult:
-    url = SBR_F5_ML_URL_TEMPLATE.format(game_date=game_date)
+def _fetch_sbr_date(*, game_date: str, url_template: str) -> DateFetchResult:
+    url = url_template.format(game_date=game_date)
     try:
         response = requests.get(url, headers=REQUEST_HEADERS, timeout=SBR_TIMEOUT)
         if response.status_code == 404:
@@ -506,8 +677,18 @@ def _coerce_nullable_int(value: Any) -> int | None:
         return None
 
 
-def _is_valid_american_odds(value: int) -> bool:
-    return value <= -100 or value >= 100
+def _coerce_nullable_float(value: Any) -> float | None:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_valid_american_odds(value: int, *, max_abs_odds: int = DEFAULT_MAX_ABS_AMERICAN_ODDS) -> bool:
+    absolute_value = abs(int(value))
+    return absolute_value >= 100 and absolute_value <= int(max_abs_odds)
 
 
 def _normalize_game_status(value: str) -> str:
@@ -549,6 +730,29 @@ def _dedupe_normalized_rows(frame: pd.DataFrame) -> pd.DataFrame:
     return deduped.reset_index(drop=True)
 
 
+def _empty_normalized_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        columns=[
+            "game_pk",
+            "commence_time",
+            "game_date",
+            "home_team",
+            "away_team",
+            "market_type",
+            "book_name",
+            "home_odds",
+            "away_odds",
+            "home_point",
+            "away_point",
+            "fetched_at",
+            "is_opening",
+            "source_name",
+            "source_event_id",
+            "source_start_time",
+        ]
+    )
+
+
 def _timestamp_seconds(value: Any) -> float:
     parsed = pd.to_datetime(value, utc=True, errors="coerce")
     if pd.isna(parsed):
@@ -557,15 +761,21 @@ def _timestamp_seconds(value: Any) -> float:
 
 
 __all__ = [
+    "DEFAULT_MAX_ABS_AMERICAN_ODDS",
     "DEFAULT_CLOSING_OUTPUT_PATH",
     "DEFAULT_HISTORICAL_ODDS_ROOT",
     "DEFAULT_NORMALIZED_OUTPUT_PATH",
     "DEFAULT_RAW_OUTPUT_PATH",
+    "DEFAULT_RL_CLOSING_OUTPUT_PATH",
+    "DEFAULT_RL_NORMALIZED_OUTPUT_PATH",
+    "DEFAULT_RL_RAW_OUTPUT_PATH",
     "DEFAULT_TRAINING_DATA_PATH",
     "fetch_sbr_f5_moneyline_raw",
+    "fetch_sbr_f5_runline_raw",
     "import_closing_lines",
     "load_training_schedule",
     "normalize_sbr_f5_moneyline",
+    "normalize_sbr_f5_runline",
     "seed_games_from_training_data",
     "write_outputs",
 ]

@@ -113,19 +113,24 @@ def test_train_calibrated_models_trains_and_saves_versioned_bundle(tmp_path) -> 
     holdout_frame = frame.loc[frame["season"] == 2025].reset_index(drop=True)
 
     for artifact in result.models.values():
-        assert artifact.model_path.exists()
         assert artifact.stacking_model_path.exists()
-        assert artifact.model_path.name.startswith(f"{artifact.model_name}_")
-        assert result.model_version in artifact.model_path.name
         assert artifact.calibration_row_count == 15
+        assert artifact.promoted_variant in {"base", "stacking", "calibrated"}
+        if artifact.persisted:
+            assert artifact.model_path.exists()
+            assert artifact.model_path.name.startswith(f"{artifact.model_name}_")
+            assert result.model_version in artifact.model_path.name
 
-        loaded_model = joblib.load(artifact.model_path)
-        probabilities = loaded_model.predict_calibrated(holdout_frame)
+            loaded_model = joblib.load(artifact.model_path)
+            probabilities = loaded_model.predict_calibrated(holdout_frame)
 
-        assert loaded_model.__class__.__name__ == "CalibratedStackingModel"
-        assert loaded_model.calibration_method == "platt"
-        assert probabilities.shape == (len(holdout_frame),)
-        assert ((probabilities >= 0.0) & (probabilities <= 1.0)).all()
+            assert loaded_model.__class__.__name__ == "CalibratedStackingModel"
+            assert loaded_model.calibration_method == "platt"
+            assert probabilities.shape == (len(holdout_frame),)
+            assert ((probabilities >= 0.0) & (probabilities <= 1.0)).all()
+        else:
+            assert not artifact.model_path.exists()
+            assert artifact.skip_reason is not None
 
 
 def test_train_calibrated_models_reports_quality_gates_and_reliability_data(tmp_path) -> None:
@@ -263,13 +268,20 @@ def test_cli_training_produces_loadable_calibrated_bundle(tmp_path) -> None:
         text=True,
     )
 
-    artifact_path = next(output_dir.glob("f5_ml_calibrated_model_*.joblib"))
-    loaded_model = joblib.load(artifact_path)
-    holdout_frame = frame.loc[frame["season"] == 2025].reset_index(drop=True)
-    probabilities = loaded_model.predict_calibrated(holdout_frame)
+    summary_path = next(output_dir.glob("calibration_run_*.json"))
+    summary_payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    model_payload = summary_payload["models"]["f5_ml_calibrated_model"]
 
-    assert probabilities.shape == (len(holdout_frame),)
-    assert ((probabilities >= 0.0) & (probabilities <= 1.0)).all()
+    if model_payload["persisted"]:
+        artifact_path = next(output_dir.glob("f5_ml_calibrated_model_*.joblib"))
+        loaded_model = joblib.load(artifact_path)
+        holdout_frame = frame.loc[frame["season"] == 2025].reset_index(drop=True)
+        probabilities = loaded_model.predict_calibrated(holdout_frame)
+
+        assert probabilities.shape == (len(holdout_frame),)
+        assert ((probabilities >= 0.0) & (probabilities <= 1.0)).all()
+    else:
+        assert model_payload["promoted_variant"] in {"base", "stacking"}
 
 
 def test_main_rebuilds_training_data_with_live_weather_fetcher(

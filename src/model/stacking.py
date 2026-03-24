@@ -20,6 +20,7 @@ from xgboost import XGBClassifier
 
 from src.clients.weather_client import fetch_game_weather
 from src.model.data_builder import DEFAULT_OUTPUT_PATH, build_training_dataset
+from src.model.promotion import build_promotion_reason, select_promoted_variant
 from src.model.xgboost_trainer import (
     DEFAULT_MODEL_OUTPUT_DIR,
     DEFAULT_RANDOM_STATE,
@@ -78,6 +79,8 @@ class StackingModelArtifact:
     oof_prediction_strategy: str
     persisted: bool
     skip_reason: str | None
+    promoted_variant: str
+    promotion_reason: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,6 +226,7 @@ def train_stacking_models(
     resolved_output_dir = Path(output_dir)
     resolved_output_dir.mkdir(parents=True, exist_ok=True)
 
+    logger.info("Starting stacking training for holdout season %s", effective_holdout_season)
     base_training_result = train_f5_models(
         training_data=dataset,
         output_dir=resolved_output_dir,
@@ -241,6 +245,11 @@ def train_stacking_models(
     artifacts: dict[str, StackingModelArtifact] = {}
 
     for spec in _STACKING_MODEL_SPECS:
+        logger.info(
+            "Training stacking variant %s using base model %s",
+            str(spec["model_name"]),
+            str(spec["base_model_name"]),
+        )
         base_artifact = base_training_result.models[str(spec["base_model_name"])]
         stacking_artifact = _train_single_stacking_model(
             dataset=dataset,
@@ -270,6 +279,9 @@ def train_stacking_models(
                 "holdout_season": effective_holdout_season,
                 "feature_columns": feature_columns,
                 "raw_meta_feature_columns": resolved_raw_meta_feature_columns,
+                "promoted_variants": {
+                    name: artifact.promoted_variant for name, artifact in artifacts.items()
+                },
                 "models": {
                     name: _stacking_artifact_to_json_ready(artifact)
                     for name, artifact in artifacts.items()
@@ -402,19 +414,38 @@ def _train_single_stacking_model(
     }
     logger.info("%s holdout metrics: %s", model_name, holdout_metrics)
 
+    metrics_by_variant = {
+        "base": {
+            "log_loss": holdout_metrics["base_log_loss"],
+            "brier": holdout_metrics["base_brier"],
+            "roc_auc": holdout_metrics["base_roc_auc"],
+            "accuracy": holdout_metrics["base_accuracy"],
+        },
+        "stacking": {
+            "log_loss": holdout_metrics["stacked_log_loss"],
+            "brier": holdout_metrics["stacked_brier"],
+            "roc_auc": holdout_metrics["stacked_roc_auc"],
+            "accuracy": holdout_metrics["stacked_accuracy"],
+        },
+    }
+    promoted_variant = select_promoted_variant(metrics_by_variant)
+    promotion_reason = build_promotion_reason(
+        promoted_variant=promoted_variant,
+        metrics_by_variant=metrics_by_variant,
+    )
+
     model_path = output_dir / f"{model_name}_{model_version}.joblib"
     metadata_path = model_path.with_suffix(".metadata.json")
     persisted = (
         not enforce_holdout_brier_gate
-        or holdout_metrics["stacked_brier"] <= holdout_metrics["base_brier"]
+        or promoted_variant == "stacking"
     )
     skip_reason: str | None = None
 
     if enforce_holdout_brier_gate and not persisted:
         skip_reason = (
-            "Skipped persistence because holdout stacked_brier "
-            f"{holdout_metrics['stacked_brier']:.6f} exceeded base_brier "
-            f"{holdout_metrics['base_brier']:.6f}."
+            "Skipped persistence because stacking was not promoted; "
+            f"{promotion_reason}."
         )
         logger.warning("%s %s", model_name, skip_reason)
 
@@ -446,6 +477,8 @@ def _train_single_stacking_model(
         "holdout_metrics": holdout_metrics,
         "persisted": persisted,
         "skip_reason": skip_reason,
+        "promoted_variant": promoted_variant,
+        "promotion_reason": promotion_reason,
         "trained_at": datetime.now(UTC).isoformat(),
     }
     if persisted:
@@ -473,6 +506,8 @@ def _train_single_stacking_model(
         oof_prediction_strategy="cross_val_predict",
         persisted=persisted,
         skip_reason=skip_reason,
+        promoted_variant=promoted_variant,
+        promotion_reason=promotion_reason,
     )
 
 

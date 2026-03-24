@@ -47,10 +47,10 @@ const MetricComparison: React.FC<MetricComparisonProps> = ({ title, run1Label, r
     };
 
     const layout: Partial<Plotly.Layout> = {
-      title,
+      title: { text: title },
       barmode: 'group',
-      xaxis: { title: 'Metric' },
-      yaxis: { title: 'Value' },
+      xaxis: { title: { text: 'Metric' } },
+      yaxis: { title: { text: 'Value' } },
       autosize: true,
       margin: { t: 40, l: 60, r: 20, b: 80 },
     };

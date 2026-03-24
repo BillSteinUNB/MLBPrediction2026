@@ -208,7 +208,7 @@ function getLaneId(run: RunSummary): string {
 
 function getMetricVal(run: RunSummary | null | undefined, key: string): number | null {
   if (!run) return null;
-  const val = (run as Record<string, unknown>)[key];
+  const val = (run as unknown as Record<string, unknown>)[key];
   if (val === null || val === undefined || typeof val !== "number" || Number.isNaN(val))
     return null;
   return val;

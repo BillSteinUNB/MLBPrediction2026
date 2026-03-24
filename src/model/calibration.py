@@ -19,6 +19,7 @@ from sklearn.metrics import accuracy_score, brier_score_loss, log_loss, roc_auc_
 
 from src.clients.weather_client import fetch_game_weather
 from src.model.data_builder import DEFAULT_OUTPUT_PATH, build_training_dataset
+from src.model.promotion import build_promotion_reason, select_promoted_variant
 from src.model.stacking import (
     DEFAULT_META_LEARNER_MAX_ITER,
     DEFAULT_RAW_META_FEATURE_COLUMNS,
@@ -82,6 +83,10 @@ class CalibrationModelArtifact:
     calibration_window_start: str | None
     calibration_window_end: str | None
     holdout_metrics: dict[str, Any]
+    persisted: bool
+    skip_reason: str | None
+    promoted_variant: str
+    promotion_reason: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -238,6 +243,11 @@ def train_calibrated_models(
     resolved_output_dir = Path(output_dir)
     resolved_output_dir.mkdir(parents=True, exist_ok=True)
 
+    logger.info(
+        "Starting calibration training for holdout season %s using method=%s",
+        effective_holdout_season,
+        calibration_method,
+    )
     stacking_training_frame = pd.concat(
         [dedicated_split.model_training_frame, dedicated_split.holdout_frame],
         ignore_index=True,
@@ -265,6 +275,11 @@ def train_calibrated_models(
 
     artifacts: dict[str, CalibrationModelArtifact] = {}
     for spec in _CALIBRATED_MODEL_SPECS:
+        logger.info(
+            "Evaluating calibration variant %s built on %s",
+            str(spec["model_name"]),
+            str(spec["stacking_model_name"]),
+        )
         artifact = _train_single_calibrated_model(
             dataset=dataset,
             model_name=str(spec["model_name"]),
@@ -297,6 +312,9 @@ def train_calibrated_models(
                 "model_training_row_count": int(len(dedicated_split.model_training_frame)),
                 "calibration_row_count": int(dedicated_split.calibration_row_count),
                 "holdout_row_count": int(len(dedicated_split.holdout_frame)),
+                "promoted_variants": {
+                    name: artifact.promoted_variant for name, artifact in artifacts.items()
+                },
                 "models": {
                     name: _calibration_artifact_to_json_ready(artifact)
                     for name, artifact in artifacts.items()
@@ -540,6 +558,36 @@ def _train_single_calibrated_model(
     )
     logger.info("%s holdout metrics: %s", model_name, holdout_metrics)
 
+    stacking_metadata_payload = json.loads(
+        stacking_model_path.with_suffix(".metadata.json").read_text(encoding="utf-8")
+    )
+    stacking_holdout_metrics = stacking_metadata_payload.get("holdout_metrics", {})
+    metrics_by_variant = {
+        "base": {
+            "log_loss": stacking_holdout_metrics.get("base_log_loss"),
+            "brier": stacking_holdout_metrics.get("base_brier"),
+            "roc_auc": stacking_holdout_metrics.get("base_roc_auc"),
+            "accuracy": stacking_holdout_metrics.get("base_accuracy"),
+        },
+        "stacking": {
+            "log_loss": stacking_holdout_metrics.get("stacked_log_loss"),
+            "brier": stacking_holdout_metrics.get("stacked_brier"),
+            "roc_auc": stacking_holdout_metrics.get("stacked_roc_auc"),
+            "accuracy": stacking_holdout_metrics.get("stacked_accuracy"),
+        },
+        "calibrated": {
+            "log_loss": holdout_metrics.get("calibrated_log_loss"),
+            "brier": holdout_metrics.get("calibrated_brier"),
+            "roc_auc": holdout_metrics.get("calibrated_roc_auc"),
+            "accuracy": holdout_metrics.get("calibrated_accuracy"),
+        },
+    }
+    promoted_variant = select_promoted_variant(metrics_by_variant)
+    promotion_reason = build_promotion_reason(
+        promoted_variant=promoted_variant,
+        metrics_by_variant=metrics_by_variant,
+    )
+
     calibrated_model = CalibratedStackingModel(
         model_name=model_name,
         target_column=target_column,
@@ -547,7 +595,16 @@ def _train_single_calibrated_model(
         calibrator=calibrator,
     )
     model_path = output_dir / f"{model_name}_{model_version}.joblib"
-    joblib.dump(calibrated_model, model_path)
+    persisted = promoted_variant == "calibrated"
+    skip_reason: str | None = None
+    if persisted:
+        joblib.dump(calibrated_model, model_path)
+    else:
+        skip_reason = (
+            "Skipped persistence because calibrated variant was not promoted; "
+            f"{promotion_reason}."
+        )
+        logger.warning("%s %s", model_name, skip_reason)
 
     calibration_window_start = (
         pd.Timestamp(calibration_frame["scheduled_start"].iloc[0]).isoformat()
@@ -585,12 +642,20 @@ def _train_single_calibrated_model(
                     )
                 ),
                 "holdout_metrics": holdout_metrics,
+                "persisted": persisted,
+                "skip_reason": skip_reason,
+                "promoted_variant": promoted_variant,
+                "promotion_reason": promotion_reason,
                 "trained_at": datetime.now(UTC).isoformat(),
             },
             indent=2,
         ),
         encoding="utf-8",
     )
+    if not persisted and model_path.exists():
+        model_path.unlink()
+    if not persisted and metadata_path.exists():
+        metadata_path.unlink()
 
     return CalibrationModelArtifact(
         model_name=model_name,
@@ -608,6 +673,10 @@ def _train_single_calibrated_model(
         calibration_window_start=calibration_window_start,
         calibration_window_end=calibration_window_end,
         holdout_metrics=holdout_metrics,
+        persisted=persisted,
+        skip_reason=skip_reason,
+        promoted_variant=promoted_variant,
+        promotion_reason=promotion_reason,
     )
 
 

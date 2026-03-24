@@ -5,7 +5,7 @@ import re
 import zlib
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from datetime import date as date_type, datetime, timezone
+from datetime import date as date_type, datetime, timedelta, timezone
 from html.parser import HTMLParser
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
@@ -25,6 +25,7 @@ MLB_GAME_FEED_URL = "https://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live"
 MLB_PLAYER_STATS_URL = "https://statsapi.mlb.com/api/v1/people/{player_id}/stats"
 ROTOGRINDERS_LINEUPS_URL = "https://rotogrinders.com/lineups/mlb"
 ROTOBALLER_LINEUPS_URL = "https://www.rotoballer.com/fantasy-baseball-daily-projected-starting-mlb-lineups"
+ROTOWIRE_LINEUPS_URL = "https://www.rotowire.com/baseball/daily-lineups.php"
 HTTP_TIMEOUT = 30.0
 OPENER_IP_THRESHOLD = 3.0
 RECENT_START_WINDOW = 5
@@ -286,6 +287,196 @@ class _RotoBallerParser(HTMLParser):
         self._depth -= 1
 
 
+class _RotoWireParser(HTMLParser):
+    """HTML parser for RotoWire lineup cards."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.game_cards: list[_RawProjectedGameCard] = []
+        self._depth = 0
+        self._current_game_card: _RawProjectedGameCard | None = None
+        self._game_card_depth: int | None = None
+        self._team_side: str | None = None
+        self._team_side_depth: int | None = None
+        self._team_abbr_side: str | None = None
+        self._team_abbr_depth: int | None = None
+        self._team_abbr_buffer: list[str] = []
+        self._current_side: str | None = None
+        self._current_side_depth: int | None = None
+        self._pitcher_depth: int | None = None
+        self._pitcher_buffer: list[str] = []
+        self._player_depth: int | None = None
+        self._position_depth: int | None = None
+        self._position_buffer: list[str] = []
+        self._current_player_name: str | None = None
+        self._current_position: str | None = None
+        self._lineups_by_side: dict[str, _RawProjectedLineupCard] = {
+            "away": _RawProjectedLineupCard(),
+            "home": _RawProjectedLineupCard(),
+        }
+        self._teams_by_side: dict[str, str] = {}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._depth += 1
+        attr_map = {key: value or "" for key, value in attrs}
+        classes = set(attr_map.get("class", "").split())
+
+        if tag == "div" and {"lineup", "is-mlb"}.issubset(classes) and "is-tools" not in classes:
+            self._current_game_card = _RawProjectedGameCard()
+            self._game_card_depth = self._depth
+            self._lineups_by_side = {
+                "away": _RawProjectedLineupCard(),
+                "home": _RawProjectedLineupCard(),
+            }
+            self._teams_by_side = {}
+            return
+
+        if self._current_game_card is None:
+            return
+
+        if tag == "div" and "lineup__team" in classes:
+            if "is-visit" in classes:
+                self._team_side = "away"
+                self._team_side_depth = self._depth
+            elif "is-home" in classes:
+                self._team_side = "home"
+                self._team_side_depth = self._depth
+            return
+
+        if tag == "div" and "lineup__abbr" in classes and self._team_side is not None:
+            self._team_abbr_side = self._team_side
+            self._team_abbr_depth = self._depth
+            self._team_abbr_buffer = []
+            return
+
+        if tag == "ul" and "lineup__list" in classes:
+            if "is-visit" in classes:
+                self._current_side = "away"
+                self._current_side_depth = self._depth
+            elif "is-home" in classes:
+                self._current_side = "home"
+                self._current_side_depth = self._depth
+            return
+
+        if self._current_side is None:
+            return
+
+        lineup = self._lineups_by_side[self._current_side]
+
+        if tag == "li" and "lineup__status" in classes:
+            lineup.confirmed = "is-expected" not in classes
+            return
+
+        if tag == "div" and "lineup__player-highlight-name" in classes:
+            self._pitcher_depth = self._depth
+            self._pitcher_buffer = []
+            return
+
+        if tag == "li" and "lineup__player" in classes:
+            self._player_depth = self._depth
+            self._current_player_name = None
+            self._current_position = None
+            return
+
+        if tag == "div" and "lineup__pos" in classes:
+            self._position_depth = self._depth
+            self._position_buffer = []
+            return
+
+        if tag == "a" and self._player_depth is not None:
+            player_name = _clean_text(attr_map.get("title", ""))
+            if player_name:
+                self._current_player_name = player_name
+
+    def handle_data(self, data: str) -> None:
+        text = data.strip()
+        if not text:
+            return
+
+        if self._team_abbr_depth is not None:
+            self._team_abbr_buffer.append(text)
+
+        if self._pitcher_depth is not None:
+            self._pitcher_buffer.append(text)
+
+        if self._position_depth is not None:
+            self._position_buffer.append(text)
+
+        if self._player_depth is not None and self._current_player_name is None:
+            self._current_player_name = text
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._team_abbr_depth == self._depth:
+            team_code = _normalize_team_label(_clean_text(" ".join(self._team_abbr_buffer)))
+            if team_code and self._team_abbr_side is not None:
+                self._teams_by_side[self._team_abbr_side] = team_code
+            self._team_abbr_side = None
+            self._team_abbr_depth = None
+            self._team_abbr_buffer = []
+
+        if self._team_side_depth == self._depth:
+            self._team_side = None
+            self._team_side_depth = None
+
+        if self._position_depth == self._depth:
+            self._current_position = _clean_text(" ".join(self._position_buffer)) or None
+            self._position_depth = None
+            self._position_buffer = []
+
+        if self._pitcher_depth == self._depth and self._current_side is not None:
+            pitcher_name = _clean_person_name(" ".join(self._pitcher_buffer)) or None
+            if pitcher_name:
+                self._lineups_by_side[self._current_side].pitcher_name = pitcher_name
+            self._pitcher_depth = None
+            self._pitcher_buffer = []
+
+        if self._player_depth == self._depth and self._current_side is not None:
+            if self._current_player_name:
+                self._lineups_by_side[self._current_side].players.append(
+                    _RawProjectedPlayer(
+                        name=self._current_player_name,
+                        position=self._current_position,
+                    )
+                )
+            self._player_depth = None
+            self._current_player_name = None
+            self._current_position = None
+
+        if self._current_side_depth == self._depth:
+            self._current_side = None
+            self._current_side_depth = None
+
+        if self._game_card_depth == self._depth:
+            away_team = self._teams_by_side.get("away")
+            home_team = self._teams_by_side.get("home")
+            if (
+                self._current_game_card is not None
+                and away_team
+                and home_team
+                and (
+                    self._lineups_by_side["away"].players
+                    or self._lineups_by_side["home"].players
+                    or self._lineups_by_side["away"].pitcher_name
+                    or self._lineups_by_side["home"].pitcher_name
+                )
+            ):
+                self._current_game_card.teams = [away_team, home_team]
+                self._current_game_card.lineups = [
+                    self._lineups_by_side["away"],
+                    self._lineups_by_side["home"],
+                ]
+                self.game_cards.append(self._current_game_card)
+            self._current_game_card = None
+            self._game_card_depth = None
+            self._teams_by_side = {}
+            self._lineups_by_side = {
+                "away": _RawProjectedLineupCard(),
+                "home": _RawProjectedLineupCard(),
+            }
+
+        self._depth -= 1
+
+
 def _build_team_label_index() -> dict[str, str]:
     teams = _load_settings_yaml()["teams"]
     team_map: dict[str, str] = {}
@@ -324,6 +515,16 @@ def _clean_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
+def _clean_person_name(value: str) -> str:
+    cleaned = _clean_text(value)
+    return re.sub(r"\s+[LRS]$", "", cleaned)
+
+
+def _strip_html_tags(value: str) -> str:
+    without_tags = re.sub(r"<[^>]+>", " ", value)
+    return _clean_text(without_tags)
+
+
 def _default_client() -> httpx.Client:
     return httpx.Client(timeout=HTTP_TIMEOUT, follow_redirects=True)
 
@@ -349,6 +550,15 @@ def _projected_source_game_date(now: datetime | None = None) -> str:
     else:
         reference = reference.astimezone(PROJECTED_SOURCE_TIMEZONE)
     return reference.date().isoformat()
+
+
+def _projected_source_tomorrow_date(now: datetime | None = None) -> str:
+    reference = now or datetime.now(PROJECTED_SOURCE_TIMEZONE)
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=PROJECTED_SOURCE_TIMEZONE)
+    else:
+        reference = reference.astimezone(PROJECTED_SOURCE_TIMEZONE)
+    return (reference.date() + timedelta(days=1)).isoformat()
 
 
 def _fallback_player_id(full_name: str) -> int:
@@ -429,28 +639,51 @@ def _fetch_primary_projected_lineups(
     *,
     player_id_resolver: PlayerIdResolver | None = None,
 ) -> dict[str, _ProjectedLineupData]:
-    if game_date != _projected_source_game_date():
+    today = _projected_source_game_date()
+    tomorrow = _projected_source_tomorrow_date()
+    request_specs: tuple[tuple[str, dict[str, str], Callable[..., dict[str, _ProjectedLineupData]]], ...]
+    if game_date == today:
+        request_specs = (
+            (
+                ROTOGRINDERS_LINEUPS_URL,
+                {
+                    "User-Agent": "Mozilla/5.0 (compatible; MLBPrediction2026/1.0)",
+                    "Accept": "text/html,application/xhtml+xml",
+                },
+                _parse_rotogrinders_html,
+            ),
+            (
+                ROTOBALLER_LINEUPS_URL,
+                {
+                    "User-Agent": "Mozilla/5.0 (compatible; MLBPrediction2026/1.0)",
+                    "Accept": "text/html,application/xhtml+xml",
+                },
+                _parse_rotoballer_html,
+            ),
+        )
+    elif game_date == tomorrow:
+        request_specs = (
+            (
+                f"{ROTOWIRE_LINEUPS_URL}?date=tomorrow",
+                {
+                    "User-Agent": "Mozilla/5.0 (compatible; MLBPrediction2026/1.0)",
+                    "Accept": "text/html,application/xhtml+xml",
+                },
+                _parse_rotowire_html,
+            ),
+        )
+    else:
         logger.info(
-            "Skipping projected lineup scrape for %s because projected sources are current-day only",
+            "Skipping projected lineup scrape for %s because future sources are only supported for today/tomorrow",
             game_date,
         )
         return {}
 
-    sources = (
-        (ROTOGRINDERS_LINEUPS_URL, _parse_rotogrinders_html),
-        (ROTOBALLER_LINEUPS_URL, _parse_rotoballer_html),
-    )
     projected_lineups: dict[str, _ProjectedLineupData] = {}
 
-    for url, parser in sources:
+    for url, headers, parser in request_specs:
         try:
-            response = http_client.get(
-                url,
-                headers={
-                    "User-Agent": "Mozilla/5.0 (compatible; MLBPrediction2026/1.0)",
-                    "Accept": "text/html,application/xhtml+xml",
-                },
-            )
+            response = http_client.get(url, headers=headers)
             response.raise_for_status()
         except httpx.HTTPError:
             logger.info("Primary lineup source failed: %s", url, exc_info=True)
@@ -525,6 +758,81 @@ def _parse_rotoballer_html(
             )
         except Exception:  # pragma: no cover - defensive guard for malformed cards
             logger.warning("Skipping malformed RotoBaller lineup card for %s", team_code, exc_info=True)
+
+    return projected_lineups
+
+
+def _parse_rotowire_html(
+    html: str,
+    *,
+    player_id_resolver: PlayerIdResolver | None = None,
+) -> dict[str, _ProjectedLineupData]:
+    projected_lineups: dict[str, _ProjectedLineupData] = {}
+    blocks = re.split(r'<div class="lineup__box">', html)[1:]
+
+    for block in blocks:
+        if "lineup__main" not in block or "lineup__abbr" not in block:
+            continue
+
+        team_codes = [
+            code
+            for code in (
+                _normalize_team_label(match)
+                for match in re.findall(r'<div class="lineup__abbr">\s*([^<]+?)\s*</div>', block)
+            )
+            if code
+        ]
+        lineup_sections = re.findall(
+            r'<ul class="lineup__list is-(visit|home)">(.*?)</ul>',
+            block,
+            flags=re.DOTALL,
+        )
+        if len(team_codes) < 2 or len(lineup_sections) < 2:
+            continue
+
+        side_to_team = {"visit": team_codes[0], "home": team_codes[1]}
+        for side, section_html in lineup_sections[:2]:
+            team_code = side_to_team.get(side)
+            if team_code is None:
+                continue
+            pitcher_match = re.search(
+                r'<div class="lineup__player-highlight-name">\s*<a[^>]*>(.*?)</a>',
+                section_html,
+                flags=re.DOTALL,
+            )
+            pitcher_name = (
+                _clean_person_name(_strip_html_tags(pitcher_match.group(1)))
+                if pitcher_match
+                else None
+            )
+            players: list[_RawProjectedPlayer] = []
+            for player_match in re.finditer(
+                r'<li class="lineup__player">\s*'
+                r'<div class="lineup__pos">\s*(.*?)\s*</div>\s*'
+                r'<a(?P<attrs>[^>]*)>(?P<label>.*?)</a>',
+                section_html,
+                flags=re.DOTALL,
+            ):
+                position = _strip_html_tags(player_match.group(1)) or None
+                attrs = player_match.group("attrs")
+                title_match = re.search(r'title="([^"]+)"', attrs)
+                player_name = (
+                    _clean_text(title_match.group(1))
+                    if title_match
+                    else _strip_html_tags(player_match.group("label"))
+                )
+                if player_name:
+                    players.append(_RawProjectedPlayer(name=player_name, position=position))
+
+            if not players and pitcher_name is None:
+                continue
+            projected_lineups[team_code] = _build_projected_lineup_data(
+                team=team_code,
+                source="rotowire",
+                pitcher_name=pitcher_name,
+                players=players,
+                player_id_resolver=player_id_resolver,
+            )
 
     return projected_lineups
 

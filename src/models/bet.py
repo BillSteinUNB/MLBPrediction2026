@@ -29,6 +29,8 @@ class BetDecision(ModelBase):
     game_pk: int
     market_type: MarketType
     side: BetSide
+    source_model: str | None = None
+    source_model_version: str | None = None
     book_name: str | None = None
     model_probability: Probability
     fair_probability: Probability
@@ -37,6 +39,7 @@ class BetDecision(ModelBase):
     is_positive_ev: bool
     kelly_stake: NonNegativeFloat = 0.0
     odds_at_bet: AmericanOdds
+    line_at_bet: float | None = None
     result: BetResult = BetResult.PENDING
     settled_at: UtcDatetime | None = None
     profit_loss: float | None = None

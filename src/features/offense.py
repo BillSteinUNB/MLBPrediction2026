@@ -530,33 +530,11 @@ def _derive_offensive_metrics(dataframe: pd.DataFrame) -> pd.DataFrame:
 
 def _compute_game_level_metrics(raw_logs: pd.DataFrame) -> pd.DataFrame:
     if raw_logs.empty:
-        return pd.DataFrame(
-            columns=[
-                "game_date",
-                "woba_numerator",
-                "woba_denominator",
-                "woba",
-                "iso",
-                "babip",
-                "k_pct",
-                "bb_pct",
-            ]
-        )
+        return _empty_game_metrics_frame()
 
     date_column = _first_column(raw_logs, ("Date", "Offense_Date", "game_date"))
     if date_column is None:
-        return pd.DataFrame(
-            columns=[
-                "game_date",
-                "woba_numerator",
-                "woba_denominator",
-                "woba",
-                "iso",
-                "babip",
-                "k_pct",
-                "bb_pct",
-            ]
-        )
+        return _empty_game_metrics_frame()
 
     ab = _extract_numeric(raw_logs, "AB", "Offense_AB", "Batting Stats_AB")
     hits = _extract_numeric(raw_logs, "H", "Offense_H", "Batting Stats_H")
@@ -607,6 +585,21 @@ def _compute_game_level_metrics(raw_logs: pd.DataFrame) -> pd.DataFrame:
 
     result = result.dropna(subset=["game_date"]).sort_values("game_date").reset_index(drop=True)
     return result
+
+
+def _empty_game_metrics_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "game_date": pd.to_datetime(pd.Series([], dtype="datetime64[ns]"), utc=False),
+            "woba_numerator": pd.Series([], dtype=float),
+            "woba_denominator": pd.Series([], dtype=float),
+            "woba": pd.Series([], dtype=float),
+            "iso": pd.Series([], dtype=float),
+            "babip": pd.Series([], dtype=float),
+            "k_pct": pd.Series([], dtype=float),
+            "bb_pct": pd.Series([], dtype=float),
+        }
+    )
 
 
 def _rolling_metrics_as_of(

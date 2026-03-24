@@ -37,9 +37,9 @@ const MetricTrend: React.FC<MetricTrendProps> = ({ title, data, yLabel }) => {
     };
 
     const layout: Partial<Plotly.Layout> = {
-      title,
-      xaxis: { title: 'Time' },
-      yaxis: { title: yLabel },
+      title: { text: title },
+      xaxis: { title: { text: 'Time' } },
+      yaxis: { title: { text: yLabel } },
       autosize: true,
       margin: { t: 40, l: 60, r: 20, b: 60 },
     };

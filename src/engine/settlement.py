@@ -97,6 +97,15 @@ def settle_bet(
         return BetResult.WIN if decision.side == winning_side else BetResult.LOSS
 
     home_margin = resolved_home_score - resolved_away_score
+    if decision.line_at_bet is not None:
+        selected_margin = float(home_margin if decision.side == "home" else -home_margin)
+        covered_margin = selected_margin + float(decision.line_at_bet)
+        if covered_margin > 0:
+            return BetResult.WIN
+        if covered_margin < 0:
+            return BetResult.LOSS
+        return BetResult.PUSH
+
     if decision.side == "home":
         return BetResult.WIN if home_margin >= 2 else BetResult.LOSS
 

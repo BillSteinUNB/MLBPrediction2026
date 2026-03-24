@@ -569,6 +569,7 @@ def test_compute_bullpen_features_parses_flattened_pitching_ir_logs(
             }
         )
 
+    monkeypatch.setattr(bullpen, "DERIVED_CACHE_ROOT", tmp_path / "derived_bullpen")
     monkeypatch.setattr(bullpen, "fetch_statcast_range", lambda *_args, **_kwargs: statcast_frame.copy())
 
     rows = bullpen.compute_bullpen_features(
@@ -580,3 +581,46 @@ def test_compute_bullpen_features_parses_flattened_pitching_ir_logs(
     by_name = {row.feature_name: row.feature_value for row in rows}
     assert by_name["home_team_bullpen_ir_pct_30g"] == pytest.approx(2 / 6)
     assert by_name["home_team_bullpen_ir_pct_30g"] > 0.0
+
+
+def test_collapse_plate_appearances_keeps_same_at_bat_number_separate_across_games() -> None:
+    from src.features.bullpen import _collapse_plate_appearances
+
+    pitches = pd.DataFrame(
+        [
+            {
+                "game_pk": 1001,
+                "pitcher_id": 501,
+                "at_bat_number": 1,
+                "pitch_number": 1,
+                "events": None,
+            },
+            {
+                "game_pk": 1001,
+                "pitcher_id": 501,
+                "at_bat_number": 1,
+                "pitch_number": 2,
+                "events": "walk",
+            },
+            {
+                "game_pk": 1002,
+                "pitcher_id": 501,
+                "at_bat_number": 1,
+                "pitch_number": 1,
+                "events": None,
+            },
+            {
+                "game_pk": 1002,
+                "pitcher_id": 501,
+                "at_bat_number": 1,
+                "pitch_number": 2,
+                "events": "strikeout",
+            },
+        ]
+    )
+
+    collapsed = _collapse_plate_appearances(pitches)
+
+    assert len(collapsed) == 2
+    assert set(collapsed["game_pk"].tolist()) == {1001, 1002}
+    assert set(collapsed["events"].tolist()) == {"walk", "strikeout"}

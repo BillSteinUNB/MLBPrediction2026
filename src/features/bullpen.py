@@ -25,7 +25,7 @@ LEAGUE_HR_FB_RATE = 0.11
 FIP_CONSTANT = 3.2
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DERIVED_CACHE_ROOT = REPO_ROOT / "data" / "raw" / "derived" / "bullpen"
-BULLPEN_METRICS_CACHE_VERSION = 1
+BULLPEN_METRICS_CACHE_VERSION = 2
 
 _BullpenMetricsFetcher = Callable[..., pd.DataFrame]
 _TeamLogsFetcher = Callable[..., pd.DataFrame]
@@ -808,9 +808,19 @@ def _collapse_plate_appearances(pitches: pd.DataFrame) -> pd.DataFrame:
         return pitches.copy()
 
     if "at_bat_number" in pitches.columns:
-        sort_columns = [column for column in ("at_bat_number", "pitch_number") if column in pitches.columns]
-        terminal = pitches.sort_values(sort_columns).groupby("at_bat_number", as_index=False).tail(1)
-        return terminal.reset_index(drop=True)
+        key_columns = [column for column in ("game_pk", "pitcher_id", "at_bat_number") if column in pitches.columns]
+        sort_columns = [
+            column
+            for column in ("game_pk", "pitcher_id", "at_bat_number", "pitch_number")
+            if column in pitches.columns
+        ]
+        if key_columns:
+            terminal = (
+                pitches.sort_values(sort_columns)
+                .groupby(key_columns, as_index=False, dropna=False)
+                .tail(1)
+            )
+            return terminal.reset_index(drop=True)
 
     if "events" in pitches.columns:
         terminal = pitches.loc[pitches["events"].notna()].copy()

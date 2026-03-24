@@ -20,6 +20,15 @@ temp_log_rotation_validation/
 *.csv
 temp_backtest_*/
 tmp_*
+data/models/*/
+data/experiments/*/
+data/autoresearch/
+temp_*/
+test-*.png
+nul
+
+# Local workflow artifacts
+.sisyphus/evidence/
 
 # Dashboard frontend
 dashboard/node_modules/

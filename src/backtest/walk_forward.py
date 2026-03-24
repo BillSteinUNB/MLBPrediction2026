@@ -69,7 +69,10 @@ DEFAULT_CALIBRATION_FRACTION = 0.15
 DEFAULT_WALK_FORWARD_CALIBRATION_METHOD = DEFAULT_CALIBRATION_METHOD
 DEFAULT_EDGE_THRESHOLD = 0.03
 DEFAULT_MAX_EDGE_TO_BET: float | None = None
+DEFAULT_MIN_BET_ODDS: int | None = None
+DEFAULT_MAX_BET_ODDS: int | None = None
 DEFAULT_MARKET_VIG = 0.04
+DEFAULT_HISTORICAL_ODDS_SNAPSHOT_SELECTION = "opening"
 DEFAULT_TIME_SERIES_SPLITS = 3
 DEFAULT_FLOAT_FORMAT = "%.10f"
 DEFAULT_STARTING_BANKROLL_UNITS = 100.0
@@ -127,6 +130,7 @@ class WalkForwardBacktestResult:
     max_drawdown_pct: float
     longest_losing_streak: int
     total_bets: int
+    profitability_metrics_valid: bool
     window_count: int
     data_version_hash: str
     code_version_hash: str
@@ -230,6 +234,8 @@ def run_walk_forward_backtest(
     calibration_method: str = DEFAULT_WALK_FORWARD_CALIBRATION_METHOD,
     edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
     max_edge_to_bet: float | None = DEFAULT_MAX_EDGE_TO_BET,
+    min_bet_odds: int | None = DEFAULT_MIN_BET_ODDS,
+    max_bet_odds: int | None = DEFAULT_MAX_BET_ODDS,
     market_vig: float = DEFAULT_MARKET_VIG,
     time_series_splits: int = DEFAULT_TIME_SERIES_SPLITS,
     raw_meta_feature_columns: Sequence[str] = DEFAULT_RAW_META_FEATURE_COLUMNS,
@@ -238,6 +244,7 @@ def run_walk_forward_backtest(
     weather_fetcher: WeatherFetcher = fetch_game_weather,
     historical_odds_db_path: str | Path | None = None,
     historical_odds_book_name: str | None = None,
+    historical_odds_snapshot_selection: Literal["latest", "opening"] = DEFAULT_HISTORICAL_ODDS_SNAPSHOT_SELECTION,
     starting_bankroll_units: float = DEFAULT_STARTING_BANKROLL_UNITS,
     staking_mode: Literal["flat", "kelly", "edge_scaled", "edge_bucketed"] = DEFAULT_STAKING_MODE,
     flat_bet_size_units: float = DEFAULT_FLAT_BET_SIZE_UNITS,
@@ -314,6 +321,8 @@ def run_walk_forward_backtest(
                 calibration_method=calibration_method,
                 edge_threshold=edge_threshold,
                 max_edge_to_bet=max_edge_to_bet,
+                min_bet_odds=min_bet_odds,
+                max_bet_odds=max_bet_odds,
                 market_vig=market_vig,
                 time_series_splits=time_series_splits,
                 estimator_kwargs=resolved_estimator_kwargs,
@@ -323,6 +332,7 @@ def run_walk_forward_backtest(
                 code_version_hash=code_version_hash,
                 historical_odds_db_path=historical_odds_db_path,
                 historical_odds_book_name=historical_odds_book_name,
+                historical_odds_snapshot_selection=historical_odds_snapshot_selection,
                 bankroll_state=bankroll_state,
                 staking_mode=staking_mode,
                 flat_bet_size_units=flat_bet_size_units,
@@ -400,6 +410,8 @@ def run_walk_forward_backtest(
                 calibration_method=calibration_method,
                 edge_threshold=edge_threshold,
                 max_edge_to_bet=max_edge_to_bet,
+                min_bet_odds=min_bet_odds,
+                max_bet_odds=max_bet_odds,
                 market_vig=market_vig,
                 time_series_splits=time_series_splits,
                 estimator_kwargs=resolved_estimator_kwargs,
@@ -409,6 +421,7 @@ def run_walk_forward_backtest(
                 code_version_hash=code_version_hash,
                 historical_odds_db_path=historical_odds_db_path,
                 historical_odds_book_name=historical_odds_book_name,
+                historical_odds_snapshot_selection=historical_odds_snapshot_selection,
                 bankroll_state=bankroll_state,
                 staking_mode=staking_mode,
                 flat_bet_size_units=flat_bet_size_units,
@@ -467,6 +480,7 @@ def run_walk_forward_backtest(
         else 0.0
     )
     longest_losing_streak = int(predictions["losing_streak"].max())
+    profitability_metrics_valid = bool(predictions["market_source"].eq("historical").all())
 
     resolved_output_dir = Path(output_dir)
     resolved_output_dir.mkdir(parents=True, exist_ok=True)
@@ -506,6 +520,7 @@ def run_walk_forward_backtest(
         "kelly_fraction": float(kelly_fraction),
         "max_bet_fraction": float(max_bet_fraction),
         "max_drawdown": float(max_drawdown),
+        "historical_odds_snapshot_selection": historical_odds_snapshot_selection,
         "estimator_kwargs": resolved_estimator_kwargs,
         "raw_meta_feature_columns": list(raw_meta_feature_columns),
         "window_count": int(len(window_metrics)),
@@ -517,6 +532,7 @@ def run_walk_forward_backtest(
         "max_drawdown_pct": max_drawdown_pct,
         "longest_losing_streak": longest_losing_streak,
         "total_bets": int(predictions["is_bet"].sum()),
+        "profitability_metrics_valid": profitability_metrics_valid,
         "total_profit_units": total_profit,
         "total_staked_units": total_staked,
         "data_version_hash": data_version_hash,
@@ -546,6 +562,7 @@ def run_walk_forward_backtest(
         max_drawdown_pct=max_drawdown_pct,
         longest_losing_streak=longest_losing_streak,
         total_bets=int(predictions["is_bet"].sum()),
+        profitability_metrics_valid=profitability_metrics_valid,
         window_count=len(window_metrics),
         data_version_hash=data_version_hash,
         code_version_hash=code_version_hash,
@@ -580,6 +597,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--edge-threshold", type=float, default=DEFAULT_EDGE_THRESHOLD)
     parser.add_argument("--max-edge-to-bet", type=float)
+    parser.add_argument("--min-bet-odds", type=int)
+    parser.add_argument("--max-bet-odds", type=int)
     parser.add_argument("--market-vig", type=float, default=DEFAULT_MARKET_VIG)
     parser.add_argument("--time-series-splits", type=int, default=DEFAULT_TIME_SERIES_SPLITS)
     parser.add_argument("--max-depth", type=int, default=DEFAULT_ESTIMATOR_KWARGS["max_depth"])
@@ -605,6 +624,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--reg-lambda", type=float, default=1.0)
     parser.add_argument("--historical-odds-db")
     parser.add_argument("--historical-odds-book")
+    parser.add_argument(
+        "--historical-odds-snapshot",
+        choices=["opening", "latest"],
+        default=DEFAULT_HISTORICAL_ODDS_SNAPSHOT_SELECTION,
+    )
     parser.add_argument(
         "--starting-bankroll-units",
         type=float,
@@ -639,6 +663,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         calibration_method=args.calibration_method,
         edge_threshold=args.edge_threshold,
         max_edge_to_bet=args.max_edge_to_bet,
+        min_bet_odds=args.min_bet_odds,
+        max_bet_odds=args.max_bet_odds,
         market_vig=args.market_vig,
         time_series_splits=args.time_series_splits,
         estimator_kwargs={
@@ -654,6 +680,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         },
         historical_odds_db_path=args.historical_odds_db,
         historical_odds_book_name=args.historical_odds_book,
+        historical_odds_snapshot_selection=args.historical_odds_snapshot,
         starting_bankroll_units=args.starting_bankroll_units,
         staking_mode=args.staking_mode,
         flat_bet_size_units=args.flat_bet_size_units,
@@ -732,6 +759,8 @@ def _evaluate_window(
     calibration_method: str,
     edge_threshold: float,
     max_edge_to_bet: float | None,
+    min_bet_odds: int | None,
+    max_bet_odds: int | None,
     market_vig: float,
     time_series_splits: int,
     estimator_kwargs: Mapping[str, Any],
@@ -741,6 +770,7 @@ def _evaluate_window(
     code_version_hash: str,
     historical_odds_db_path: str | Path | None,
     historical_odds_book_name: str | None,
+    historical_odds_snapshot_selection: Literal["latest", "opening"],
     bankroll_state: _BankrollState,
     staking_mode: Literal["flat", "kelly", "edge_scaled", "edge_bucketed"],
     flat_bet_size_units: float,
@@ -791,17 +821,41 @@ def _evaluate_window(
         market_vig=market_vig,
         historical_odds_db_path=historical_odds_db_path,
         historical_odds_book_name=historical_odds_book_name,
+        historical_odds_snapshot_selection=historical_odds_snapshot_selection,
     )
     edge_home = model_home_prob - market_home_fair_prob
     edge_away = (1.0 - model_home_prob) - market_away_fair_prob
     actual_home_win = pd.to_numeric(test_frame["f5_ml_result"], errors="raise").astype(int).to_numpy()
     is_push = pd.to_numeric(test_frame["f5_tied_after_5"], errors="coerce").fillna(0).astype(int).to_numpy().astype(bool)
+    profitability_metrics_valid = bool(np.all(market_source == "historical"))
 
-    bet_side = np.where(edge_home >= edge_threshold, "home", "none")
-    bet_side = np.where(edge_away >= edge_threshold, "away", bet_side)
-    if max_edge_to_bet is not None:
-        bet_side = np.where((bet_side == "home") & (edge_home > max_edge_to_bet), "none", bet_side)
-        bet_side = np.where((bet_side == "away") & (edge_away > max_edge_to_bet), "none", bet_side)
+    if profitability_metrics_valid:
+        bet_side = np.where(edge_home >= edge_threshold, "home", "none")
+        bet_side = np.where(edge_away >= edge_threshold, "away", bet_side)
+        if max_edge_to_bet is not None:
+            bet_side = np.where((bet_side == "home") & (edge_home > max_edge_to_bet), "none", bet_side)
+            bet_side = np.where((bet_side == "away") & (edge_away > max_edge_to_bet), "none", bet_side)
+
+        preliminary_bet_odds = np.where(
+            bet_side == "home",
+            home_odds,
+            np.where(bet_side == "away", away_odds, 0),
+        )
+        if min_bet_odds is not None:
+            bet_side = np.where(
+                (bet_side != "none") & (preliminary_bet_odds < int(min_bet_odds)),
+                "none",
+                bet_side,
+            )
+        if max_bet_odds is not None:
+            bet_side = np.where(
+                (bet_side != "none") & (preliminary_bet_odds > int(max_bet_odds)),
+                "none",
+                bet_side,
+            )
+    else:
+        bet_side = np.full(len(test_frame), "none", dtype=object)
+
     bet_edge = np.where(
         bet_side == "home",
         edge_home,
@@ -876,6 +930,7 @@ def _evaluate_window(
             "bet_expected_value": bet_expected_value,
             "bet_result": bet_result,
             "is_bet": (bet_side != "none").astype(int),
+            "profitability_metrics_valid": int(profitability_metrics_valid),
             "calibration_method": model_bundle.calibration_method,
             "data_version_hash": data_version_hash,
             "code_version_hash": code_version_hash,
@@ -926,6 +981,8 @@ def _evaluate_window(
         "total_profit_units": total_profit,
         "total_staked_units": total_staked,
         "max_edge_to_bet": max_edge_to_bet,
+        "min_bet_odds": min_bet_odds,
+        "max_bet_odds": max_bet_odds,
         "starting_bankroll_units": float(predictions["bankroll_before_units"].iloc[0]),
         "ending_bankroll_units": float(predictions["bankroll_after_units"].iloc[-1]),
         "peak_bankroll_units": float(predictions["peak_bankroll_units"].max()),
@@ -942,6 +999,7 @@ def _evaluate_window(
         "mean_model_home_prob": float(predictions["model_home_prob"].mean()),
         "mean_market_home_fair_prob": float(predictions["market_home_fair_prob"].mean()),
         "historical_odds_coverage": float((predictions["market_source"] == "historical").mean()),
+        "profitability_metrics_valid": profitability_metrics_valid,
         "calibration_method": model_bundle.calibration_method,
         "window_version_hash": _compute_window_version_hash(
             predictions["game_pk"].tolist(),
@@ -961,6 +1019,7 @@ def _resolve_market_pricing(
     market_vig: float,
     historical_odds_db_path: str | Path | None,
     historical_odds_book_name: str | None,
+    historical_odds_snapshot_selection: Literal["latest", "opening"],
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     default_home_fair = np.clip(
         pd.to_numeric(test_frame["home_team_log5_30g"], errors="coerce").to_numpy(dtype=float),
@@ -996,6 +1055,7 @@ def _resolve_market_pricing(
         game_pks=test_frame["game_pk"].astype(int).tolist(),
         market_type="f5_ml",
         book_name=historical_odds_book_name,
+        snapshot_selection=historical_odds_snapshot_selection,
     )
     if historical.empty:
         return (

@@ -46,9 +46,9 @@ const ReliabilityDiagram: React.FC<ReliabilityDiagramProps> = ({ title, calibrat
     };
 
     const layout: Partial<Plotly.Layout> = {
-      title,
-      xaxis: { title: 'Predicted probability', range: [0, 1] },
-      yaxis: { title: 'Observed (actual) probability', range: [0, 1] },
+      title: { text: title },
+      xaxis: { title: { text: 'Predicted probability' }, range: [0, 1] },
+      yaxis: { title: { text: 'Observed (actual) probability' }, range: [0, 1] },
       autosize: true,
       margin: { t: 40, l: 60, r: 20, b: 60 },
     };
