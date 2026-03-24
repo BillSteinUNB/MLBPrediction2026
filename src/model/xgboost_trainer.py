@@ -12,10 +12,11 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import joblib
+import optuna
 import pandas as pd
 from sklearn.base import clone
 from sklearn.metrics import accuracy_score, log_loss, roc_auc_score
-from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
+from sklearn.model_selection import TimeSeriesSplit
 from xgboost import XGBClassifier
 
 from src.clients.weather_client import fetch_game_weather
@@ -34,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL_OUTPUT_DIR = Path("data") / "models"
 DEFAULT_TIME_SERIES_SPLITS = 5
-DEFAULT_SEARCH_ITERATIONS = 40
+DEFAULT_SEARCH_ITERATIONS = 100
 DEFAULT_RANDOM_STATE = 2026
 DEFAULT_TOP_FEATURE_COUNT = 25
 DEFAULT_EARLY_STOPPING_ROUNDS = 20
@@ -289,23 +290,29 @@ def _train_single_model(
     if holdout_frame.empty:
         raise ValueError(f"No holdout rows found for season {holdout_season}")
 
-    search = RandomizedSearchCV(
-        estimator=_build_estimator(random_state=random_state),
-        param_distributions={key: list(values) for key, values in search_space.items()},
-        n_iter=_resolve_search_iterations(search_space, search_iterations),
-        scoring="neg_log_loss",
-        cv=create_time_series_split(
-            row_count=len(train_frame),
-            requested_splits=time_series_splits,
-        ),
+    (
+        best_params,
+        cv_best_log_loss,
+        optuna_best_trial_number,
+        optuna_trial_count,
+        optuna_study_name,
+        optuna_storage_path,
+        resolved_time_series_splits,
+    ) = _run_optuna_search(
+        train_frame=train_frame,
+        feature_columns=feature_columns,
+        target_column=target_column,
+        model_name=model_name,
+        output_dir=output_dir,
+        holdout_season=holdout_season,
+        data_version_hash=data_version_hash,
+        search_space=search_space,
+        time_series_splits=time_series_splits,
+        search_iterations=search_iterations,
         random_state=random_state,
-        refit=True,
-        n_jobs=1,
-        verbose=2,
     )
-
-    search.fit(train_frame[feature_columns], train_frame[target_column])
-    searched_estimator: XGBClassifier = search.best_estimator_
+    searched_estimator = _build_estimator(random_state=random_state)
+    searched_estimator.set_params(**best_params)
     (
         best_estimator,
         requested_n_estimators,
@@ -329,8 +336,6 @@ def _train_single_model(
         "log_loss": float(log_loss(holdout_frame[target_column], holdout_probabilities, labels=[0, 1])),
         "roc_auc": _safe_roc_auc(holdout_frame[target_column], holdout_probabilities),
     }
-    best_params = _normalize_best_params(search.best_params_)
-    cv_best_log_loss = float(-search.best_score_)
     feature_importance_rankings = _extract_feature_importance_rankings(
         best_estimator,
         feature_columns,
@@ -355,7 +360,12 @@ def _train_single_model(
         "feature_columns": feature_columns,
         "best_params": best_params,
         "runtime_versions": collect_runtime_versions(),
+        "search_backend": "optuna",
         "cv_best_log_loss": cv_best_log_loss,
+        "optuna_best_trial_number": optuna_best_trial_number,
+        "optuna_trial_count": optuna_trial_count,
+        "optuna_study_name": optuna_study_name,
+        "optuna_storage_path": str(optuna_storage_path),
         "holdout_metrics": holdout_metrics,
         "requested_n_estimators": requested_n_estimators,
         "final_n_estimators": final_n_estimators,
@@ -378,7 +388,7 @@ def _train_single_model(
         ),
         "feature_importance_rankings": feature_importance_rankings,
         "search_space": {key: list(values) for key, values in search_space.items()},
-        "time_series_splits": int(search.cv.n_splits),
+        "time_series_splits": resolved_time_series_splits,
         "trained_at": datetime.now(UTC).isoformat(),
     }
     metadata_path.write_text(json.dumps(metadata_payload, indent=2), encoding="utf-8")
@@ -427,6 +437,199 @@ def _build_estimator(*, random_state: int) -> XGBClassifier:
         n_jobs=DEFAULT_XGBOOST_N_JOBS,
         verbosity=0,
     )
+
+
+def _run_optuna_search(
+    *,
+    train_frame: pd.DataFrame,
+    feature_columns: Sequence[str],
+    target_column: str,
+    model_name: str,
+    output_dir: Path,
+    holdout_season: int,
+    data_version_hash: str,
+    search_space: Mapping[str, Sequence[float | int]],
+    time_series_splits: int,
+    search_iterations: int,
+    random_state: int,
+) -> tuple[dict[str, float | int], float, int, int, str, Path, int]:
+    resolved_iterations = _resolve_search_iterations(search_space, search_iterations)
+    splitter = create_time_series_split(
+        row_count=len(train_frame),
+        requested_splits=time_series_splits,
+    )
+    resolved_time_series_splits = int(splitter.n_splits)
+    study_name = _build_optuna_study_name(
+        model_name=model_name,
+        target_column=target_column,
+        data_version_hash=data_version_hash,
+        holdout_season=holdout_season,
+    )
+    storage_path = output_dir / "optuna_studies.db"
+    storage_url = f"sqlite:///{storage_path.resolve().as_posix()}"
+
+    logger.info(
+        "Running Optuna for %s with %s requested trials and %s time-series splits",
+        model_name,
+        resolved_iterations,
+        resolved_time_series_splits,
+    )
+    optuna.logging.set_verbosity(optuna.logging.INFO)
+    study = optuna.create_study(
+        study_name=study_name,
+        direction="minimize",
+        sampler=optuna.samplers.TPESampler(seed=random_state),
+        pruner=optuna.pruners.MedianPruner(
+            n_startup_trials=min(10, resolved_iterations),
+            n_warmup_steps=2,
+        ),
+        storage=storage_url,
+        load_if_exists=True,
+    )
+
+    existing_trial_count = len(study.trials)
+    remaining_trials = max(0, resolved_iterations - existing_trial_count)
+    if remaining_trials > 0:
+        logger.info(
+            "Optuna study %s has %s existing trials; running %s additional trials",
+            study_name,
+            existing_trial_count,
+            remaining_trials,
+        )
+        study.optimize(
+            lambda trial: _objective_log_loss(
+                trial,
+                train_frame=train_frame,
+                feature_columns=feature_columns,
+                target_column=target_column,
+                search_space=search_space,
+                splitter=splitter,
+                random_state=random_state,
+            ),
+            n_trials=remaining_trials,
+            gc_after_trial=True,
+            show_progress_bar=False,
+        )
+    else:
+        logger.info(
+            "Optuna study %s already has %s trials; resuming without new trials",
+            study_name,
+            existing_trial_count,
+        )
+
+    best_trial = study.best_trial
+    best_params = _complete_optuna_params(best_trial.params, search_space=search_space)
+    return (
+        best_params,
+        float(best_trial.value),
+        int(best_trial.number),
+        len(study.trials),
+        study_name,
+        storage_path,
+        resolved_time_series_splits,
+    )
+
+
+def _objective_log_loss(
+    trial: optuna.trial.Trial,
+    *,
+    train_frame: pd.DataFrame,
+    feature_columns: Sequence[str],
+    target_column: str,
+    search_space: Mapping[str, Sequence[float | int]],
+    splitter: TimeSeriesSplit,
+    random_state: int,
+) -> float:
+    params = _suggest_optuna_params(trial, search_space=search_space)
+    feature_frame = train_frame[list(feature_columns)]
+    target_series = train_frame[target_column]
+    fold_losses: list[float] = []
+
+    for fold_index, (train_indices, test_indices) in enumerate(splitter.split(train_frame), start=1):
+        estimator = _build_estimator(random_state=random_state)
+        estimator.set_params(**params)
+        estimator.fit(
+            feature_frame.iloc[train_indices],
+            target_series.iloc[train_indices],
+        )
+        probabilities = estimator.predict_proba(feature_frame.iloc[test_indices])[:, 1]
+        fold_loss = float(
+            log_loss(
+                target_series.iloc[test_indices],
+                probabilities,
+                labels=[0, 1],
+            )
+        )
+        fold_losses.append(fold_loss)
+        trial.report(sum(fold_losses) / len(fold_losses), step=fold_index)
+        if trial.should_prune():
+            raise optuna.TrialPruned(
+                f"Pruned at fold {fold_index} with mean log loss {sum(fold_losses) / len(fold_losses):.6f}"
+            )
+
+    return float(sum(fold_losses) / len(fold_losses))
+
+
+def _suggest_optuna_params(
+    trial: optuna.trial.Trial,
+    *,
+    search_space: Mapping[str, Sequence[float | int]],
+) -> dict[str, float | int]:
+    if _matches_default_search_space(search_space):
+        return {
+            "max_depth": int(trial.suggest_int("max_depth", 3, 8)),
+            "n_estimators": int(trial.suggest_int("n_estimators", 100, 500, step=50)),
+            "learning_rate": float(trial.suggest_float("learning_rate", 0.005, 0.1, log=True)),
+            "subsample": float(trial.suggest_float("subsample", 0.6, 1.0)),
+            "colsample_bytree": float(trial.suggest_float("colsample_bytree", 0.5, 1.0)),
+            "min_child_weight": int(trial.suggest_int("min_child_weight", 1, 10)),
+            "gamma": float(trial.suggest_float("gamma", 0.0, 5.0)),
+            "reg_alpha": float(trial.suggest_float("reg_alpha", 1e-4, 10.0, log=True)),
+            "reg_lambda": float(trial.suggest_float("reg_lambda", 0.1, 10.0, log=True)),
+        }
+
+    params: dict[str, float | int] = {}
+    for key, values in search_space.items():
+        options = list(values)
+        if not options:
+            raise ValueError(f"Search space for {key} must contain at least one value")
+        if len(options) == 1:
+            params[key] = options[0]
+            continue
+        params[key] = trial.suggest_categorical(key, options)
+    return _normalize_best_params(params)
+
+
+def _complete_optuna_params(
+    best_trial_params: Mapping[str, Any],
+    *,
+    search_space: Mapping[str, Sequence[float | int]],
+) -> dict[str, float | int]:
+    completed: dict[str, Any] = dict(best_trial_params)
+    for key, values in search_space.items():
+        options = list(values)
+        if len(options) == 1 and key not in completed:
+            completed[key] = options[0]
+    return _normalize_best_params(completed)
+
+
+def _matches_default_search_space(search_space: Mapping[str, Sequence[float | int]]) -> bool:
+    if set(search_space) != set(DEFAULT_SEARCH_SPACE):
+        return False
+    for key, values in DEFAULT_SEARCH_SPACE.items():
+        if list(search_space[key]) != list(values):
+            return False
+    return True
+
+
+def _build_optuna_study_name(
+    *,
+    model_name: str,
+    target_column: str,
+    data_version_hash: str,
+    holdout_season: int,
+) -> str:
+    return f"{model_name}_{target_column}_{data_version_hash[:12]}_{holdout_season}"
 
 
 def _refit_estimator_with_temporal_early_stopping(
@@ -591,6 +794,8 @@ def _resolve_search_iterations(
     search_space: Mapping[str, Sequence[float | int]],
     requested_iterations: int,
 ) -> int:
+    if _matches_default_search_space(search_space):
+        return max(1, int(requested_iterations))
     total_combinations = prod(max(len(values), 1) for values in search_space.values())
     return max(1, min(requested_iterations, total_combinations))
 
