@@ -59,8 +59,21 @@ class ExperimentDataAdapter:
     def _resolve_models_dir(self, models_dir: str | Path | None) -> Path:
         return Path(models_dir) if models_dir is not None else self.models_dir
 
-    def _resolve_experiments_dir(self, experiments_dir: str | Path | None) -> Path:
-        return Path(experiments_dir) if experiments_dir is not None else self.experiments_dir
+    def _resolve_experiments_dir(
+        self,
+        experiments_dir: str | Path | None,
+        models_dir: str | Path | None = None,
+    ) -> Path:
+        if experiments_dir is not None:
+            return Path(experiments_dir)
+
+        if models_dir is not None:
+            resolved_models_dir = Path(models_dir)
+            inferred_experiments_dir = resolved_models_dir.parent / "experiments"
+            if self.experiments_dir == Path("data") / "experiments" and inferred_experiments_dir.exists():
+                return inferred_experiments_dir
+
+        return self.experiments_dir
 
     def _load_dashboard_catalog(self, experiments_dir: Path) -> dict[str, Any]:
         catalog_path = experiments_dir / "dashboard_catalog.json"
@@ -146,7 +159,7 @@ class ExperimentDataAdapter:
 
     def get_all_runs(self, models_dir: str | Path | None = None) -> list[RunSummary]:
         resolved_models_dir = self._resolve_models_dir(models_dir)
-        resolved_experiments_dir = self._resolve_experiments_dir(None)
+        resolved_experiments_dir = self._resolve_experiments_dir(None, resolved_models_dir)
         if not resolved_models_dir.exists():
             return []
 

@@ -13,7 +13,11 @@ from typing import Generator
 
 import pytest
 import requests
-from playwright.sync_api import Browser, BrowserContext, Page
+
+playwright = pytest.importorskip("playwright.sync_api")
+Browser = playwright.Browser
+BrowserContext = playwright.BrowserContext
+Page = playwright.Page
 
 
 @pytest.fixture(scope="session")

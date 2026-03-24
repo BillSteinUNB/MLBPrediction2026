@@ -1083,6 +1083,12 @@ def _fetch_live_odds_with_retry(
         commence_time_from=commence_time_from,
         commence_time_to=commence_time_to,
     )
+    primary_f5_games = {
+        snapshot.game_pk for snapshot in primary_snapshots if snapshot.market_type == "f5_ml"
+    }
+    if primary_f5_games:
+        return primary_snapshots
+
     sbr_snapshots = fetch_sbr_f5_odds(
         target_date=commence_time_from,
         db_path=db_path,
@@ -1090,14 +1096,11 @@ def _fetch_live_odds_with_retry(
     if not sbr_snapshots:
         return primary_snapshots
 
-    existing_f5_games = {
-        snapshot.game_pk for snapshot in primary_snapshots if snapshot.market_type == "f5_ml"
-    }
     merged = list(primary_snapshots)
     merged.extend(
         snapshot
         for snapshot in sbr_snapshots
-        if snapshot.game_pk not in existing_f5_games
+        if snapshot.game_pk not in primary_f5_games
     )
     return sorted(
         merged,
