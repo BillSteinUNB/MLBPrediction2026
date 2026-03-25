@@ -206,6 +206,44 @@ def _dated_batting_logs() -> dict[int, pd.DataFrame]:
     }
 
 
+def _season_statcast_xwoba() -> dict[int, pd.DataFrame]:
+    return {
+        2025: pd.DataFrame(
+            {
+                "game_pk": [9001, 9001, 9002, 9002, 9001, 9001, 9002, 9002],
+                "game_date": [
+                    "2025-04-01",
+                    "2025-04-01",
+                    "2025-04-02",
+                    "2025-04-02",
+                    "2025-04-01",
+                    "2025-04-01",
+                    "2025-04-02",
+                    "2025-04-02",
+                ],
+                "team": ["NYY", "NYY", "NYY", "NYY", "BOS", "BOS", "BOS", "BOS"],
+                "player_id": [101, 102, 101, 102, 201, 202, 201, 202],
+                "pa": [4, 5, 4, 4, 4, 4, 4, 4],
+                "bbe": [2, 1, 2, 2, 1, 2, 2, 1],
+                "xwoba": [0.39, 0.27, 0.34, 0.32, 0.31, 0.30, 0.28, 0.26],
+                "barrel_pct": [50.0, 0.0, 50.0, 0.0, 0.0, 50.0, 0.0, 0.0],
+            }
+        ),
+        2024: pd.DataFrame(
+            {
+                "game_pk": [8001, 8001, 8001, 8001],
+                "game_date": ["2024-08-01", "2024-08-01", "2024-08-01", "2024-08-01"],
+                "team": ["NYY", "NYY", "BOS", "BOS"],
+                "player_id": [101, 102, 201, 202],
+                "pa": [5, 4, 4, 4],
+                "bbe": [3, 1, 2, 2],
+                "xwoba": [0.33, 0.29, 0.31, 0.30],
+                "barrel_pct": [33.3333333333, 0.0, 0.0, 50.0],
+            }
+        ),
+    }
+
+
 def _woba(row: dict[str, float]) -> float:
     singles = row["H"] - row["2B"] - row["3B"] - row["HR"]
     numerator = (
@@ -328,6 +366,77 @@ def test_compute_offensive_features_applies_marcel_blending_early_season(tmp_pat
     assert home_lineup_row.feature_value == pytest.approx(home_team_row.feature_value)
 
 
+def test_compute_offensive_features_blends_team_xwoba_and_gap_from_statcast(
+    tmp_path: Path,
+) -> None:
+    from src.features.offense import compute_offensive_features
+
+    db_path = tmp_path / "offense_xwoba.db"
+    init_db(db_path)
+    _seed_game(
+        db_path,
+        game_pk=561,
+        game_date="2025-04-03T20:05:00+00:00",
+        home_team="NYY",
+        away_team="BOS",
+    )
+
+    team_logs = _team_logs_with_current_game()
+    statcast_metrics = _season_statcast_xwoba()
+    current_home_woba = pd.Series(
+        [_woba(row.to_dict()) for _, row in team_logs[(2025, "NYY")].iloc[:2].iterrows()]
+    ).mean()
+    current_home_xwoba = (((0.39 * 4) + (0.27 * 5)) / 9 + ((0.34 * 4) + (0.32 * 4)) / 8) / 2
+    current_home_barrel_pct = (((1 / 3) * 100.0) + ((1 / 4) * 100.0)) / 2
+    prior_home_woba = _woba(team_logs[(2024, "NYY")].iloc[0].to_dict())
+    prior_home_xwoba = (0.33 * 5 + 0.29 * 4) / 9
+    prior_home_barrel_pct = (1 / 4) * 100.0
+    expected_home_xwoba = (current_home_xwoba * 2 + prior_home_xwoba * 30) / 32
+    expected_home_barrel_pct = (current_home_barrel_pct * 2 + prior_home_barrel_pct * 30) / 32
+    expected_home_gap = (
+        ((current_home_woba - current_home_xwoba) * 2)
+        + ((prior_home_woba - prior_home_xwoba) * 30)
+    ) / 32
+
+    def fake_team_logs_fetcher(season: int, team: str, refresh: bool = False) -> pd.DataFrame:
+        _ = refresh
+        return team_logs[(season, team)].copy()
+
+    def fake_batting_fetcher(season: int, min_pa: int = 50, refresh: bool = False) -> pd.DataFrame:
+        _ = min_pa
+        _ = refresh
+        return _season_snapshot_batting_stats()[season].copy()
+
+    def fake_offense_statcast_fetcher(
+        season: int,
+        *,
+        db_path: Path,
+        end_date,
+        refresh: bool = False,
+    ) -> pd.DataFrame:
+        _ = db_path
+        _ = end_date
+        _ = refresh
+        return statcast_metrics[season].copy()
+
+    rows = compute_offensive_features(
+        "2025-04-03",
+        db_path=db_path,
+        windows=(2,),
+        regression_weight=30,
+        team_logs_fetcher=fake_team_logs_fetcher,
+        batting_stats_fetcher=fake_batting_fetcher,
+        offense_statcast_fetcher=fake_offense_statcast_fetcher,
+    )
+
+    by_name = {row.feature_name: row.feature_value for row in rows}
+    assert by_name["home_team_xwoba_2g"] == pytest.approx(expected_home_xwoba)
+    assert by_name["home_team_woba_minus_xwoba_2g"] == pytest.approx(expected_home_gap)
+    assert by_name["home_team_barrel_pct_2g"] == pytest.approx(expected_home_barrel_pct)
+    assert by_name["home_lineup_xwoba_2g"] == pytest.approx(by_name["home_team_xwoba_2g"])
+    assert by_name["home_lineup_barrel_pct_2g"] == pytest.approx(by_name["home_team_barrel_pct_2g"])
+
+
 def test_compute_offensive_features_falls_back_to_team_metrics_for_undated_batting_snapshots(
     tmp_path: Path,
 ) -> None:
@@ -387,10 +496,16 @@ def test_compute_offensive_features_uses_as_of_dated_lineup_metrics_when_availab
 
     team_logs = _team_logs_with_current_game()
     batting_logs = _dated_batting_logs()
+    statcast_metrics = _season_statcast_xwoba()
     prior_home = _woba(team_logs[(2024, "NYY")].iloc[0].to_dict())
     lineup_current_woba = (0.36 * 4 + 0.30 * 4) / 8
+    lineup_current_xwoba = (0.34 * 4 + 0.32 * 4) / 8
+    lineup_prior_xwoba = (0.33 + 0.29) / 2
+    team_prior_xwoba = (0.33 * 5 + 0.29 * 4) / 9
     leaked_lineup_woba = (0.41 * 4 + 0.36 * 4 + 0.0 * 10 + 0.28 * 5 + 0.30 * 4 + 0.0 * 10) / 37
     expected_lineup_woba = (lineup_current_woba * 2 + prior_home * 2) / 4
+    expected_lineup_xwoba = (lineup_current_xwoba * 2 + lineup_prior_xwoba * 2) / 4
+    expected_lineup_gap = ((lineup_current_woba - lineup_current_xwoba) * 2 + (prior_home - team_prior_xwoba) * 2) / 4
     leaked_lineup_feature = (leaked_lineup_woba * 2 + prior_home * 2) / 4
 
     def fake_team_logs_fetcher(season: int, team: str, refresh: bool = False) -> pd.DataFrame:
@@ -402,6 +517,18 @@ def test_compute_offensive_features_uses_as_of_dated_lineup_metrics_when_availab
         _ = refresh
         return batting_logs[season].copy()
 
+    def fake_offense_statcast_fetcher(
+        season: int,
+        *,
+        db_path: Path,
+        end_date,
+        refresh: bool = False,
+    ) -> pd.DataFrame:
+        _ = db_path
+        _ = end_date
+        _ = refresh
+        return statcast_metrics[season].copy()
+
     rows = compute_offensive_features(
         "2025-04-03",
         db_path=db_path,
@@ -410,12 +537,108 @@ def test_compute_offensive_features_uses_as_of_dated_lineup_metrics_when_availab
         lineup_player_ids={(558, "NYY"): [101, 102], (558, "BOS"): [201, 202]},
         team_logs_fetcher=fake_team_logs_fetcher,
         batting_stats_fetcher=fake_batting_fetcher,
+        offense_statcast_fetcher=fake_offense_statcast_fetcher,
     )
 
     by_name = {row.feature_name: row.feature_value for row in rows}
     assert by_name["home_lineup_woba_1g"] != pytest.approx(by_name["home_team_woba_1g"])
     assert by_name["home_lineup_woba_1g"] == pytest.approx(expected_lineup_woba)
     assert by_name["home_lineup_woba_1g"] > leaked_lineup_feature
+    assert by_name["home_lineup_xwoba_1g"] == pytest.approx(expected_lineup_xwoba)
+    assert by_name["home_lineup_woba_minus_xwoba_1g"] == pytest.approx(expected_lineup_gap)
+
+
+def test_compute_offensive_features_falls_back_to_actual_woba_when_team_xwoba_is_missing(
+    tmp_path: Path,
+) -> None:
+    from src.features.offense import compute_offensive_features
+
+    db_path = tmp_path / "offense_xwoba_fallback.db"
+    init_db(db_path)
+    _seed_game(
+        db_path,
+        game_pk=562,
+        game_date="2025-04-03T20:05:00+00:00",
+        home_team="NYY",
+        away_team="BOS",
+    )
+
+    team_logs = _team_logs_with_current_game()
+
+    def fake_team_logs_fetcher(season: int, team: str, refresh: bool = False) -> pd.DataFrame:
+        _ = refresh
+        return team_logs[(season, team)].copy()
+
+    def fake_batting_fetcher(season: int, min_pa: int = 50, refresh: bool = False) -> pd.DataFrame:
+        _ = min_pa
+        _ = refresh
+        return _season_snapshot_batting_stats()[season].copy()
+
+    def fake_offense_statcast_fetcher(
+        season: int,
+        *,
+        db_path: Path,
+        end_date,
+        refresh: bool = False,
+    ) -> pd.DataFrame:
+        _ = season
+        _ = db_path
+        _ = end_date
+        _ = refresh
+        return pd.DataFrame(
+            columns=["game_pk", "game_date", "team", "player_id", "pa", "xwoba"]
+        )
+
+    rows = compute_offensive_features(
+        "2025-04-03",
+        db_path=db_path,
+        windows=(2,),
+        regression_weight=30,
+        team_logs_fetcher=fake_team_logs_fetcher,
+        batting_stats_fetcher=fake_batting_fetcher,
+        offense_statcast_fetcher=fake_offense_statcast_fetcher,
+    )
+
+    by_name = {row.feature_name: row.feature_value for row in rows}
+    assert by_name["home_team_xwoba_2g"] == pytest.approx(by_name["home_team_woba_2g"])
+    assert by_name["home_team_woba_minus_xwoba_2g"] == pytest.approx(0.0)
+    assert by_name["home_team_barrel_pct_2g"] == pytest.approx(7.0)
+
+
+def test_build_statcast_offense_metrics_derives_batting_team_and_barrel_pct() -> None:
+    from src.features.offense import _build_statcast_offense_metrics
+
+    season_games = pd.DataFrame(
+        {
+            "game_pk": [7777],
+            "game_date": ["2025-04-01"],
+        }
+    )
+    statcast_frame = pd.DataFrame(
+        {
+            "game_pk": [7777, 7777, 7777, 7777],
+            "at_bat_number": [1, 1, 2, 3],
+            "pitch_number": [1, 2, 1, 1],
+            "inning_topbot": ["Top", "Top", "Top", "Bot"],
+            "away_team": ["BOS", "BOS", "BOS", "BOS"],
+            "home_team": ["NYY", "NYY", "NYY", "NYY"],
+            "batter": [11, 11, 12, 21],
+            "events": [None, "single", "strikeout", "double"],
+            "bb_type": [None, "line_drive", None, "fly_ball"],
+            "launch_speed": [None, 100.0, None, 91.0],
+            "launch_angle": [None, 27.0, None, 25.0],
+            "estimated_woba_using_speedangle": [None, 0.700, None, 0.500],
+        }
+    )
+
+    result = _build_statcast_offense_metrics(season_games, statcast_frame)
+    assert result["team"].tolist() == ["BOS", "BOS", "NYY"]
+    assert result["player_id"].tolist() == [11, 12, 21]
+    assert result["pa"].tolist() == [1.0, 1.0, 1.0]
+    assert result["bbe"].tolist() == [1.0, 0.0, 1.0]
+    assert result["barrel_pct"].iloc[0] == pytest.approx(100.0)
+    assert pd.isna(result["barrel_pct"].iloc[1])
+    assert result["barrel_pct"].iloc[2] == pytest.approx(0.0)
 
 
 def test_compute_offensive_features_uses_league_average_prior_for_first_year_lineup_players(

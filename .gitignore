@@ -34,3 +34,9 @@ nul
 dashboard/node_modules/
 dashboard/dist/
 dashboard/.vite/
+
+# Odds scraper local artifacts
+OddsScraper/data/
+OddsScraper/*.log
+OddsScraper/__pycache__/
+flashscore_page.html

@@ -237,6 +237,7 @@ class SlateGame(BaseModel):
     notified: bool = False
     paper_fallback: bool = False
     input_status: Optional[SlateInputStatus] = None
+    narrative: Optional[str] = None
 
 
 class SlateResponse(BaseModel):
@@ -345,3 +346,4 @@ class LiveSeasonGameResponse(BaseModel):
     forced_settled_result: Optional[str] = None
     forced_flat_profit_loss: Optional[float] = None
     settled_at: Optional[str] = None
+    narrative: Optional[str] = None

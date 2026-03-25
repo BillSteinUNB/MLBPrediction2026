@@ -67,7 +67,9 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "HR/FB": 9.0,
                     "avg_fastball_velocity": 96.1,
                     "pitch_mix_entropy": 1.80,
+                    "csw_pct": 31.0,
                     "innings_pitched": 6.0,
+                    "pitch_count": 92.0,
                 },
                 {
                     "game_pk": 9002,
@@ -82,7 +84,9 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "HR/FB": 21.0,
                     "avg_fastball_velocity": 92.0,
                     "pitch_mix_entropy": 1.20,
+                    "csw_pct": 24.0,
                     "innings_pitched": 4.0,
+                    "pitch_count": 81.0,
                 },
                 {
                     "game_pk": 9003,
@@ -97,7 +101,9 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "HR/FB": 10.0,
                     "avg_fastball_velocity": 95.8,
                     "pitch_mix_entropy": 1.75,
+                    "csw_pct": 30.5,
                     "innings_pitched": 5.2,
+                    "pitch_count": 101.0,
                 },
                 {
                     "game_pk": 9004,
@@ -112,7 +118,9 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "HR/FB": 18.0,
                     "avg_fastball_velocity": 91.8,
                     "pitch_mix_entropy": 1.10,
+                    "csw_pct": 23.0,
                     "innings_pitched": 4.1,
+                    "pitch_count": 76.0,
                 },
                 {
                     "game_pk": 9010,
@@ -127,7 +135,9 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "HR/FB": 4.0,
                     "avg_fastball_velocity": 97.4,
                     "pitch_mix_entropy": 2.10,
+                    "csw_pct": 34.0,
                     "innings_pitched": 7.0,
+                    "pitch_count": 109.0,
                 },
                 {
                     "game_pk": 9101,
@@ -142,7 +152,9 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "HR/FB": 8.0,
                     "avg_fastball_velocity": 95.2,
                     "pitch_mix_entropy": 1.60,
+                    "csw_pct": 30.0,
                     "innings_pitched": 5.0,
+                    "pitch_count": 93.0,
                 },
                 {
                     "game_pk": 9102,
@@ -157,7 +169,9 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "HR/FB": 9.0,
                     "avg_fastball_velocity": 95.0,
                     "pitch_mix_entropy": 1.58,
+                    "csw_pct": 29.5,
                     "innings_pitched": 6.0,
+                    "pitch_count": 97.0,
                 },
                 {
                     "game_pk": 9201,
@@ -172,7 +186,9 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "HR/FB": 11.0,
                     "avg_fastball_velocity": 94.0,
                     "pitch_mix_entropy": 1.48,
+                    "csw_pct": 28.0,
                     "innings_pitched": 5.0,
+                    "pitch_count": 88.0,
                 },
                 {
                     "game_pk": 9301,
@@ -187,7 +203,9 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "HR/FB": 20.0,
                     "avg_fastball_velocity": 93.5,
                     "pitch_mix_entropy": 1.30,
+                    "csw_pct": 27.0,
                     "innings_pitched": 1.0,
+                    "pitch_count": 24.0,
                 },
                 {
                     "game_pk": 9302,
@@ -202,7 +220,9 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "HR/FB": 22.0,
                     "avg_fastball_velocity": 93.1,
                     "pitch_mix_entropy": 1.25,
+                    "csw_pct": 26.0,
                     "innings_pitched": 1.1,
+                    "pitch_count": 27.0,
                 },
                 {
                     "game_pk": 9303,
@@ -217,7 +237,9 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "HR/FB": 7.0,
                     "avg_fastball_velocity": 96.0,
                     "pitch_mix_entropy": 1.72,
+                    "csw_pct": 31.5,
                     "innings_pitched": 5.0,
+                    "pitch_count": 86.0,
                 },
                 {
                     "game_pk": 9304,
@@ -232,7 +254,9 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "HR/FB": 8.0,
                     "avg_fastball_velocity": 95.6,
                     "pitch_mix_entropy": 1.68,
+                    "csw_pct": 30.8,
                     "innings_pitched": 6.0,
+                    "pitch_count": 94.0,
                 },
                 {
                     "game_pk": 9401,
@@ -247,7 +271,9 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "HR/FB": 11.0,
                     "avg_fastball_velocity": 94.4,
                     "pitch_mix_entropy": 1.57,
+                    "csw_pct": 28.4,
                     "innings_pitched": 5.2,
+                    "pitch_count": 91.0,
                 },
             ]
         ),
@@ -353,6 +379,76 @@ def _fake_start_metrics_fetcher(metrics_by_season: dict[int, pd.DataFrame]):
     return _fetcher
 
 
+def test_normalize_start_metrics_fills_missing_pitch_count_with_baseline() -> None:
+    from src.features.pitching import DEFAULT_METRIC_BASELINES, _normalize_start_metrics
+
+    normalized = _normalize_start_metrics(
+        pd.DataFrame(
+            [
+                {
+                    "game_pk": 1,
+                    "game_date": "2025-04-01",
+                    "team": "NYY",
+                    "pitcher_id": 100,
+                    "xFIP": 3.4,
+                    "xERA": 3.5,
+                    "K%": 25.0,
+                    "BB%": 7.0,
+                    "GB%": 44.0,
+                    "HR/FB": 10.0,
+                    "avg_fastball_velocity": 95.2,
+                    "pitch_mix_entropy": 1.7,
+                    "csw_pct": 30.0,
+                    "innings_pitched": 6.0,
+                }
+            ]
+        )
+    )
+
+    assert normalized.loc[0, "pitch_count"] == pytest.approx(DEFAULT_METRIC_BASELINES["pitch_count"])
+
+
+def test_compute_start_metrics_returns_pitch_count() -> None:
+    from src.features.pitching import _compute_start_metrics
+
+    pitches = pd.DataFrame(
+        [
+            {
+                "at_bat_number": 1,
+                "pitch_number": 1,
+                "events": None,
+                "bb_type": None,
+                "description": "called_strike",
+                "pitch_type": "FF",
+                "release_speed": 95.0,
+            },
+            {
+                "at_bat_number": 1,
+                "pitch_number": 2,
+                "events": None,
+                "bb_type": None,
+                "description": "foul",
+                "pitch_type": "FF",
+                "release_speed": 95.2,
+            },
+            {
+                "at_bat_number": 1,
+                "pitch_number": 3,
+                "events": "strikeout",
+                "bb_type": None,
+                "description": "swinging_strike",
+                "pitch_type": "SL",
+                "release_speed": 85.1,
+            },
+        ]
+    )
+
+    metrics = _compute_start_metrics(pitches, league_hr_fb_rate=0.11)
+
+    assert metrics["pitch_count"] == pytest.approx(3.0)
+    assert metrics["innings_pitched"] == pytest.approx(1 / 3)
+
+
 def _lineup_for(
     *,
     game_pk: int,
@@ -404,7 +500,15 @@ def test_compute_pitching_features_uses_starter_starts_only_and_excludes_current
     assert by_name["home_starter_xera_2s"] == pytest.approx(3.65)
     assert by_name["home_starter_avg_fastball_velocity_2s"] == pytest.approx(95.95)
     assert by_name["home_starter_pitch_mix_entropy_2s"] == pytest.approx(1.775)
+    assert by_name["home_starter_csw_pct_2s"] == pytest.approx(30.75)
+    assert by_name["home_starter_velo_delta_7v60s"] == pytest.approx(0.0)
+    assert by_name["home_starter_days_rest"] == pytest.approx(4.0)
+    assert by_name["home_starter_last_start_pitch_count"] == pytest.approx(101.0)
+    assert by_name["home_starter_cumulative_pitch_load_5s"] == pytest.approx(96.5)
     assert by_name["away_starter_xfip_2s"] == pytest.approx(3.6)
+    assert by_name["away_starter_days_rest"] == pytest.approx(3.0)
+    assert by_name["away_starter_last_start_pitch_count"] == pytest.approx(97.0)
+    assert by_name["away_starter_cumulative_pitch_load_5s"] == pytest.approx(95.0)
     assert by_name["home_starter_is_opener"] == 0.0
     assert by_name["home_starter_uses_team_composite"] == 0.0
 
@@ -484,6 +588,9 @@ def test_compute_pitching_features_uses_team_composite_when_lineup_flags_opener(
     assert by_name["home_starter_uses_team_composite"] == 1.0
     assert by_name["home_starter_xfip_2s"] == pytest.approx((4.0 + 7.5) / 2)
     assert by_name["home_starter_xfip_2s"] != pytest.approx((3.0 + 4.0) / 2)
+    assert by_name["home_starter_days_rest"] == pytest.approx(5.0)
+    assert by_name["home_starter_last_start_pitch_count"] == pytest.approx(90.0)
+    assert by_name["home_starter_cumulative_pitch_load_5s"] == pytest.approx(90.0)
 
 
 def test_compute_pitching_features_detects_opener_and_uses_team_composite(
@@ -517,6 +624,9 @@ def test_compute_pitching_features_detects_opener_and_uses_team_composite(
     assert by_name["home_starter_uses_team_composite"] == 1.0
     assert by_name["home_starter_xfip_2s"] == pytest.approx((3.0 + 3.5) / 2)
     assert by_name["home_starter_xfip_2s"] != pytest.approx((8.0 + 9.0) / 2)
+    assert by_name["home_starter_days_rest"] == pytest.approx(5.0)
+    assert by_name["home_starter_last_start_pitch_count"] == pytest.approx(90.0)
+    assert by_name["home_starter_cumulative_pitch_load_5s"] == pytest.approx(90.0)
 
 
 def test_compute_pitching_features_still_uses_history_based_opener_when_lineup_flag_is_false(

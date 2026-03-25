@@ -109,24 +109,39 @@ const statusBoxStyle: React.CSSProperties = {
 };
 
 const decisionBoxStyle: React.CSSProperties = {
-  border: "1px solid #24503a",
-  borderRadius: 8,
-  padding: 12,
-  background: "linear-gradient(180deg, rgba(21,48,35,0.95), rgba(15,36,28,0.96))",
+  borderRadius: 14,
+  padding: "20px 20px 20px 24px",
+  background: "linear-gradient(135deg, rgba(16,50,36,0.97) 0%, rgba(11,38,28,0.98) 50%, rgba(8,30,22,0.99) 100%)",
+  borderLeft: "4px solid #34d399",
+  border: "1px solid rgba(52,211,153,0.18)",
+  borderLeftWidth: 4,
+  borderLeftColor: "#34d399",
+  boxShadow: "0 4px 24px rgba(16,50,36,0.45), inset 0 1px 0 rgba(52,211,153,0.08)",
+  position: "relative" as const,
+  overflow: "hidden",
 };
 
 const estimatedDecisionBoxStyle: React.CSSProperties = {
-  border: "1px solid #4d4a28",
-  borderRadius: 8,
-  padding: 12,
-  background: "linear-gradient(180deg, rgba(62,53,22,0.95), rgba(43,37,18,0.96))",
+  borderRadius: 14,
+  padding: "20px 20px 20px 24px",
+  background: "linear-gradient(135deg, rgba(50,42,16,0.97) 0%, rgba(38,32,11,0.98) 50%, rgba(30,25,8,0.99) 100%)",
+  borderLeft: "4px solid #fbbf24",
+  border: "1px solid rgba(251,191,36,0.18)",
+  borderLeftWidth: 4,
+  borderLeftColor: "#fbbf24",
+  boxShadow: "0 4px 24px rgba(50,42,16,0.45), inset 0 1px 0 rgba(251,191,36,0.08)",
+  position: "relative" as const,
+  overflow: "hidden",
 };
 
 const forcedBoxStyle: React.CSSProperties = {
+  borderRadius: 12,
+  padding: "14px 16px 14px 20px",
+  background: "linear-gradient(135deg, rgba(16,25,43,0.95), rgba(13,20,33,0.97))",
   border: "1px solid var(--border)",
-  borderRadius: 8,
-  padding: 12,
-  background: "var(--bg-elevated)",
+  borderLeft: "3px solid var(--muted)",
+  borderLeftWidth: 3,
+  borderLeftColor: "var(--muted)",
 };
 
 const mutedStyle: React.CSSProperties = {
@@ -244,6 +259,7 @@ function sourceModelLabel(value: string | null | undefined): string {
   if (value === "rlv2_blend") return "RL V2 Blend";
   return value;
 }
+void sourceModelLabel;
 
 function statusBadge(label: string, tone: "neutral" | "good" | "warn" | "bad"): React.ReactElement {
   const palette = {
@@ -326,46 +342,210 @@ function GameCard({ game }: { game: SlateGame }) {
 
       {decision ? (
         <div style={estimatedDecision ? estimatedDecisionBoxStyle : decisionBoxStyle}>
-          <TooltipLabel
-            label={estimatedDecision ? "Preview Lean" : "Recommended Bet"}
-            as="div"
-            style={{
-              fontSize: 12,
-              color: estimatedDecision ? "var(--warn-fg)" : "var(--good-fg)",
+          {/* Subtle glow overlay */}
+          <div style={{
+            position: "absolute",
+            top: 0,
+            right: 0,
+            width: 120,
+            height: 120,
+            background: estimatedDecision
+              ? "radial-gradient(circle at top right, rgba(251,191,36,0.06), transparent 70%)"
+              : "radial-gradient(circle at top right, rgba(52,211,153,0.06), transparent 70%)",
+            pointerEvents: "none",
+          }} />
+
+          {/* Market type label */}
+          <div style={{
+            fontSize: 11,
+            fontWeight: 700,
+            textTransform: "uppercase",
+            letterSpacing: "1.2px",
+            color: estimatedDecision ? "rgba(251,191,36,0.7)" : "rgba(52,211,153,0.7)",
+            marginBottom: 8,
+          }}>
+            {estimatedDecision ? "Preview Lean" : "Recommended Bet"} — {marketLabel(decision.market_type)}
+          </div>
+
+          {/* Hero row: Team name + Odds */}
+          <div style={{
+            display: "flex",
+            alignItems: "baseline",
+            gap: 12,
+            flexWrap: "wrap",
+          }}>
+            <span style={{
+              fontSize: 26,
+              fontWeight: 800,
+              color: "#f3f6fb",
+              letterSpacing: "-0.3px",
+              lineHeight: 1.15,
+            }}>
+              {displayedLine}
+            </span>
+            <span style={{
+              fontSize: 22,
               fontWeight: 700,
-              textTransform: "uppercase",
-            }}
-          />
-          <div style={{ marginTop: 6, fontSize: 18, fontWeight: 700, color: "var(--text-h)" }}>
-            {marketLabel(decision.market_type)} • {displayedLine} {fmtOdds(decision.odds_at_bet)}
+              color: estimatedDecision ? "#fbbf24" : "#34d399",
+              fontFamily: "var(--mono)",
+              letterSpacing: "-0.5px",
+            }}>
+              {fmtOdds(decision.odds_at_bet)}
+            </span>
           </div>
-          <div style={{ ...mutedStyle, marginTop: 6 }}>
-            Book {formatBookLabel(decision.book_name)} • Edge {fmtEdgePct(decision.edge_pct)} • Kelly {decision.kelly_stake.toFixed(2)}
+
+          {/* Edge badge + Confidence bar row */}
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            marginTop: 14,
+            flexWrap: "wrap",
+          }}>
+            {/* Edge pill */}
+            <span style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "4px 12px",
+              borderRadius: 999,
+              background: estimatedDecision
+                ? "rgba(251,191,36,0.12)"
+                : "rgba(52,211,153,0.12)",
+              border: estimatedDecision
+                ? "1px solid rgba(251,191,36,0.28)"
+                : "1px solid rgba(52,211,153,0.28)",
+              color: estimatedDecision ? "#fbbf24" : "#34d399",
+              fontSize: 13,
+              fontWeight: 700,
+              letterSpacing: "0.3px",
+            }}>
+              {fmtEdgePct(decision.edge_pct)} EDGE
+            </span>
+
+            {/* Confidence bar */}
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              flex: 1,
+              minWidth: 140,
+            }}>
+              <div style={{
+                flex: 1,
+                height: 6,
+                borderRadius: 3,
+                background: "rgba(255,255,255,0.07)",
+                overflow: "hidden",
+              }}>
+                <div style={{
+                  width: `${Math.min(Math.max((decision.model_probability ?? 0) * 100, 0), 100)}%`,
+                  height: "100%",
+                  borderRadius: 3,
+                  background: estimatedDecision
+                    ? "linear-gradient(90deg, rgba(251,191,36,0.5), #fbbf24)"
+                    : "linear-gradient(90deg, rgba(52,211,153,0.5), #34d399)",
+                  transition: "width 0.4s ease",
+                }} />
+              </div>
+              <span style={{
+                fontSize: 12,
+                fontWeight: 600,
+                color: "rgba(243,246,251,0.65)",
+                whiteSpace: "nowrap",
+                fontFamily: "var(--mono)",
+              }}>
+                {fmtPct(decision.model_probability)}
+              </span>
+            </div>
           </div>
-          <div style={mutedStyle}>Model source {sourceModelLabel(decision.source_model)}</div>
-          <div style={{ ...mutedStyle, marginTop: 6 }}>
-            Model probability {fmtPct(decision.model_probability)} • Market fair probability {fmtPct(decision.fair_probability)}
-          </div>
-          <div style={mutedStyle}>
-            Posted price {fmtOdds(decision.odds_at_bet)} • Model fair price {fairAmericanOdds(decision.model_probability)} • Market fair price {fairAmericanOdds(decision.fair_probability)}
-          </div>
-          {decision.market_type === "f5_rl" ? (
-            <div style={mutedStyle}>
-              Posted run line {displayedLine}. Model projected spread: {projectedSpreadLabel(game)}.
+
+          {/* Projected F5 Score */}
+          {game.prediction ? (
+            <div style={{
+              marginTop: 14,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+            }}>
+              <span style={{
+                fontSize: 11,
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: "0.8px",
+                color: "rgba(243,246,251,0.35)",
+              }}>
+                Proj F5
+              </span>
+              <span style={{
+                fontSize: 15,
+                fontWeight: 600,
+                color: "rgba(243,246,251,0.85)",
+                fontFamily: "var(--mono)",
+                letterSpacing: "0.5px",
+              }}>
+                {teamNameForSide(game, "away")} {fmtRuns(game.prediction.projected_f5_away_runs)}
+                {" "}&ndash;{" "}
+                {fmtRuns(game.prediction.projected_f5_home_runs)} {teamNameForSide(game, "home")}
+              </span>
             </div>
           ) : null}
+
+          {/* Estimated market disclaimer */}
           {estimatedDecision ? (
-            <div style={{ ...mutedStyle, marginTop: 6 }}>
-              This uses an estimated F5 market built from full-game odds, not a posted sportsbook F5 line.
+            <div style={{
+              marginTop: 12,
+              fontSize: 11,
+              color: "rgba(251,191,36,0.45)",
+              fontStyle: "italic",
+              lineHeight: 1.4,
+            }}>
+              Estimated F5 market from full-game odds — not a posted sportsbook line.
+            </div>
+          ) : null}
+
+          {/* Narrative section */}
+          {(game as SlateGame & { narrative?: string | null }).narrative ? (
+            <div style={{
+              marginTop: 14,
+              paddingTop: 12,
+              borderTop: estimatedDecision
+                ? "1px solid rgba(251,191,36,0.1)"
+                : "1px solid rgba(52,211,153,0.1)",
+            }}>
+              <p style={{
+                fontSize: 13,
+                lineHeight: 1.55,
+                color: "rgba(243,246,251,0.55)",
+                fontStyle: "italic",
+                margin: 0,
+              }}>
+                {(game as SlateGame & { narrative?: string | null }).narrative}
+              </p>
             </div>
           ) : null}
         </div>
       ) : (
-        <div style={statusBoxStyle}>
-          <div style={{ fontSize: 12, color: "var(--text)", fontWeight: 700, textTransform: "uppercase" }}>
-            No Pick Reason
+        <div style={{
+          borderRadius: 12,
+          padding: "16px 18px",
+          background: "linear-gradient(135deg, rgba(16,25,43,0.6), rgba(13,20,33,0.7))",
+          border: "1px solid var(--border)",
+        }}>
+          <div style={{
+            fontSize: 11,
+            fontWeight: 700,
+            textTransform: "uppercase",
+            letterSpacing: "1.2px",
+            color: "var(--muted)",
+            marginBottom: 6,
+          }}>
+            No Pick
           </div>
-          <div style={{ marginTop: 6, fontSize: 14, color: "var(--text-h)" }}>
+          <div style={{
+            fontSize: 14,
+            color: "rgba(243,246,251,0.6)",
+            lineHeight: 1.5,
+          }}>
             {game.no_pick_reason ?? game.error_message ?? "No decision"}
           </div>
         </div>
@@ -373,29 +553,59 @@ function GameCard({ game }: { game: SlateGame }) {
 
       {forcedDecision ? (
         <div style={forcedBoxStyle}>
-          <div style={{ fontSize: 12, color: "var(--text)", fontWeight: 700, textTransform: "uppercase" }}>
+          <div style={{
+            fontSize: 11,
+            fontWeight: 700,
+            textTransform: "uppercase",
+            letterSpacing: "1px",
+            color: "var(--muted)",
+            marginBottom: 8,
+          }}>
             Forced Pick
           </div>
-          <div style={{ marginTop: 6, fontSize: 16, fontWeight: 700, color: "var(--text-h)" }}>
-            {marketLabel(forcedDecision.market_type)} • {forcedDisplayedLine} {fmtOdds(forcedDecision.odds_at_bet)}
-          </div>
-          <div style={{ ...mutedStyle, marginTop: 6 }}>
-            Model source {sourceModelLabel(forcedDecision.source_model)} • Unit {forcedDecision.kelly_stake.toFixed(2)}
-          </div>
-          <div style={mutedStyle}>
-            Edge {fmtEdgePct(forcedDecision.edge_pct)} • Model probability {fmtPct(forcedDecision.model_probability)}
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+          }}>
+            <span style={{
+              fontSize: 16,
+              fontWeight: 700,
+              color: "var(--text-h)",
+            }}>
+              {forcedDisplayedLine}
+            </span>
+            <span style={{
+              fontSize: 15,
+              fontWeight: 600,
+              color: "var(--accent)",
+              fontFamily: "var(--mono)",
+            }}>
+              {fmtOdds(forcedDecision.odds_at_bet)}
+            </span>
+            <span style={{
+              fontSize: 12,
+              color: "var(--muted)",
+            }}>
+              {marketLabel(forcedDecision.market_type)}
+            </span>
+            <span style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "2px 8px",
+              borderRadius: 999,
+              background: "rgba(124,199,255,0.08)",
+              border: "1px solid rgba(124,199,255,0.18)",
+              color: "var(--accent)",
+              fontSize: 11,
+              fontWeight: 700,
+            }}>
+              {fmtEdgePct(forcedDecision.edge_pct)} EDGE
+            </span>
           </div>
         </div>
-      ) : (
-        <div style={statusBoxStyle}>
-          <div style={{ fontSize: 12, color: "var(--text)", fontWeight: 700, textTransform: "uppercase" }}>
-            Forced Pick
-          </div>
-          <div style={{ marginTop: 6, fontSize: 14, color: "var(--text-h)" }}>
-            No forced pick was stored for this game.
-          </div>
-        </div>
-      )}
+      ) : null}
 
       <div style={sectionGridStyle}>
         <div style={statBlockStyle}>

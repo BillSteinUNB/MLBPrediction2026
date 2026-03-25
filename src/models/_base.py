@@ -34,5 +34,12 @@ Probability = Annotated[float, Field(ge=0, le=1)]
 NonNegativeFloat = Annotated[float, Field(ge=0)]
 UtcDatetime = Annotated[datetime, AfterValidator(_ensure_utc_datetime)]
 AmericanOdds = Annotated[int, AfterValidator(_validate_american_odds)]
-MarketType = Literal["f5_ml", "f5_rl"]
-BetSide = Literal["home", "away"]
+MarketType = Literal[
+    "full_game_ml",
+    "full_game_rl",
+    "full_game_total",
+    "f5_ml",
+    "f5_rl",
+    "f5_total",
+]
+BetSide = Literal["home", "away", "over", "under"]

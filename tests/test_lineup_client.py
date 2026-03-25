@@ -195,6 +195,40 @@ def _live_feed_payload(*, home_confirmed: bool, away_confirmed: bool, home_pitch
     away_order = [8001, 8002] if away_confirmed else []
     return {
         "gameData": {
+            "players": {
+                "ID8001": {
+                    "person": {"id": 8001, "fullName": "Jarren Duran"},
+                    "batSide": {"code": "L"},
+                    "pitchHand": {"code": "R"},
+                },
+                "ID8002": {
+                    "person": {"id": 8002, "fullName": "Rafael Devers"},
+                    "batSide": {"code": "L"},
+                    "pitchHand": {"code": "R"},
+                },
+                "ID9001": {
+                    "person": {"id": 9001, "fullName": "Aaron Judge"},
+                    "batSide": {"code": "R"},
+                    "pitchHand": {"code": "R"},
+                },
+                "ID9002": {
+                    "person": {"id": 9002, "fullName": "Paul Goldschmidt"},
+                    "batSide": {"code": "R"},
+                    "pitchHand": {"code": "L"},
+                },
+                "ID1001": {
+                    "person": {"id": 1001, "fullName": "Chris Sale"},
+                    "pitchHand": {"code": "L"},
+                },
+                "ID1003": {
+                    "person": {"id": 1003, "fullName": "Marcus Stroman"},
+                    "pitchHand": {"code": "R"},
+                },
+                "ID2002": {
+                    "person": {"id": 2002, "fullName": "Luke Weaver"},
+                    "pitchHand": {"code": "R"},
+                },
+            },
             "probablePitchers": {
                 "away": {"id": 1001, "fullName": "Chris Sale"},
                 "home": {"id": home_pitcher_id, "fullName": "Luke Weaver"},
@@ -210,11 +244,15 @@ def _live_feed_payload(*, home_confirmed: bool, away_confirmed: bool, home_pitch
                                 "person": {"id": 8001, "fullName": "Jarren Duran"},
                                 "position": {"abbreviation": "LF"},
                                 "battingOrder": "100",
+                                "batSide": {"code": "L"},
+                                "pitchHand": {"code": "R"},
                             },
                             "ID8002": {
                                 "person": {"id": 8002, "fullName": "Rafael Devers"},
                                 "position": {"abbreviation": "3B"},
                                 "battingOrder": "200",
+                                "batSide": {"code": "L"},
+                                "pitchHand": {"code": "R"},
                             },
                         },
                     },
@@ -225,11 +263,15 @@ def _live_feed_payload(*, home_confirmed: bool, away_confirmed: bool, home_pitch
                                 "person": {"id": 9001, "fullName": "Aaron Judge"},
                                 "position": {"abbreviation": "RF"},
                                 "battingOrder": "100",
+                                "batSide": {"code": "R"},
+                                "pitchHand": {"code": "R"},
                             },
                             "ID9002": {
                                 "person": {"id": 9002, "fullName": "Paul Goldschmidt"},
                                 "position": {"abbreviation": "1B"},
                                 "battingOrder": "200",
+                                "batSide": {"code": "R"},
+                                "pitchHand": {"code": "L"},
                             },
                         },
                     },
@@ -388,18 +430,23 @@ def test_fetch_confirmed_lineups_prefers_primary_projection_and_detects_starter_
     assert away_lineup.source == "mlb-api"
     assert away_lineup.projected_starting_pitcher_id == 1001
     assert away_lineup.starting_pitcher_id == 1001
+    assert away_lineup.starting_pitcher_throws == "L"
     assert away_lineup.is_opener is False
     assert [player.player_id for player in away_lineup.players] == [8001, 8002]
+    assert [player.bats for player in away_lineup.players] == ["L", "L"]
 
     assert home_lineup.confirmed is True
     assert home_lineup.source == "mlb-api"
     assert home_lineup.projected_starting_pitcher_id == 1003
+    assert home_lineup.projected_starting_pitcher_throws == "R"
     assert home_lineup.starting_pitcher_id == 2002
+    assert home_lineup.starting_pitcher_throws == "R"
     assert home_lineup.projected_starting_pitcher_id != home_lineup.starting_pitcher_id
     assert home_lineup.starter_avg_innings_pitched == pytest.approx(13 / 6, rel=1e-6)
     assert home_lineup.is_opener is True
     assert home_lineup.is_bullpen_game is True
     assert [player.batting_order for player in home_lineup.players] == [1, 2]
+    assert [player.bats for player in home_lineup.players] == ["R", "R"]
 
 
 def test_fetch_confirmed_lineups_falls_back_to_mlb_api_when_primary_sources_fail(
@@ -505,7 +552,9 @@ def test_fetch_confirmed_lineups_uses_rotoballer_when_rotogrinders_unavailable(
     assert lineup_by_team["NYY"].source == "rotoballer"
     assert lineup_by_team["BOS"].confirmed is False
     assert [player.player_id for player in lineup_by_team["BOS"].players] == [8001, 8002]
+    assert [player.bats for player in lineup_by_team["BOS"].players] == ["L", "L"]
     assert lineup_by_team["NYY"].projected_starting_pitcher_id == 1003
+    assert lineup_by_team["NYY"].projected_starting_pitcher_throws == "R"
     assert [player.player_name for player in lineup_by_team["NYY"].players] == ["Aaron Judge", "Paul Goldschmidt"]
 
 

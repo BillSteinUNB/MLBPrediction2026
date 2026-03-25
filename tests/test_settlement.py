@@ -40,6 +40,7 @@ def _decision(
     side: str = "home",
     kelly_stake: float = 50.0,
     odds_at_bet: int = 120,
+    line_at_bet: float | None = None,
 ) -> BetDecision:
     return BetDecision(
         game_pk=game_pk,
@@ -52,24 +53,43 @@ def _decision(
         is_positive_ev=True,
         kelly_stake=kelly_stake,
         odds_at_bet=odds_at_bet,
+        line_at_bet=line_at_bet,
         result=BetResult.PENDING,
     )
 
 
 @pytest.mark.parametrize(
-    ("market_type", "side", "home_score", "away_score", "innings_completed", "starter_scratched", "expected"),
+    (
+        "market_type",
+        "side",
+        "home_score",
+        "away_score",
+        "innings_completed",
+        "starter_scratched",
+        "line_at_bet",
+        "expected",
+    ),
     [
-        pytest.param("f5_ml", "home", 3, 1, 5.0, False, BetResult.WIN, id="ml-home-lead-home-win"),
-        pytest.param("f5_ml", "away", 1, 3, 5.0, False, BetResult.WIN, id="ml-away-lead-away-win"),
-        pytest.param("f5_ml", "home", 2, 2, 5.0, False, BetResult.PUSH, id="ml-tie-push"),
-        pytest.param("f5_rl", "home", 4, 2, 5.0, False, BetResult.WIN, id="rl-home-minus-wins-by-two"),
-        pytest.param("f5_rl", "home", 3, 2, 5.0, False, BetResult.LOSS, id="rl-home-minus-loses-by-one"),
-        pytest.param("f5_rl", "home", 2, 2, 5.0, False, BetResult.LOSS, id="rl-home-minus-loses-on-tie"),
-        pytest.param("f5_rl", "away", 2, 2, 5.0, False, BetResult.WIN, id="rl-away-plus-wins-on-tie"),
-        pytest.param("f5_rl", "away", 1, 3, 5.0, False, BetResult.WIN, id="rl-away-plus-wins-when-leading"),
-        pytest.param("f5_rl", "home", 1, 3, 5.0, False, BetResult.LOSS, id="rl-home-minus-loses-when-trailing"),
-        pytest.param("f5_ml", "home", 3, 1, 4.5, False, BetResult.NO_ACTION, id="short-game-no-action"),
-        pytest.param("f5_ml", "home", 3, 1, 5.0, True, BetResult.NO_ACTION, id="starter-scratch-no-action"),
+        pytest.param("f5_ml", "home", 3, 1, 5.0, False, None, BetResult.WIN, id="ml-home-lead-home-win"),
+        pytest.param("f5_ml", "away", 1, 3, 5.0, False, None, BetResult.WIN, id="ml-away-lead-away-win"),
+        pytest.param("f5_ml", "home", 2, 2, 5.0, False, None, BetResult.PUSH, id="ml-tie-push"),
+        pytest.param("f5_rl", "home", 4, 2, 5.0, False, -1.5, BetResult.WIN, id="rl-home-minus-wins-by-two"),
+        pytest.param("f5_rl", "home", 3, 2, 5.0, False, -1.5, BetResult.LOSS, id="rl-home-minus-loses-by-one"),
+        pytest.param("f5_rl", "home", 2, 2, 5.0, False, -1.5, BetResult.LOSS, id="rl-home-minus-loses-on-tie"),
+        pytest.param("f5_rl", "away", 2, 2, 5.0, False, 1.5, BetResult.WIN, id="rl-away-plus-wins-on-tie"),
+        pytest.param("f5_rl", "away", 1, 3, 5.0, False, 1.5, BetResult.WIN, id="rl-away-plus-wins-when-leading"),
+        pytest.param("f5_rl", "home", 1, 3, 5.0, False, -1.5, BetResult.LOSS, id="rl-home-minus-loses-when-trailing"),
+        pytest.param("f5_total", "over", 3, 2, 5.0, False, 4.5, BetResult.WIN, id="f5-total-over-wins"),
+        pytest.param("f5_total", "over", 3, 2, 5.0, False, 5.5, BetResult.LOSS, id="f5-total-over-loses"),
+        pytest.param("f5_total", "under", 3, 2, 5.0, False, 5.0, BetResult.PUSH, id="f5-total-under-push"),
+        pytest.param("full_game_ml", "home", 5, 4, 9.0, False, None, BetResult.WIN, id="full-game-ml-home-win"),
+        pytest.param("full_game_ml", "away", 5, 4, 9.0, False, None, BetResult.LOSS, id="full-game-ml-away-loss"),
+        pytest.param("full_game_rl", "home", 6, 4, 9.0, False, -1.5, BetResult.WIN, id="full-game-rl-home-covers"),
+        pytest.param("full_game_rl", "away", 6, 4, 9.0, False, 1.5, BetResult.LOSS, id="full-game-rl-away-fails"),
+        pytest.param("full_game_total", "over", 5, 4, 9.0, False, 8.5, BetResult.WIN, id="full-game-total-over-wins"),
+        pytest.param("full_game_total", "under", 5, 4, 9.0, False, 9.5, BetResult.WIN, id="full-game-total-under-wins"),
+        pytest.param("f5_ml", "home", 3, 1, 4.5, False, None, BetResult.NO_ACTION, id="short-game-no-action"),
+        pytest.param("f5_ml", "home", 3, 1, 5.0, True, None, BetResult.NO_ACTION, id="starter-scratch-no-action"),
     ],
 )
 def test_settle_bet_handles_all_contract_scenarios(
@@ -79,11 +99,12 @@ def test_settle_bet_handles_all_contract_scenarios(
     away_score: int,
     innings_completed: float,
     starter_scratched: bool,
+    line_at_bet: float | None,
     expected: BetResult,
 ) -> None:
     from src.engine.settlement import settle_bet
 
-    decision = _decision(market_type=market_type, side=side)
+    decision = _decision(market_type=market_type, side=side, line_at_bet=line_at_bet)
 
     result = settle_bet(
         decision,
@@ -128,6 +149,8 @@ def test_settle_bet_returns_no_action_when_scores_are_missing(
         pytest.param("f5_ml", "home", 1, 3, BetResult.LOSS, id="ml-home-bet-loses-when-away-leads"),
         pytest.param("f5_rl", "away", 4, 2, BetResult.LOSS, id="rl-away-plus-loses-on-two-run-deficit"),
         pytest.param("f5_rl", "away", 3, 2, BetResult.WIN, id="rl-away-plus-wins-on-one-run-deficit"),
+        pytest.param("f5_total", "under", 4, 3, BetResult.LOSS, id="f5-total-under-loses"),
+        pytest.param("full_game_total", "over", 4, 3, BetResult.WIN, id="full-game-total-over-wins"),
     ],
 )
 def test_settle_bet_handles_opposite_side_outcomes(
@@ -139,7 +162,11 @@ def test_settle_bet_handles_opposite_side_outcomes(
 ) -> None:
     from src.engine.settlement import settle_bet
 
-    decision = _decision(market_type=market_type, side=side)
+    decision = _decision(
+        market_type=market_type,
+        side=side,
+        line_at_bet=4.5 if "total" in market_type else None,
+    )
 
     result = settle_bet(
         decision,
@@ -152,12 +179,12 @@ def test_settle_bet_handles_opposite_side_outcomes(
 
 
 @pytest.mark.parametrize(
-    ("market_type", "side", "home_score", "away_score", "innings_completed", "starter_scratched", "expected_result", "expected_profit_loss", "expected_settlement_amount", "expected_balance"),
+    ("market_type", "side", "home_score", "away_score", "innings_completed", "starter_scratched", "line_at_bet", "expected_result", "expected_profit_loss", "expected_settlement_amount", "expected_balance"),
     [
-        pytest.param("f5_ml", "home", 3, 1, 5.0, False, "WIN", 60.0, 110.0, 1060.0, id="win"),
-        pytest.param("f5_ml", "home", 1, 3, 5.0, False, "LOSS", -50.0, 0.0, 950.0, id="loss"),
-        pytest.param("f5_ml", "home", 2, 2, 5.0, False, "PUSH", 0.0, 50.0, 1000.0, id="push"),
-        pytest.param("f5_ml", "home", 3, 1, 4.0, False, "NO_ACTION", 0.0, 50.0, 1000.0, id="no-action"),
+        pytest.param("f5_ml", "home", 3, 1, 5.0, False, None, "WIN", 60.0, 110.0, 1060.0, id="win"),
+        pytest.param("f5_ml", "home", 1, 3, 5.0, False, None, "LOSS", -50.0, 0.0, 950.0, id="loss"),
+        pytest.param("f5_ml", "home", 2, 2, 5.0, False, None, "PUSH", 0.0, 50.0, 1000.0, id="push"),
+        pytest.param("f5_ml", "home", 3, 1, 4.0, False, None, "NO_ACTION", 0.0, 50.0, 1000.0, id="no-action"),
     ],
 )
 def test_settle_game_bets_updates_bets_and_bankroll_ledger(
@@ -168,6 +195,7 @@ def test_settle_game_bets_updates_bets_and_bankroll_ledger(
     away_score: int,
     innings_completed: float,
     starter_scratched: bool,
+    line_at_bet: float | None,
     expected_result: str,
     expected_profit_loss: float,
     expected_settlement_amount: float,
@@ -179,7 +207,12 @@ def test_settle_game_bets_updates_bets_and_bankroll_ledger(
     init_db(db_path)
     _seed_game(db_path, 12345)
 
-    placed_decision = _decision(game_pk=12345, market_type=market_type, side=side)
+    placed_decision = _decision(
+        game_pk=12345,
+        market_type=market_type,
+        side=side,
+        line_at_bet=line_at_bet,
+    )
     update_bankroll(
         action="place",
         decision=placed_decision,
@@ -260,3 +293,19 @@ def test_settle_game_bets_uses_game_pk_to_disambiguate_doubleheaders(tmp_path: P
     assert settlement_rows == [
         ("bet_settled:WIN: game_pk=2002, market_type=f5_ml, side=home, stake=50.00",),
     ]
+
+
+def test_settle_full_game_bets_ignore_f5_starter_scratch(tmp_path: Path) -> None:
+    from src.engine.settlement import settle_bet
+
+    decision = _decision(market_type="full_game_ml", side="home")
+
+    result = settle_bet(
+        decision,
+        home_score=4,
+        away_score=2,
+        innings_completed=5.0,
+        starter_scratched=True,
+    )
+
+    assert result is BetResult.WIN

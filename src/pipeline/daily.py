@@ -61,6 +61,7 @@ from src.ops.error_handler import (
 )
 from src.ops.logging_config import configure_logging
 from src.ops.performance_tracker import sync_closing_lines_from_snapshots
+from src.pipeline.narrative import generate_game_narrative
 
 
 logger = logging.getLogger(__name__)
@@ -172,6 +173,7 @@ class GameProcessingResult:
     notified: bool = False
     paper_fallback: bool = False
     input_status: dict[str, Any] | None = None
+    narrative: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -190,6 +192,7 @@ class GameProcessingResult:
             "notified": self.notified,
             "paper_fallback": self.paper_fallback,
             "input_status": self.input_status,
+            "narrative": self.narrative,
         }
 
 
@@ -265,8 +268,12 @@ class ArtifactOrFallbackPredictionEngine:
         resolved_frame = self._ensure_required_columns(resolved_frame)
 
         if self.ml_bundle is not None and self.rl_bundle is not None:
-            ml_home_probability = float(self._predict_legacy_home_probability(self.ml_bundle, resolved_frame))
-            rl_home_probability = float(self._predict_legacy_home_probability(self.rl_bundle, resolved_frame))
+            ml_home_probability = float(
+                self._predict_legacy_home_probability(self.ml_bundle, resolved_frame)
+            )
+            rl_home_probability = float(
+                self._predict_legacy_home_probability(self.rl_bundle, resolved_frame)
+            )
         else:
             ml_home_probability = _fallback_ml_home_probability(resolved_frame.iloc[0])
             rl_home_probability = _fallback_rl_home_probability(
@@ -368,7 +375,9 @@ class ArtifactOrFallbackPredictionEngine:
                         snapshot=snapshot,
                         db_path=db_path,
                         source_model="rlv2_direct",
-                        source_model_version=self.rlv2_direct.model_version if self.rlv2_direct else None,
+                        source_model_version=self.rlv2_direct.model_version
+                        if self.rlv2_direct
+                        else None,
                     )
                 )
             if margin_probability is not None:
@@ -381,7 +390,9 @@ class ArtifactOrFallbackPredictionEngine:
                         snapshot=snapshot,
                         db_path=db_path,
                         source_model="rlv2_margin",
-                        source_model_version=self.rlv2_margin.model_version if self.rlv2_margin else None,
+                        source_model_version=self.rlv2_margin.model_version
+                        if self.rlv2_margin
+                        else None,
                     )
                 )
             if direct_probability is not None and margin_probability is not None:
@@ -457,7 +468,9 @@ class ArtifactOrFallbackPredictionEngine:
         )
         return ml_bundle, rl_bundle, resolved_version
 
-    def _resolve_best_legacy_bundle(self, target_key: Literal["ml", "rl"]) -> LegacyModelBundle | None:
+    def _resolve_best_legacy_bundle(
+        self, target_key: Literal["ml", "rl"]
+    ) -> LegacyModelBundle | None:
         resolved_candidates: list[LegacyModelBundle] = []
         target_prefix = f"f5_{target_key}"
         variant_patterns: tuple[tuple[str, Literal["base", "stacking", "calibrated"]], ...] = (
@@ -481,15 +494,25 @@ class ArtifactOrFallbackPredictionEngine:
 
         latest_holdout_season = max(candidate.holdout_season for candidate in resolved_candidates)
         season_candidates = [
-            candidate for candidate in resolved_candidates if candidate.holdout_season == latest_holdout_season
+            candidate
+            for candidate in resolved_candidates
+            if candidate.holdout_season == latest_holdout_season
         ]
         return min(
             season_candidates,
             key=lambda candidate: (
                 candidate.holdout_log_loss,
                 float("inf") if candidate.holdout_brier is None else candidate.holdout_brier,
-                -(candidate.holdout_roc_auc if candidate.holdout_roc_auc is not None else float("-inf")),
-                -(candidate.holdout_accuracy if candidate.holdout_accuracy is not None else float("-inf")),
+                -(
+                    candidate.holdout_roc_auc
+                    if candidate.holdout_roc_auc is not None
+                    else float("-inf")
+                ),
+                -(
+                    candidate.holdout_accuracy
+                    if candidate.holdout_accuracy is not None
+                    else float("-inf")
+                ),
                 _legacy_variant_priority(candidate.variant),
                 -candidate.model_path.stat().st_mtime,
             ),
@@ -550,12 +573,8 @@ class ArtifactOrFallbackPredictionEngine:
                 raw_meta_feature_columns=list(loaded_model.stacking_model.raw_meta_feature_columns),
                 holdout_season=int(metadata_payload.get("holdout_season", 0)),
                 holdout_log_loss=float(holdout_log_loss),
-                holdout_roc_auc=(
-                    None if holdout_roc_auc is None else float(holdout_roc_auc)
-                ),
-                holdout_accuracy=(
-                    None if holdout_accuracy is None else float(holdout_accuracy)
-                ),
+                holdout_roc_auc=(None if holdout_roc_auc is None else float(holdout_roc_auc)),
+                holdout_accuracy=(None if holdout_accuracy is None else float(holdout_accuracy)),
                 holdout_brier=None if holdout_brier is None else float(holdout_brier),
             )
 
@@ -652,7 +671,9 @@ class ArtifactOrFallbackPredictionEngine:
             snapshot=snapshot,
             feature_columns=self.rlv2_direct.feature_columns,
         )
-        probability = self.rlv2_direct.model.predict_proba(frame[self.rlv2_direct.feature_columns])[:, 1][0]
+        probability = self.rlv2_direct.model.predict_proba(frame[self.rlv2_direct.feature_columns])[
+            :, 1
+        ][0]
         return max(0.0, min(1.0, float(probability)))
 
     def _predict_rlv2_margin_home_probability(
@@ -671,7 +692,9 @@ class ArtifactOrFallbackPredictionEngine:
             snapshot=snapshot,
             feature_columns=self.rlv2_margin.feature_columns,
         )
-        predicted_margin = float(self.rlv2_margin.model.predict(frame[self.rlv2_margin.feature_columns])[0])
+        predicted_margin = float(
+            self.rlv2_margin.model.predict(frame[self.rlv2_margin.feature_columns])[0]
+        )
         return margin_to_cover_probability(
             predicted_margin=predicted_margin,
             home_point=snapshot.home_point,
@@ -712,8 +735,12 @@ class ArtifactOrFallbackPredictionEngine:
         frame["posted_f5_rl_away_point"] = snapshot.away_point
         frame["posted_f5_rl_home_odds"] = snapshot.home_odds
         frame["posted_f5_rl_away_odds"] = snapshot.away_odds
-        frame["posted_f5_rl_home_implied_prob"] = _american_to_implied_probability(snapshot.home_odds)
-        frame["posted_f5_rl_away_implied_prob"] = _american_to_implied_probability(snapshot.away_odds)
+        frame["posted_f5_rl_home_implied_prob"] = _american_to_implied_probability(
+            snapshot.home_odds
+        )
+        frame["posted_f5_rl_away_implied_prob"] = _american_to_implied_probability(
+            snapshot.away_odds
+        )
         frame["posted_f5_rl_point_abs"] = abs(float(snapshot.home_point or 0.0))
         frame["posted_f5_rl_home_is_favorite"] = (
             1.0 if int(snapshot.home_odds) < int(snapshot.away_odds) else 0.0
@@ -777,6 +804,7 @@ class ArtifactOrFallbackPredictionEngine:
             )
             for decision in decisions
         ]
+
 
 def run_daily_pipeline(
     *,
@@ -872,9 +900,7 @@ def run_daily_pipeline(
     run_id = _build_run_id(pipeline_day)
     lineups_by_game_team = {(lineup.game_pk, lineup.team): lineup for lineup in lineups}
     odds_by_game = _group_odds_by_game(odds)
-    schedule_lookup = {
-        int(row["game_pk"]): row for row in schedule.to_dict(orient="records")
-    }
+    schedule_lookup = {int(row["game_pk"]): row for row in schedule.to_dict(orient="records")}
 
     current_bankroll, peak_bankroll, drawdown_pct = _load_bankroll_state(
         database_path,
@@ -887,7 +913,9 @@ def run_daily_pipeline(
     for game_pk in schedule["game_pk"].astype(int).tolist():
         game = schedule_lookup[game_pk]
         matchup = f"{game['away_team']} @ {game['home_team']}"
-        row_frame = inference_frame.loc[inference_frame["game_pk"] == game_pk].reset_index(drop=True)
+        row_frame = inference_frame.loc[inference_frame["game_pk"] == game_pk].reset_index(
+            drop=True
+        )
         input_status: dict[str, Any] | None = None
 
         try:
@@ -922,8 +950,8 @@ def run_daily_pipeline(
             lineup_only_block = bool(validation_reasons) and set(validation_reasons) <= {
                 "lineup unavailable"
             }
-            allow_paper_fallback = dry_run and lineup_only_block and bool(
-                input_status["odds_available"]
+            allow_paper_fallback = (
+                dry_run and lineup_only_block and bool(input_status["odds_available"])
             )
             if validation_reasons and not allow_paper_fallback:
                 results.append(
@@ -998,6 +1026,52 @@ def run_daily_pipeline(
                     input_status=input_status if "input_status" in locals() else None,
                 )
             )
+
+    # --- Generate narratives for all processed games ---
+    _POTD_MIN_EDGE = 0.05
+    potd_game_pk: int | None = None
+    best_potd_score = 0.0
+    for result in results:
+        if result.status == "pick" and result.selected_decision is not None:
+            edge = float(result.selected_decision.edge_pct)
+            if edge >= _POTD_MIN_EDGE:
+                score = edge * float(result.selected_decision.model_probability)
+                if score > best_potd_score:
+                    best_potd_score = score
+                    potd_game_pk = result.game_pk
+
+    for result in results:
+        if result.selected_decision is None and result.status != "error":
+            continue
+        if result.status == "error":
+            continue
+        try:
+            game_features: dict[str, Any] = {}
+            row = inference_frame.loc[inference_frame["game_pk"] == result.game_pk]
+            if not row.empty:
+                for col_name in row.columns:
+                    val = row.iloc[0][col_name]
+                    if pd.notna(val):
+                        game_features[str(col_name)] = val
+
+            decision_dict: dict[str, Any] | None = None
+            if result.selected_decision is not None:
+                decision_dict = result.selected_decision.model_dump(mode="json")
+
+            prediction_dict: dict[str, Any] | None = None
+            if result.prediction is not None:
+                prediction_dict = result.prediction.model_dump(mode="json")
+
+            result.narrative = generate_game_narrative(
+                matchup=result.matchup,
+                prediction=prediction_dict,
+                decision=decision_dict,
+                features=game_features,
+                is_play_of_day=(result.game_pk == potd_game_pk),
+                no_pick_reason=result.no_pick_reason,
+            )
+        except Exception:
+            logger.debug("Narrative generation failed for game %s", result.game_pk, exc_info=True)
 
     _apply_pick_side_effects(
         database_path,
@@ -1109,9 +1183,7 @@ def _fetch_live_odds_with_retry(
 
     merged = list(primary_snapshots)
     merged.extend(
-        snapshot
-        for snapshot in sbr_snapshots
-        if snapshot.game_pk not in primary_f5_games
+        snapshot for snapshot in sbr_snapshots if snapshot.game_pk not in primary_f5_games
     )
     return sorted(
         merged,
@@ -1161,7 +1233,9 @@ def _default_history_fetcher(season: int, before_date: date) -> pd.DataFrame:
 
 def _default_lineups_fetcher(target_date: str) -> list[Lineup]:
     return call_with_graceful_degradation(
-        lambda: _retry_with_circuit_breaker(_fetch_lineups_with_retry, _LINEUPS_CIRCUIT, target_date),
+        lambda: _retry_with_circuit_breaker(
+            _fetch_lineups_with_retry, _LINEUPS_CIRCUIT, target_date
+        ),
         operation_name=f"lineup fetch for {target_date}",
         fallback=[],
         logger_=logger,
@@ -1241,20 +1315,16 @@ def _parse_schedule_game(game: dict[str, Any]) -> dict[str, Any] | None:
     home_payload = game.get("teams", {}).get("home", {})
     away_payload = game.get("teams", {}).get("away", {})
     home_team = _normalize_team_code(
-        home_payload.get("team", {}).get("abbreviation")
-        or home_payload.get("team", {}).get("name")
+        home_payload.get("team", {}).get("abbreviation") or home_payload.get("team", {}).get("name")
     )
     away_team = _normalize_team_code(
-        away_payload.get("team", {}).get("abbreviation")
-        or away_payload.get("team", {}).get("name")
+        away_payload.get("team", {}).get("abbreviation") or away_payload.get("team", {}).get("name")
     )
     if home_team is None or away_team is None:
         return None
 
     venue = str(
-        game.get("venue", {}).get("name")
-        or game.get("venue", {}).get("locationName")
-        or home_team
+        game.get("venue", {}).get("name") or game.get("venue", {}).get("locationName") or home_team
     )
     park = get_park_factors(team_code=home_team, venue=venue)
     linescore = game.get("linescore", {})
@@ -1276,8 +1346,12 @@ def _parse_schedule_game(game: dict[str, Any]) -> dict[str, Any] | None:
         "park_hr_factor": float(park.hr),
         "game_type": game_type,
         "status": _normalize_game_status(game.get("status", {}).get("detailedState")),
-        "f5_home_score": sum(_inning_runs(inning, "home") for inning in innings[:5]) if innings else None,
-        "f5_away_score": sum(_inning_runs(inning, "away") for inning in innings[:5]) if innings else None,
+        "f5_home_score": sum(_inning_runs(inning, "home") for inning in innings[:5])
+        if innings
+        else None,
+        "f5_away_score": sum(_inning_runs(inning, "away") for inning in innings[:5])
+        if innings
+        else None,
         "final_home_score": _optional_int(home_payload.get("score")),
         "final_away_score": _optional_int(away_payload.get("score")),
     }
@@ -1330,7 +1404,10 @@ def _upsert_games(db_path: str | Path, schedule: pd.DataFrame) -> None:
     rows = [
         (
             int(game["game_pk"]),
-            str(game.get("game_date") or _coerce_timestamp(game["scheduled_start"]).date().isoformat()),
+            str(
+                game.get("game_date")
+                or _coerce_timestamp(game["scheduled_start"]).date().isoformat()
+            ),
             str(game["home_team"]),
             str(game["away_team"]),
             _optional_int(game.get("home_starter_id")),
@@ -1408,7 +1485,9 @@ def _persist_odds_snapshots(db_path: str | Path, snapshots: Sequence[OddsSnapsho
                 for snapshot in snapshots
             ],
         )
-        for game_pk, market_type in {(snapshot.game_pk, snapshot.market_type) for snapshot in snapshots}:
+        for game_pk, market_type in {
+            (snapshot.game_pk, snapshot.market_type) for snapshot in snapshots
+        }:
             sync_closing_lines_from_snapshots(
                 game_pk=game_pk,
                 market_type=market_type,
@@ -1524,7 +1603,11 @@ def _collect_validation_reasons(
         if lineup is None or not lineup.players:
             reasons.append("lineup unavailable")
             break
-        if (lineup.starting_pitcher_id or lineup.projected_starting_pitcher_id or _optional_int(game.get(starter_key))) is None:
+        if (
+            lineup.starting_pitcher_id
+            or lineup.projected_starting_pitcher_id
+            or _optional_int(game.get(starter_key))
+        ) is None:
             reasons.append("starter unavailable")
             break
 
@@ -1678,7 +1761,9 @@ def _select_game_decision(
     if not positive_candidates:
         return None, False
 
-    drawdown_pct = ((peak_bankroll - current_bankroll) / peak_bankroll) if peak_bankroll > 0 else 0.0
+    drawdown_pct = (
+        ((peak_bankroll - current_bankroll) / peak_bankroll) if peak_bankroll > 0 else 0.0
+    )
     kill_switch_active = drawdown_pct >= float(_SETTINGS["thresholds"]["max_drawdown"])
 
     ranked_candidates: list[tuple[int, float, float, BetDecision]] = []
@@ -1686,7 +1771,11 @@ def _select_game_decision(
         threshold = _official_edge_threshold(candidate)
         passes_threshold = float(candidate.edge_pct) >= threshold
         selection_score = _official_selection_score(candidate)
-        stake_units = 0.0 if kill_switch_active else _official_stake_units(candidate, bankroll=current_bankroll)
+        stake_units = (
+            0.0
+            if kill_switch_active
+            else _official_stake_units(candidate, bankroll=current_bankroll)
+        )
         ranked_candidates.append(
             (
                 int(passes_threshold),
@@ -1726,7 +1815,10 @@ def _is_official_live_candidate(candidate: BetDecision) -> bool:
         return False
     if candidate.odds_at_bet > DEFAULT_OFFICIAL_MAX_BET_ODDS:
         return False
-    if not str(candidate.book_name or "").startswith("estimate:") and float(candidate.edge_pct) > DEFAULT_OFFICIAL_MAX_TRUSTED_EDGE:
+    if (
+        not str(candidate.book_name or "").startswith("estimate:")
+        and float(candidate.edge_pct) > DEFAULT_OFFICIAL_MAX_TRUSTED_EDGE
+    ):
         return False
     if candidate.market_type == "f5_ml":
         return candidate.source_model == "legacy_f5_ml"
@@ -1734,7 +1826,11 @@ def _is_official_live_candidate(candidate: BetDecision) -> bool:
 
 
 def _official_edge_threshold(candidate: BetDecision) -> float:
-    return DEFAULT_OFFICIAL_ML_MIN_EDGE if candidate.market_type == "f5_ml" else DEFAULT_OFFICIAL_RL_MIN_EDGE
+    return (
+        DEFAULT_OFFICIAL_ML_MIN_EDGE
+        if candidate.market_type == "f5_ml"
+        else DEFAULT_OFFICIAL_RL_MIN_EDGE
+    )
 
 
 def _official_selection_score(candidate: BetDecision) -> float:
@@ -1792,9 +1888,7 @@ def _load_bankroll_state(
         current_row = connection.execute(
             "SELECT running_balance FROM bankroll_ledger ORDER BY id DESC LIMIT 1"
         ).fetchone()
-        peak_row = connection.execute(
-            "SELECT MAX(running_balance) FROM bankroll_ledger"
-        ).fetchone()
+        peak_row = connection.execute("SELECT MAX(running_balance) FROM bankroll_ledger").fetchone()
 
     current_bankroll = float(current_row[0]) if current_row else float(starting_bankroll)
     peak_bankroll = max(float(starting_bankroll), float(peak_row[0] or 0.0))
@@ -1814,7 +1908,11 @@ def _send_daily_notification(
     drawdown_pct: float,
     kill_switch_triggered: bool,
 ) -> tuple[str, dict[str, Any]]:
-    picks = [result for result in results if result.status == "pick" and result.selected_decision is not None]
+    picks = [
+        result
+        for result in results
+        if result.status == "pick" and result.selected_decision is not None
+    ]
     if picks:
         payload = notifier.send_picks(
             pipeline_date=pipeline_date,
@@ -1839,7 +1937,8 @@ def _send_daily_notification(
                 inference_frame=inference_frame,
             )
             for result in results
-            if result.no_pick_reason == "kill-switch active" and result.selected_decision is not None
+            if result.no_pick_reason == "kill-switch active"
+            and result.selected_decision is not None
         ]
         payload = notifier.send_drawdown_alert(
             pipeline_date=pipeline_date,
@@ -2040,7 +2139,9 @@ def _persist_game_results(
                     result.selected_decision.side if result.selected_decision else None,
                     result.selected_decision.odds_at_bet if result.selected_decision else None,
                     result.selected_decision.fair_probability if result.selected_decision else None,
-                    result.selected_decision.model_probability if result.selected_decision else None,
+                    result.selected_decision.model_probability
+                    if result.selected_decision
+                    else None,
                     result.selected_decision.edge_pct if result.selected_decision else None,
                     result.selected_decision.ev if result.selected_decision else None,
                     result.selected_decision.kelly_stake if result.selected_decision else None,

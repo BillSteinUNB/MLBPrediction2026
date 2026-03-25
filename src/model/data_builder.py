@@ -13,6 +13,7 @@ from time import perf_counter
 from typing import Any, Callable, Mapping, Sequence
 
 import httpx
+import numpy as np
 import pandas as pd
 
 from src.clients.statcast_client import (
@@ -22,6 +23,7 @@ from src.clients.statcast_client import (
     fetch_catcher_framing,
     fetch_fielding_stats,
     fetch_pitcher_stats,
+    fetch_statcast_range,
     fetch_team_game_logs,
 )
 from src.clients.chadwick_client import fetch_chadwick_register
@@ -52,6 +54,7 @@ from src.features.offense import (
     LEAGUE_WOBA_BASELINE,
     LEAGUE_WRC_PLUS_BASELINE,
     compute_offensive_features,
+    _fetch_season_offense_statcast_metrics,
 )
 from src.features.pitching import (
     DEFAULT_METRIC_BASELINES as DEFAULT_PITCHING_METRIC_BASELINES,
@@ -59,7 +62,8 @@ from src.features.pitching import (
     _fetch_season_start_metrics,
 )
 from src.features.umpires import compute_umpire_features
-from src.models.lineup import Lineup
+from src.models.features import GameFeatures
+from src.models.lineup import Lineup, LineupPlayer
 from src.models.weather import WeatherData
 
 
@@ -102,7 +106,10 @@ _FINAL_GAME_STATES = {"final", "game over", "completed early"}
 _OFFENSE_FEATURE_DEFAULTS = {
     "wrc_plus": LEAGUE_WRC_PLUS_BASELINE,
     "woba": LEAGUE_WOBA_BASELINE,
+    "xwoba": LEAGUE_WOBA_BASELINE,
+    "woba_minus_xwoba": 0.0,
     "iso": 0.0,
+    "barrel_pct": 7.0,
     "babip": 0.0,
     "k_pct": 0.0,
     "bb_pct": 0.0,
@@ -111,6 +118,9 @@ _PITCHING_FEATURE_DEFAULTS = {
     **DEFAULT_PITCHING_METRIC_BASELINES,
     "is_opener": 0.0,
     "uses_team_composite": 0.0,
+    "days_rest": 5.0,
+    "last_start_pitch_count": 90.0,
+    "cumulative_pitch_load_5s": 90.0,
 }
 _DEFENSE_FEATURE_DEFAULTS = {
     "drs": 0.0,
@@ -132,6 +142,9 @@ _WEATHER_FEATURE_DEFAULTS = {
     "weather_wind_factor": 0.0,
     "weather_rain_risk": NEUTRAL_WEATHER_FACTOR,
     "weather_composite": NEUTRAL_WEATHER_FACTOR,
+    "weather_precip_probability": 0.0,
+    "weather_precipitation_mm": 0.0,
+    "weather_cloud_cover_pct": 0.0,
     "weather_data_missing": 1.0,
 }
 _UMPIRE_FEATURE_DEFAULTS = {
@@ -147,6 +160,59 @@ _SCHEDULE_FEATURE_DEFAULTS = {
     "abs_active": 1.0,
     "abs_walk_rate_delta": DEFAULT_WALK_RATE_DELTA,
     "abs_strikeout_rate_delta": DEFAULT_STRIKEOUT_RATE_DELTA,
+    "home_timezone_crossings_east": 0.0,
+    "away_timezone_crossings_east": 0.0,
+    "home_is_day_after_night_game": 0.0,
+    "away_is_day_after_night_game": 0.0,
+}
+_TEAM_TIMEZONE_OFFSETS = {
+    "ARI": -7,
+    "ATL": -5,
+    "BAL": -5,
+    "BOS": -5,
+    "CHC": -6,
+    "CIN": -5,
+    "CLE": -5,
+    "COL": -7,
+    "CWS": -6,
+    "DET": -5,
+    "HOU": -6,
+    "KC": -6,
+    "LAA": -8,
+    "LAD": -8,
+    "MIA": -5,
+    "MIL": -6,
+    "MIN": -6,
+    "NYM": -5,
+    "NYY": -5,
+    "OAK": -8,
+    "PHI": -5,
+    "PIT": -5,
+    "SD": -8,
+    "SEA": -8,
+    "SF": -8,
+    "STL": -6,
+    "TB": -5,
+    "TEX": -6,
+    "TOR": -5,
+    "WSH": -5,
+}
+_LINEUP_CONTEXT_FEATURE_DEFAULTS = {
+    "lhb_pct": 0.0,
+    "rhb_pct": 0.0,
+    "shb_pct": 0.0,
+    "known_bats_pct": 0.0,
+    "platoon_advantage_pct": 0.0,
+    "woba_vs_LHP": LEAGUE_WOBA_BASELINE,
+    "woba_vs_RHP": LEAGUE_WOBA_BASELINE,
+    "woba_vs_opposing_hand": LEAGUE_WOBA_BASELINE,
+    "opposing_starter_throws_left": 0.0,
+    "opposing_starter_throws_right": 0.0,
+    "confirmed": 0.0,
+}
+_MATCHUP_INTERACTION_FEATURE_DEFAULTS = {
+    "home_offense_vs_away_starter_woba_gap": 0.0,
+    "away_offense_vs_home_starter_woba_gap": 0.0,
 }
 
 
@@ -157,10 +223,33 @@ LineupFetcher = Callable[[str | date | datetime], Sequence[Lineup]]
 UmpireFetcher = Callable[..., pd.DataFrame]
 StartMetricsFetcher = Callable[..., pd.DataFrame]
 BullpenMetricsFetcher = Callable[..., pd.DataFrame]
+OffenseStatcastFetcher = Callable[..., pd.DataFrame]
 WeatherFetcher = Callable[..., WeatherData | None]
 LineupPlayerIdsByDate = Mapping[str | date | datetime, Mapping[tuple[int, str], Sequence[int]]]
 
 logger = logging.getLogger(__name__)
+
+_TEAM_BATTING_SPLIT_MIN_PA = 30
+_EVENT_WOBA_VALUES = {
+    "single": 0.89,
+    "double": 1.27,
+    "triple": 1.62,
+    "home_run": 2.10,
+    "walk": 0.69,
+    "intent_walk": 0.69,
+    "hit_by_pitch": 0.72,
+    "field_out": 0.0,
+    "fielders_choice": 0.0,
+    "fielders_choice_out": 0.0,
+    "force_out": 0.0,
+    "double_play": 0.0,
+    "grounded_into_double_play": 0.0,
+    "ground_into_double_play": 0.0,
+    "sac_fly": 0.0,
+    "sac_bunt": 0.0,
+    "strikeout": 0.0,
+    "strikeout_double_play": 0.0,
+}
 
 
 def _resolve_feature_build_workers() -> int:
@@ -269,6 +358,7 @@ def build_training_dataset(
     team_logs_fetcher: TeamLogsFetcher = fetch_team_game_logs,
     lineup_fetcher: LineupFetcher | None = None,
     umpire_fetcher: UmpireFetcher | None = None,
+    offense_statcast_fetcher: OffenseStatcastFetcher | None = None,
     start_metrics_fetcher: StartMetricsFetcher | None = None,
     bullpen_metrics_fetcher: BullpenMetricsFetcher | None = None,
     weather_fetcher: WeatherFetcher | None = None,
@@ -343,7 +433,10 @@ def build_training_dataset(
     )
 
     build_timestamp = datetime.now(UTC)
-    resolved_lineup_fetcher = lineup_fetcher or _empty_lineups_fetcher
+    resolved_lineup_fetcher = lineup_fetcher or _build_historical_lineup_fetcher(
+        schedule=schedule,
+        refresh=refresh_raw_data,
+    )
     resolved_umpire_fetcher = (
         umpire_fetcher
         or (fetch_retrosheet_umpires if schedule_fetcher is None else _empty_umpires_fetcher)
@@ -365,6 +458,7 @@ def build_training_dataset(
         team_logs_fetcher=team_logs_fetcher,
         lineup_fetcher=lineup_fetcher,
         umpire_fetcher=resolved_umpire_fetcher,
+        offense_statcast_fetcher=offense_statcast_fetcher,
         start_metrics_fetcher=start_metrics_fetcher,
         bullpen_metrics_fetcher=bullpen_metrics_fetcher,
         lineup_player_ids_by_date=lineup_player_ids_by_date,
@@ -380,6 +474,7 @@ def build_training_dataset(
             refresh=refresh_raw_data,
             umpire_fetcher=resolved_umpire_fetcher,
             lineup_player_ids_by_date=resolved_lineup_player_ids_by_date,
+            offense_statcast_fetcher=offense_statcast_fetcher,
             worker_count=feature_build_workers,
         )
         feature_frame = _feature_rows_to_frame(chunk_result.feature_rows)
@@ -404,6 +499,7 @@ def build_training_dataset(
                 team_logs_fetcher=team_logs_fetcher,
                 lineup_fetcher=resolved_lineup_fetcher,
                 umpire_fetcher=resolved_umpire_fetcher,
+                offense_statcast_fetcher=offense_statcast_fetcher,
                 start_metrics_fetcher=start_metrics_fetcher,
                 bullpen_metrics_fetcher=bullpen_metrics_fetcher,
                 lineup_player_ids_by_date=resolved_lineup_player_ids_by_date,
@@ -507,6 +603,7 @@ def build_live_feature_frame(
     team_logs_fetcher: TeamLogsFetcher = fetch_team_game_logs,
     fielding_stats_fetcher: SeasonStatsFetcher = fetch_fielding_stats,
     framing_stats_fetcher: SeasonStatsFetcher = fetch_catcher_framing,
+    offense_statcast_fetcher: OffenseStatcastFetcher | None = None,
     start_metrics_fetcher: StartMetricsFetcher | None = None,
     bullpen_metrics_fetcher: BullpenMetricsFetcher | None = None,
     weather_fetcher: WeatherFetcher | None = None,
@@ -551,12 +648,17 @@ def build_live_feature_frame(
             team_logs_fetcher=team_logs_fetcher,
             lineup_fetcher=_static_lineup_fetcher(target_day, lineup_list),
             umpire_fetcher=_empty_umpires_fetcher,
+            offense_statcast_fetcher=offense_statcast_fetcher,
             start_metrics_fetcher=start_metrics_fetcher,
             bullpen_metrics_fetcher=bullpen_metrics_fetcher,
             lineup_player_ids_by_date={target_day.isoformat(): lineup_player_ids},
         )
 
         feature_frame = _feature_rows_to_frame(_load_feature_rows(working_db_path))
+        combined_schedule_for_context = pd.concat(
+            [prepared_history, prepared_schedule],
+            ignore_index=True,
+        ).sort_values(["scheduled_start", "game_pk"]).reset_index(drop=True)
     finally:
         try:
             working_db_path.unlink(missing_ok=True)
@@ -568,6 +670,7 @@ def build_live_feature_frame(
         feature_frame=feature_frame,
         weather_database_path=Path(db_path),
         weather_fetcher=weather_fetcher,
+        schedule_context_lookup=_build_schedule_context_lookup(combined_schedule_for_context),
     )
 
 
@@ -883,6 +986,7 @@ def _compute_feature_modules(
     team_logs_fetcher: TeamLogsFetcher,
     lineup_fetcher: LineupFetcher,
     umpire_fetcher: UmpireFetcher,
+    offense_statcast_fetcher: OffenseStatcastFetcher | None,
     start_metrics_fetcher: StartMetricsFetcher | None,
     bullpen_metrics_fetcher: BullpenMetricsFetcher | None,
     lineup_player_ids_by_date: LineupPlayerIdsByDate | None,
@@ -894,6 +998,8 @@ def _compute_feature_modules(
     cached_framing_stats_fetcher = _memoize_dataframe_fetcher(framing_stats_fetcher)
     cached_lineup_fetcher = _memoize_lineup_fetcher(lineup_fetcher)
     cached_umpire_fetcher = _memoize_dataframe_fetcher(umpire_fetcher)
+    cached_offense_statcast_fetcher = _build_cached_offense_statcast_fetcher(offense_statcast_fetcher)
+    cached_team_batting_splits_fetcher = _build_cached_team_batting_splits_fetcher()
     cached_start_metrics_fetcher = _build_cached_start_metrics_fetcher(start_metrics_fetcher)
     cached_bullpen_metrics_fetcher = _build_cached_bullpen_metrics_fetcher(
         bullpen_metrics_fetcher,
@@ -939,6 +1045,23 @@ def _compute_feature_modules(
         stage_elapsed = perf_counter() - stage_started_at
         module_seconds["prepare"] += stage_elapsed
         day_seconds["prepare"] = stage_elapsed
+        target_day = _coerce_date(game_date)
+        team_batting_splits_lookup = (
+            cached_team_batting_splits_fetcher(
+                target_day.year,
+                db_path=database_path,
+                target_day=target_day,
+                refresh=refresh,
+            )
+            if day_lineups
+            else {}
+        )
+        _persist_lineup_context_features(
+            database_path=database_path,
+            schedule=schedule,
+            lineups=day_lineups,
+            batting_splits_lookup=team_batting_splits_lookup,
+        )
         logger.info("[build %s/%s] offense %s", index, total_days, game_date)
         stage_started_at = perf_counter()
         compute_offensive_features(
@@ -950,6 +1073,7 @@ def _compute_feature_modules(
             roster_turnover_by_team=roster_turnover_by_team or None,
             team_logs_fetcher=cached_team_logs_fetcher,
             batting_stats_fetcher=cached_batting_stats_fetcher,
+            offense_statcast_fetcher=cached_offense_statcast_fetcher,
         )
         stage_elapsed = perf_counter() - stage_started_at
         module_seconds["offense"] += stage_elapsed
@@ -1046,6 +1170,7 @@ def _resolve_effective_feature_build_workers(
     team_logs_fetcher: TeamLogsFetcher,
     lineup_fetcher: LineupFetcher | None,
     umpire_fetcher: UmpireFetcher,
+    offense_statcast_fetcher: OffenseStatcastFetcher | None,
     start_metrics_fetcher: StartMetricsFetcher | None,
     bullpen_metrics_fetcher: BullpenMetricsFetcher | None,
     lineup_player_ids_by_date: LineupPlayerIdsByDate | None,
@@ -1053,6 +1178,8 @@ def _resolve_effective_feature_build_workers(
     if refresh_raw_data:
         return 1
     if lineup_fetcher is not None:
+        return 1
+    if offense_statcast_fetcher is not None:
         return 1
     if start_metrics_fetcher is not None or bullpen_metrics_fetcher is not None:
         return 1
@@ -1077,6 +1204,7 @@ def _compute_feature_modules_parallel(
     refresh: bool,
     umpire_fetcher: UmpireFetcher,
     lineup_player_ids_by_date: LineupPlayerIdsByDate | None,
+    offense_statcast_fetcher: OffenseStatcastFetcher | None,
     worker_count: int,
 ) -> _FeatureChunkResult:
     wall_started_at = perf_counter()
@@ -1098,6 +1226,7 @@ def _compute_feature_modules_parallel(
                 team_logs_fetcher=fetch_team_game_logs,
                 lineup_fetcher=_empty_lineups_fetcher,
                 umpire_fetcher=umpire_fetcher,
+                offense_statcast_fetcher=offense_statcast_fetcher,
                 start_metrics_fetcher=None,
                 bullpen_metrics_fetcher=None,
                 lineup_player_ids_by_date=lineup_player_ids_by_date,
@@ -1122,6 +1251,7 @@ def _compute_feature_modules_parallel(
                 refresh,
                 umpire_fetcher,
                 _normalize_lineup_player_ids_by_date(lineup_player_ids_by_date),
+                offense_statcast_fetcher,
             )
             for chunk_dates in chunked_dates
         ]
@@ -1144,6 +1274,7 @@ def _build_feature_chunk(
     refresh: bool,
     umpire_fetcher: UmpireFetcher,
     lineup_player_ids_by_date: dict[str, Mapping[tuple[int, str], Sequence[int]]],
+    offense_statcast_fetcher: OffenseStatcastFetcher | None,
 ) -> _FeatureChunkResult:
     chunk_schedule = schedule.loc[schedule["game_date"].astype(str).isin(chunk_dates)].copy()
     temp_fd, temp_db_name = tempfile.mkstemp(prefix="training_builder_chunk_", suffix=".db")
@@ -1162,6 +1293,7 @@ def _build_feature_chunk(
             team_logs_fetcher=fetch_team_game_logs,
             lineup_fetcher=_empty_lineups_fetcher,
             umpire_fetcher=umpire_fetcher,
+            offense_statcast_fetcher=offense_statcast_fetcher,
             start_metrics_fetcher=None,
             bullpen_metrics_fetcher=None,
             lineup_player_ids_by_date=lineup_player_ids_by_date,
@@ -1443,6 +1575,7 @@ def _assemble_training_rows(
     historical_odds_db_path: str | Path | None,
     historical_rl_book_name: str | None,
 ) -> pd.DataFrame:
+    schedule_context_lookup = _build_schedule_context_lookup(schedule)
     feature_lookup = (
         feature_frame.set_index("game_pk")
         if not feature_frame.empty and "game_pk" in feature_frame.columns
@@ -1472,6 +1605,7 @@ def _assemble_training_rows(
             "status": _normalize_game_status(game.get("status")),
         }
         row.update(_schedule_adjustment_features(game))
+        row.update(schedule_context_lookup.get(game_pk, {}))
         row.update(
             _resolve_weather_features(
                 game,
@@ -1487,6 +1621,7 @@ def _assemble_training_rows(
             for feature_name, feature_value in feature_values.items():
                 if pd.notna(feature_value):
                     row[str(feature_name)] = float(feature_value)
+        row.update(_derive_matchup_interaction_features(row))
 
         f5_home_score = int(game["f5_home_score"])
         f5_away_score = int(game["f5_away_score"])
@@ -1621,6 +1756,7 @@ def _assemble_inference_rows(
     feature_frame: pd.DataFrame,
     weather_database_path: Path,
     weather_fetcher: WeatherFetcher | None,
+    schedule_context_lookup: Mapping[int, Mapping[str, float]] | None = None,
 ) -> pd.DataFrame:
     feature_lookup = (
         feature_frame.set_index("game_pk")
@@ -1650,6 +1786,8 @@ def _assemble_inference_rows(
             "status": _normalize_game_status(game.get("status")),
         }
         row.update(_schedule_adjustment_features(game))
+        if schedule_context_lookup is not None:
+            row.update(schedule_context_lookup.get(game_pk, {}))
         row.update(
             _resolve_weather_features(
                 game,
@@ -1665,6 +1803,7 @@ def _assemble_inference_rows(
             for feature_name, feature_value in feature_values.items():
                 if pd.notna(feature_value):
                     row[str(feature_name)] = float(feature_value)
+        row.update(_derive_matchup_interaction_features(row))
 
         rows.append(row)
 
@@ -1685,6 +1824,87 @@ def _schedule_adjustment_features(game: Mapping[str, Any]) -> dict[str, float]:
         "abs_active": float(abs_adjustment.abs_active),
         "abs_walk_rate_delta": float(abs_adjustment.walk_rate_delta),
         "abs_strikeout_rate_delta": float(abs_adjustment.strikeout_rate_delta),
+        "home_timezone_crossings_east": 0.0,
+        "away_timezone_crossings_east": 0.0,
+        "home_is_day_after_night_game": 0.0,
+        "away_is_day_after_night_game": 0.0,
+    }
+
+
+def _build_schedule_context_lookup(schedule: pd.DataFrame) -> dict[int, dict[str, float]]:
+    if schedule.empty:
+        return {}
+
+    ordered = schedule.copy()
+    ordered["scheduled_start"] = pd.to_datetime(ordered["scheduled_start"], utc=True, errors="coerce")
+    ordered = ordered.dropna(subset=["scheduled_start"]).sort_values(["scheduled_start", "game_pk"]).reset_index(drop=True)
+
+    team_previous_game: dict[str, dict[str, Any]] = {}
+    lookup: dict[int, dict[str, float]] = {}
+
+    for game in ordered.to_dict(orient="records"):
+        game_pk = int(game["game_pk"])
+        home_team = str(game["home_team"])
+        away_team = str(game["away_team"])
+        scheduled_start = pd.Timestamp(game["scheduled_start"])
+        current_timezone_offset = _TEAM_TIMEZONE_OFFSETS.get(home_team, -5)
+
+        home_context = _team_schedule_context(
+            current_team=home_team,
+            current_start=scheduled_start,
+            current_timezone_offset=current_timezone_offset,
+            previous_game=team_previous_game.get(home_team),
+        )
+        away_context = _team_schedule_context(
+            current_team=away_team,
+            current_start=scheduled_start,
+            current_timezone_offset=current_timezone_offset,
+            previous_game=team_previous_game.get(away_team),
+        )
+        lookup[game_pk] = {
+            "home_timezone_crossings_east": float(home_context["timezone_crossings_east"]),
+            "away_timezone_crossings_east": float(away_context["timezone_crossings_east"]),
+            "home_is_day_after_night_game": float(home_context["is_day_after_night_game"]),
+            "away_is_day_after_night_game": float(away_context["is_day_after_night_game"]),
+        }
+
+        team_previous_game[home_team] = {
+            "scheduled_start": scheduled_start,
+            "timezone_offset": current_timezone_offset,
+        }
+        team_previous_game[away_team] = {
+            "scheduled_start": scheduled_start,
+            "timezone_offset": current_timezone_offset,
+        }
+
+    return lookup
+
+
+def _team_schedule_context(
+    *,
+    current_team: str,
+    current_start: pd.Timestamp,
+    current_timezone_offset: int,
+    previous_game: Mapping[str, Any] | None,
+) -> dict[str, float]:
+    _ = current_team
+    if previous_game is None:
+        return {"timezone_crossings_east": 0.0, "is_day_after_night_game": 0.0}
+
+    previous_start = pd.Timestamp(previous_game["scheduled_start"])
+    previous_timezone_offset = int(previous_game.get("timezone_offset", current_timezone_offset))
+    timezone_crossings_east = max(current_timezone_offset - previous_timezone_offset, 0)
+
+    previous_local_date = (previous_start + pd.Timedelta(hours=previous_timezone_offset)).date()
+    current_local_date = (current_start + pd.Timedelta(hours=current_timezone_offset)).date()
+    previous_local_hour = int((previous_start + pd.Timedelta(hours=previous_timezone_offset)).hour)
+    is_day_after_night_game = int(
+        (current_local_date - previous_local_date).days == 1 and previous_local_hour >= 18
+    )
+
+    return {
+        "timezone_crossings_east": float(timezone_crossings_east),
+        "is_day_after_night_game": float(is_day_after_night_game),
     }
 
 
@@ -1719,6 +1939,7 @@ def _resolve_weather_features(
         team_code=str(game["home_team"]),
         venue=str(game["venue"]),
         is_dome=is_dome,
+        precipitation_probability=weather.precipitation_probability,
     )
     return {
         "weather_temp_factor": float(adjustment.temp_factor),
@@ -1727,6 +1948,9 @@ def _resolve_weather_features(
         "weather_wind_factor": float(adjustment.wind_factor),
         "weather_rain_risk": float(adjustment.rain_risk),
         "weather_composite": float(adjustment.weather_composite),
+        "weather_precip_probability": float(weather.precipitation_probability or 0.0),
+        "weather_precipitation_mm": float(weather.precipitation_mm),
+        "weather_cloud_cover_pct": float(weather.cloud_cover_pct or 0.0),
         "weather_data_missing": float(weather_missing),
     }
 
@@ -1776,9 +2000,159 @@ def _default_feature_fill_value(column: str) -> float:
         return _resolve_pattern_default(column, _UMPIRE_FEATURE_DEFAULTS)
     if _matches_feature_pattern(column, _DEFENSE_FEATURE_DEFAULTS):
         return _resolve_pattern_default(column, _DEFENSE_FEATURE_DEFAULTS)
+    if _matches_feature_pattern(column, _LINEUP_CONTEXT_FEATURE_DEFAULTS):
+        return _resolve_pattern_default(column, _LINEUP_CONTEXT_FEATURE_DEFAULTS)
+    if column in _MATCHUP_INTERACTION_FEATURE_DEFAULTS:
+        return float(_MATCHUP_INTERACTION_FEATURE_DEFAULTS[column])
     if "_lineup_" in column or _matches_feature_pattern(column, _OFFENSE_FEATURE_DEFAULTS):
         return _resolve_pattern_default(column, _OFFENSE_FEATURE_DEFAULTS)
     return 0.0
+
+
+def _derive_matchup_interaction_features(row: Mapping[str, Any]) -> dict[str, float]:
+    home_lineup_woba = _coerce_feature_float(row.get("home_lineup_woba_30g"))
+    away_lineup_woba = _coerce_feature_float(row.get("away_lineup_woba_30g"))
+    home_starter_xera = _coerce_feature_float(row.get("home_starter_xera_30s"))
+    away_starter_xera = _coerce_feature_float(row.get("away_starter_xera_30s"))
+
+    away_starter_xwoba = _starter_xwoba_from_xera(away_starter_xera)
+    home_starter_xwoba = _starter_xwoba_from_xera(home_starter_xera)
+    return {
+        "home_offense_vs_away_starter_woba_gap": float(home_lineup_woba - away_starter_xwoba),
+        "away_offense_vs_home_starter_woba_gap": float(away_lineup_woba - home_starter_xwoba),
+    }
+
+
+def _starter_xwoba_from_xera(value: float) -> float:
+    return 0.320 + ((float(value) - 3.2) / 15.0)
+
+
+def _coerce_feature_float(value: Any, default: float = 0.0) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    if pd.isna(numeric):
+        return float(default)
+    return numeric
+
+
+def _persist_lineup_context_features(
+    *,
+    database_path: Path,
+    schedule: pd.DataFrame,
+    lineups: Sequence[Lineup],
+    batting_splits_lookup: Mapping[str, Mapping[str, float]] | None = None,
+) -> None:
+    if not lineups:
+        return
+
+    game_lookup = {
+        int(row["game_pk"]): {"home_team": str(row["home_team"]), "away_team": str(row["away_team"])}
+        for row in schedule.to_dict(orient="records")
+    }
+    lineup_lookup = {(int(lineup.game_pk), str(lineup.team)): lineup for lineup in lineups}
+    features: list[GameFeatures] = []
+
+    for lineup in lineups:
+        game_context = game_lookup.get(int(lineup.game_pk))
+        if game_context is None:
+            continue
+
+        side_name = "home" if str(lineup.team) == game_context["home_team"] else "away"
+        opponent_team = (
+            game_context["away_team"] if side_name == "home" else game_context["home_team"]
+        )
+        opposing_lineup = lineup_lookup.get((int(lineup.game_pk), opponent_team))
+        opposing_starter_throws = None
+        if opposing_lineup is not None:
+            opposing_starter_throws = (
+                opposing_lineup.starting_pitcher_throws
+                or opposing_lineup.projected_starting_pitcher_throws
+            )
+        opposing_starter_throws = _normalize_handedness_value(opposing_starter_throws)
+
+        bats_values = [str(player.bats).upper() for player in lineup.players if player.bats]
+        known_count = len(bats_values)
+        lhb_count = sum(1 for value in bats_values if value == "L")
+        rhb_count = sum(1 for value in bats_values if value == "R")
+        shb_count = sum(1 for value in bats_values if value == "S")
+        platoon_advantage_count = 0
+        if opposing_starter_throws in {"L", "R"}:
+            platoon_advantage_count = sum(
+                1
+                for value in bats_values
+                if value == "S" or (value == "L" and opposing_starter_throws == "R") or (value == "R" and opposing_starter_throws == "L")
+            )
+
+        denominator = float(known_count) if known_count > 0 else 0.0
+        as_of_timestamp = lineup.as_of_timestamp
+        team_code = str(lineup.team).strip().upper()
+        team_splits = (
+            batting_splits_lookup.get(team_code, _default_team_batting_splits())
+            if batting_splits_lookup is not None
+            else _default_team_batting_splits()
+        )
+        team_woba_vs_lhp = float(team_splits.get("vs_LHP", LEAGUE_WOBA_BASELINE))
+        team_woba_vs_rhp = float(team_splits.get("vs_RHP", LEAGUE_WOBA_BASELINE))
+        if opposing_starter_throws == "L":
+            team_woba_vs_opposing_hand = team_woba_vs_lhp
+        elif opposing_starter_throws == "R":
+            team_woba_vs_opposing_hand = team_woba_vs_rhp
+        else:
+            team_woba_vs_opposing_hand = (team_woba_vs_lhp + team_woba_vs_rhp) / 2.0
+        feature_values = {
+            f"{side_name}_lineup_lhb_pct": (lhb_count / denominator) if denominator else 0.0,
+            f"{side_name}_lineup_rhb_pct": (rhb_count / denominator) if denominator else 0.0,
+            f"{side_name}_lineup_shb_pct": (shb_count / denominator) if denominator else 0.0,
+            f"{side_name}_lineup_known_bats_pct": known_count / 9.0,
+            f"{side_name}_lineup_platoon_advantage_pct": (platoon_advantage_count / denominator)
+            if denominator
+            else 0.0,
+            f"{side_name}_team_woba_vs_LHP": team_woba_vs_lhp,
+            f"{side_name}_team_woba_vs_RHP": team_woba_vs_rhp,
+            f"{side_name}_team_woba_vs_opposing_hand": team_woba_vs_opposing_hand,
+            f"{side_name}_opposing_starter_throws_left": 1.0 if opposing_starter_throws == "L" else 0.0,
+            f"{side_name}_opposing_starter_throws_right": 1.0 if opposing_starter_throws == "R" else 0.0,
+            f"{side_name}_lineup_confirmed": 1.0 if lineup.confirmed else 0.0,
+        }
+        for feature_name, feature_value in feature_values.items():
+            features.append(
+                GameFeatures(
+                    game_pk=int(lineup.game_pk),
+                    feature_name=feature_name,
+                    feature_value=float(feature_value),
+                    as_of_timestamp=as_of_timestamp,
+                )
+            )
+
+    if not features:
+        return
+
+    with sqlite_connection(database_path, builder_optimized=True) as connection:
+        connection.executemany(
+            """
+            INSERT OR REPLACE INTO features (
+                game_pk,
+                feature_name,
+                feature_value,
+                window_size,
+                as_of_timestamp
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    feature.game_pk,
+                    feature.feature_name,
+                    feature.feature_value,
+                    feature.window_size,
+                    feature.as_of_timestamp.isoformat(),
+                )
+                for feature in features
+            ],
+        )
+        connection.commit()
 
 
 def _matches_feature_pattern(column: str, defaults: Mapping[str, float]) -> bool:
@@ -1802,6 +2176,129 @@ def _normalize_lineup_player_ids_by_date(
     for game_date, lineup_ids in mapping.items():
         normalized[_normalize_lookup_date(game_date)] = lineup_ids
     return normalized
+
+
+def _build_historical_lineup_fetcher(
+    *,
+    schedule: pd.DataFrame,
+    refresh: bool,
+) -> LineupFetcher:
+    lineups_by_date = _load_historical_lineups_by_date(schedule, refresh=refresh)
+
+    def fetcher(game_date: str | date | datetime) -> list[Lineup]:
+        return list(lineups_by_date.get(_normalize_lookup_date(game_date), []))
+
+    return fetcher
+
+
+def _load_historical_lineups_by_date(
+    schedule: pd.DataFrame,
+    *,
+    refresh: bool,
+) -> dict[str, list[Lineup]]:
+    retrosheet_lineups = fetch_retrosheet_starting_lineups(refresh=refresh)
+    normalized_lineups = _normalize_retrosheet_lineups(retrosheet_lineups, schedule)
+    if normalized_lineups.empty:
+        return {}
+
+    register = fetch_chadwick_register(refresh=refresh)
+    if register.empty:
+        return {}
+
+    player_lookup = _build_historical_player_lookup(register)
+    starter_throw_lookup = _build_historical_starter_throw_lookup(register)
+    if not player_lookup:
+        return {}
+
+    lineups_by_date: dict[str, list[Lineup]] = {}
+    lineup_columns = [column for column in [f"start_l{index}" for index in range(1, 10)] if column in normalized_lineups.columns]
+    for row in normalized_lineups.to_dict(orient="records"):
+        game_pk = int(row["game_pk"])
+        team = str(row["team"])
+        game_date = str(row["game_date"])
+        scheduled_start = pd.Timestamp(row["scheduled_start"])
+        if scheduled_start.tzinfo is None:
+            scheduled_start = scheduled_start.tz_localize("UTC")
+        else:
+            scheduled_start = scheduled_start.tz_convert("UTC")
+        as_of_timestamp = (scheduled_start.normalize() - pd.Timedelta(days=1)).to_pydatetime()
+        players: list[LineupPlayer] = []
+        for batting_order, column in enumerate(lineup_columns, start=1):
+            retro_id = str(row.get(column, "")).strip().lower()
+            player_payload = player_lookup.get(retro_id)
+            if player_payload is None:
+                continue
+            players.append(
+                LineupPlayer(
+                    batting_order=batting_order,
+                    player_id=player_payload["player_id"],
+                    player_name=player_payload["player_name"],
+                    bats=player_payload["bats"],
+                    throws=player_payload["throws"],
+                )
+            )
+
+        starter_id = _coerce_int(row.get("starter_id"))
+        lineups_by_date.setdefault(game_date, []).append(
+            Lineup(
+                game_pk=game_pk,
+                team=team,
+                source="retrosheet",
+                confirmed=True,
+                as_of_timestamp=as_of_timestamp,
+                starting_pitcher_id=starter_id,
+                starting_pitcher_throws=starter_throw_lookup.get(starter_id),
+                players=players,
+            )
+        )
+
+    return lineups_by_date
+
+
+def _build_historical_player_lookup(register: pd.DataFrame) -> dict[str, dict[str, Any]]:
+    if "key_retro" not in register.columns or "key_mlbam" not in register.columns:
+        return {}
+
+    lookup: dict[str, dict[str, Any]] = {}
+    for row in register.to_dict(orient="records"):
+        retro_id = str(row.get("key_retro", "")).strip().lower()
+        player_id = _coerce_int(row.get("key_mlbam"))
+        if not retro_id or player_id is None:
+            continue
+        lookup.setdefault(
+            retro_id,
+            {
+                "player_id": player_id,
+                "player_name": _historical_player_name(row, fallback_id=player_id),
+                "bats": _normalize_handedness_value(row.get("bats")),
+                "throws": _normalize_handedness_value(row.get("throws")),
+            },
+        )
+    return lookup
+
+
+def _build_historical_starter_throw_lookup(register: pd.DataFrame) -> dict[int, str]:
+    if "key_mlbam" not in register.columns:
+        return {}
+    lookup: dict[int, str] = {}
+    for row in register.to_dict(orient="records"):
+        player_id = _coerce_int(row.get("key_mlbam"))
+        throws = _normalize_handedness_value(row.get("throws"))
+        if player_id is not None and throws is not None:
+            lookup.setdefault(player_id, throws)
+    return lookup
+
+
+def _historical_player_name(row: Mapping[str, Any], *, fallback_id: int) -> str:
+    first = str(row.get("name_first", "") or "").strip()
+    last = str(row.get("name_last", "") or "").strip()
+    full_name = " ".join(part for part in (first, last) if part).strip()
+    return full_name or f"Player {fallback_id}"
+
+
+def _normalize_handedness_value(value: Any) -> str | None:
+    normalized = str(value or "").strip().upper()
+    return normalized if normalized in {"L", "R", "S"} else None
 
 
 def _load_historical_lineup_player_ids_by_date(
@@ -1896,6 +2393,7 @@ def _normalize_retrosheet_lineups(
                 "opp": str(game["away_team"]),
                 "vishome": "h",
                 "scheduled_start": str(game["scheduled_start"]),
+                "starter_id": _coerce_int(game.get("home_starter_id")),
             }
         )
         schedule_side_rows.append(
@@ -1906,6 +2404,7 @@ def _normalize_retrosheet_lineups(
                 "opp": str(game["home_team"]),
                 "vishome": "v",
                 "scheduled_start": str(game["scheduled_start"]),
+                "starter_id": _coerce_int(game.get("away_starter_id")),
             }
         )
 
@@ -1926,7 +2425,7 @@ def _normalize_retrosheet_lineups(
     lineups["matchup_index"] = lineups.groupby(["game_date", "team", "opp", "vishome"]).cumcount()
 
     merged = lineups.merge(
-        schedule_lookup[["game_pk", "game_date", "team", "opp", "vishome", "matchup_index"]],
+        schedule_lookup[["game_pk", "game_date", "team", "opp", "vishome", "matchup_index", "scheduled_start", "starter_id"]],
         on=["game_date", "team", "opp", "vishome", "matchup_index"],
         how="inner",
     )
@@ -1975,6 +2474,192 @@ def _coerce_date(value: str | date | datetime) -> date:
     return date.fromisoformat(value)
 
 
+def _default_team_batting_splits() -> dict[str, float]:
+    return {
+        "vs_LHP": float(LEAGUE_WOBA_BASELINE),
+        "vs_RHP": float(LEAGUE_WOBA_BASELINE),
+    }
+
+
+def _event_to_woba_value(event: Any) -> float:
+    normalized_event = str(event or "").strip().lower()
+    return float(_EVENT_WOBA_VALUES.get(normalized_event, 0.0))
+
+
+def _collapse_team_batting_plate_appearances(pitches: pd.DataFrame) -> pd.DataFrame:
+    if pitches.empty:
+        return pitches.copy()
+
+    if "at_bat_number" in pitches.columns and "game_pk" in pitches.columns:
+        sort_columns = [
+            column
+            for column in ("game_pk", "at_bat_number", "pitch_number")
+            if column in pitches.columns
+        ]
+        terminal = (
+            pitches.sort_values(sort_columns)
+            .groupby(["game_pk", "at_bat_number"], as_index=False, dropna=False)
+            .tail(1)
+        )
+        return terminal.reset_index(drop=True)
+
+    if "events" in pitches.columns:
+        terminal = pitches.loc[pitches["events"].notna()].copy()
+        if not terminal.empty:
+            return terminal.reset_index(drop=True)
+
+    return pitches.tail(1).reset_index(drop=True)
+
+
+def _compute_team_batting_splits(
+    statcast_frame: pd.DataFrame,
+    target_day: date,
+) -> dict[str, dict[str, float]]:
+    if statcast_frame.empty:
+        return {}
+
+    pitches = statcast_frame.copy()
+    if "game_date" not in pitches.columns:
+        return {}
+
+    pitches["game_date"] = pd.to_datetime(pitches["game_date"], errors="coerce")
+    pitches = pitches.loc[pitches["game_date"].dt.date < target_day].copy()
+    if pitches.empty:
+        return {}
+
+    terminal = _collapse_team_batting_plate_appearances(pitches)
+    if terminal.empty or "events" not in terminal.columns:
+        return {}
+
+    terminal = terminal.loc[terminal["events"].notna()].copy()
+    if terminal.empty:
+        return {}
+
+    required_columns = {"inning_topbot", "away_team", "home_team", "p_throws"}
+    if not required_columns.issubset(terminal.columns):
+        return {}
+
+    inning_half = terminal["inning_topbot"].astype(str).str.strip().str.title()
+    terminal["batting_team"] = np.where(
+        inning_half.eq("Top"),
+        terminal["away_team"],
+        terminal["home_team"],
+    )
+    terminal["batting_team"] = terminal["batting_team"].astype(str).str.strip().str.upper()
+    terminal["p_throws"] = terminal["p_throws"].astype(str).str.strip().str.upper()
+
+    xwoba_column = "estimated_woba_using_speedangle"
+    if xwoba_column in terminal.columns:
+        terminal["woba_value"] = pd.to_numeric(terminal[xwoba_column], errors="coerce")
+    else:
+        terminal["woba_value"] = terminal["events"].map(_event_to_woba_value)
+
+    splits: dict[str, dict[str, float]] = {}
+    grouped = terminal.groupby(["batting_team", "p_throws"], dropna=True)
+    for (team, hand), group in grouped:
+        if not team:
+            continue
+
+        woba_values = pd.to_numeric(group["woba_value"], errors="coerce").dropna()
+        mean_woba = (
+            float(woba_values.mean())
+            if len(woba_values) >= _TEAM_BATTING_SPLIT_MIN_PA
+            else float(LEAGUE_WOBA_BASELINE)
+        )
+
+        team_splits = splits.setdefault(team, _default_team_batting_splits())
+        if hand == "L":
+            team_splits["vs_LHP"] = mean_woba
+        elif hand == "R":
+            team_splits["vs_RHP"] = mean_woba
+
+    return splits
+
+
+def _load_season_game_dates(
+    db_path: Path,
+    *,
+    season: int,
+) -> pd.DataFrame:
+    query = """
+        SELECT date AS game_date
+        FROM games
+        WHERE substr(date, 1, 4) = ?
+        ORDER BY date
+    """
+
+    with sqlite_connection(db_path, builder_optimized=True) as connection:
+        games = pd.read_sql_query(query, connection, params=(str(season),))
+
+    if games.empty:
+        return pd.DataFrame(columns=["game_date"])
+
+    games["game_date"] = pd.to_datetime(games["game_date"], errors="coerce")
+    games = games.dropna(subset=["game_date"]).copy()
+    if games.empty:
+        return pd.DataFrame(columns=["game_date"])
+    return games.reset_index(drop=True)
+
+
+def _fetch_season_statcast_frame(
+    season: int,
+    *,
+    db_path: str | Path,
+    refresh: bool = False,
+) -> pd.DataFrame:
+    season_games = _load_season_game_dates(Path(db_path), season=season)
+    if season_games.empty:
+        return pd.DataFrame()
+
+    min_day = season_games["game_date"].min().date()
+    max_day = season_games["game_date"].max().date()
+    return fetch_statcast_range(min_day.isoformat(), max_day.isoformat(), refresh=refresh)
+
+
+def _copy_team_batting_splits_lookup(
+    lookup: Mapping[str, Mapping[str, float]],
+) -> dict[str, dict[str, float]]:
+    return {
+        str(team): {
+            "vs_LHP": float(team_splits.get("vs_LHP", LEAGUE_WOBA_BASELINE)),
+            "vs_RHP": float(team_splits.get("vs_RHP", LEAGUE_WOBA_BASELINE)),
+        }
+        for team, team_splits in lookup.items()
+    }
+
+
+def _build_cached_team_batting_splits_fetcher() -> Callable[..., dict[str, dict[str, float]]]:
+    full_season_cache: dict[tuple[Any, ...], pd.DataFrame] = {}
+    splits_cache: dict[tuple[Any, ...], dict[str, dict[str, float]]] = {}
+
+    def wrapper(
+        season: int,
+        *,
+        db_path: str | Path,
+        target_day: date,
+        refresh: bool = False,
+    ) -> dict[str, dict[str, float]]:
+        season_key = (season, _cache_token(db_path), bool(refresh))
+        if season_key not in full_season_cache:
+            full_season_cache[season_key] = _coerce_dataframe(
+                _fetch_season_statcast_frame(
+                    season,
+                    db_path=db_path,
+                    refresh=refresh,
+                )
+            )
+
+        splits_key = (*season_key, target_day.isoformat())
+        if splits_key not in splits_cache:
+            splits_cache[splits_key] = _compute_team_batting_splits(
+                full_season_cache[season_key],
+                target_day,
+            )
+        return _copy_team_batting_splits_lookup(splits_cache[splits_key])
+
+    return wrapper
+
+
 def _normalize_scheduled_start_before(value: str | date | datetime) -> pd.Timestamp:
     timestamp = pd.Timestamp(value)
     if timestamp.tzinfo is None:
@@ -2004,6 +2689,43 @@ def _memoize_lineup_fetcher(fetcher: LineupFetcher) -> LineupFetcher:
         if key not in cache:
             cache[key] = list(fetcher(game_date))
         return list(cache[key])
+
+    return wrapper
+
+
+def _build_cached_offense_statcast_fetcher(
+    offense_statcast_fetcher: OffenseStatcastFetcher | None,
+) -> OffenseStatcastFetcher:
+    full_season_cache: dict[tuple[Any, ...], pd.DataFrame] = {}
+
+    def wrapper(
+        season: int,
+        *,
+        db_path: str | Path,
+        end_date: date | None,
+        refresh: bool = False,
+    ) -> pd.DataFrame:
+        key = (season, _cache_token(db_path), bool(refresh))
+        if key not in full_season_cache:
+            if offense_statcast_fetcher is None:
+                full_season_cache[key] = _coerce_dataframe(
+                    _fetch_season_offense_statcast_metrics(
+                        season,
+                        db_path=db_path,
+                        end_date=None,
+                        refresh=refresh,
+                    )
+                )
+            else:
+                full_season_cache[key] = _coerce_dataframe(
+                    offense_statcast_fetcher(
+                        season,
+                        db_path=db_path,
+                        end_date=None,
+                        refresh=refresh,
+                    )
+                )
+        return _filter_frame_to_end_date(full_season_cache[key], end_date)
 
     return wrapper
 

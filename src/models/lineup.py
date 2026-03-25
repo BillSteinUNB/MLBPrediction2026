@@ -12,6 +12,8 @@ class LineupPlayer(ModelBase):
     player_id: int
     player_name: str
     position: str | None = None
+    bats: str | None = Field(default=None, min_length=1, max_length=1)
+    throws: str | None = Field(default=None, min_length=1, max_length=1)
 
 
 class Lineup(ModelBase):
@@ -24,6 +26,8 @@ class Lineup(ModelBase):
     as_of_timestamp: UtcDatetime
     starting_pitcher_id: int | None = None
     projected_starting_pitcher_id: int | None = None
+    starting_pitcher_throws: str | None = Field(default=None, min_length=1, max_length=1)
+    projected_starting_pitcher_throws: str | None = Field(default=None, min_length=1, max_length=1)
     starter_avg_innings_pitched: float | None = Field(default=None, ge=0)
     is_opener: bool = False
     is_bullpen_game: bool = False

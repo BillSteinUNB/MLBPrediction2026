@@ -89,6 +89,9 @@ def _ensure_weather_cache_table(db_path: str | Path) -> Path:
                 pressure_hpa REAL NOT NULL,
                 air_density REAL NOT NULL,
                 wind_factor REAL NOT NULL,
+                precipitation_probability REAL,
+                precipitation_mm REAL NOT NULL DEFAULT 0.0,
+                cloud_cover_pct REAL,
                 is_dome_default INTEGER NOT NULL CHECK (is_dome_default IN (0, 1)),
                 forecast_time TEXT,
                 fetched_at TEXT NOT NULL,
@@ -101,6 +104,14 @@ def _ensure_weather_cache_table(db_path: str | Path) -> Path:
         }
         if "forecast_time" not in existing_columns:
             connection.execute("ALTER TABLE weather_cache ADD COLUMN forecast_time TEXT")
+        if "precipitation_probability" not in existing_columns:
+            connection.execute("ALTER TABLE weather_cache ADD COLUMN precipitation_probability REAL")
+        if "precipitation_mm" not in existing_columns:
+            connection.execute(
+                "ALTER TABLE weather_cache ADD COLUMN precipitation_mm REAL NOT NULL DEFAULT 0.0"
+            )
+        if "cloud_cover_pct" not in existing_columns:
+            connection.execute("ALTER TABLE weather_cache ADD COLUMN cloud_cover_pct REAL")
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_weather_cache_fetched_at ON weather_cache (fetched_at)"
         )
@@ -170,6 +181,9 @@ def _get_default_weather(is_dome: bool = False) -> WeatherData:
         pressure_hpa=1013.25,
         air_density=DEFAULT_AIR_DENSITY,
         wind_factor=0.0,
+        precipitation_probability=None,
+        precipitation_mm=0.0,
+        cloud_cover_pct=None,
         is_dome_default=is_dome,
         forecast_time=None,
         fetched_at=None,
@@ -206,6 +220,9 @@ def _get_cached_weather(
                     pressure_hpa,
                     air_density,
                     wind_factor,
+                    precipitation_probability,
+                    precipitation_mm,
+                    cloud_cover_pct,
                     is_dome_default,
                     forecast_time,
                     fetched_at
@@ -220,11 +237,11 @@ def _get_cached_weather(
     if row is None:
         return None
 
-    forecast_time_raw = row[8]
+    forecast_time_raw = row[11]
     if forecast_time_raw is None:
         return None
 
-    fetched_at = _normalize_datetime(row[9])
+    fetched_at = _normalize_datetime(row[12])
     if fetched_at < datetime.now(timezone.utc) - timedelta(hours=cache_hours):
         return None
 
@@ -236,7 +253,10 @@ def _get_cached_weather(
         pressure_hpa=row[4],
         air_density=row[5],
         wind_factor=row[6],
-        is_dome_default=bool(row[7]),
+        precipitation_probability=row[7],
+        precipitation_mm=row[8],
+        cloud_cover_pct=row[9],
+        is_dome_default=bool(row[10]),
         forecast_time=_normalize_datetime(forecast_time_raw),
         fetched_at=fetched_at,
     )
@@ -267,11 +287,14 @@ def _cache_weather(
                 pressure_hpa,
                 air_density,
                 wind_factor,
+                precipitation_probability,
+                precipitation_mm,
+                cloud_cover_pct,
                 is_dome_default,
                 forecast_time,
                 fetched_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 team_abbr.upper(),
@@ -283,6 +306,9 @@ def _cache_weather(
                 weather.pressure_hpa,
                 weather.air_density,
                 weather.wind_factor,
+                weather.precipitation_probability,
+                weather.precipitation_mm,
+                weather.cloud_cover_pct,
                 int(weather.is_dome_default),
                 forecast_time.isoformat(),
                 fetched_at.isoformat(),
@@ -372,6 +398,21 @@ def _build_weather_data(
     wind_speed_mph = _mps_to_mph(float(wind.get("speed", 0.0)))
     wind_direction_deg = float(wind.get("deg", 0.0))
     forecast_time = datetime.fromtimestamp(float(forecast["dt"]), tz=timezone.utc)
+    precipitation_probability_raw = forecast.get("pop")
+    precipitation_probability = (
+        max(0.0, min(1.0, float(precipitation_probability_raw)))
+        if precipitation_probability_raw is not None
+        else None
+    )
+    precipitation_mm = 0.0
+    for key in ("rain", "snow"):
+        payload = forecast.get(key)
+        if isinstance(payload, Mapping):
+            precipitation_mm += float(payload.get("3h", 0.0) or 0.0)
+    clouds_payload = forecast.get("clouds", {})
+    cloud_cover_pct = None
+    if isinstance(clouds_payload, Mapping) and clouds_payload.get("all") is not None:
+        cloud_cover_pct = float(clouds_payload["all"])
 
     return WeatherData(
         temperature_f=_kelvin_to_fahrenheit(temperature_k),
@@ -385,6 +426,9 @@ def _build_weather_data(
             wind_direction_deg,
             stadium_cf_orientation_deg,
         ),
+        precipitation_probability=precipitation_probability,
+        precipitation_mm=precipitation_mm,
+        cloud_cover_pct=cloud_cover_pct,
         is_dome_default=False,
         forecast_time=forecast_time,
         fetched_at=_normalize_datetime(retrieved_at),

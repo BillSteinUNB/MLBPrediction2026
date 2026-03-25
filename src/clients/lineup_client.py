@@ -889,6 +889,65 @@ def _extract_feed_probable_pitcher_id(feed: dict[str, Any], side: str) -> int | 
     return int(pitcher_id) if pitcher_id is not None else None
 
 
+def _normalize_handedness_code(value: Any) -> str | None:
+    code = str(value or "").strip().upper()
+    return code if code in {"L", "R", "S"} else None
+
+
+def _feed_player_lookup(feed: dict[str, Any], side: str) -> dict[int, dict[str, Any]]:
+    players_by_id: dict[int, dict[str, Any]] = {}
+    for payload in (
+        feed.get("gameData", {}).get("players", {}),
+        feed.get("liveData", {}).get("boxscore", {}).get("teams", {}).get(side, {}).get("players", {}),
+    ):
+        if not isinstance(payload, dict):
+            continue
+        for raw_key, player_payload in payload.items():
+            if not isinstance(player_payload, dict):
+                continue
+            player_id: int | None = None
+            person_id = player_payload.get("person", {}).get("id")
+            if person_id is not None:
+                player_id = int(person_id)
+            elif isinstance(raw_key, str) and raw_key.startswith("ID"):
+                suffix = raw_key[2:]
+                if suffix.isdigit():
+                    player_id = int(suffix)
+            if player_id is not None:
+                players_by_id[player_id] = player_payload
+    return players_by_id
+
+
+def _extract_feed_pitcher_throws(feed: dict[str, Any], side: str, pitcher_id: int | None) -> str | None:
+    if pitcher_id is None:
+        return None
+    player_payload = _feed_player_lookup(feed, side).get(int(pitcher_id), {})
+    if isinstance(player_payload, dict):
+        return _normalize_handedness_code(player_payload.get("pitchHand", {}).get("code"))
+    return None
+
+
+def _enrich_players_from_feed(feed: dict[str, Any], side: str, players: list[LineupPlayer]) -> list[LineupPlayer]:
+    if not players:
+        return players
+
+    player_lookup = _feed_player_lookup(feed, side)
+    enriched: list[LineupPlayer] = []
+    for player in players:
+        player_payload = player_lookup.get(int(player.player_id), {})
+        enriched.append(
+            player.model_copy(
+                update={
+                    "bats": player.bats
+                    or _normalize_handedness_code(player_payload.get("batSide", {}).get("code")),
+                    "throws": player.throws
+                    or _normalize_handedness_code(player_payload.get("pitchHand", {}).get("code")),
+                }
+            )
+        )
+    return enriched
+
+
 def _extract_official_players(feed: dict[str, Any], side: str) -> list[LineupPlayer]:
     team_payload = feed.get("liveData", {}).get("boxscore", {}).get("teams", {}).get(side, {})
     players_payload = team_payload.get("players", {})
@@ -905,6 +964,8 @@ def _extract_official_players(feed: dict[str, Any], side: str) -> list[LineupPla
                 player_id=int(player_id),
                 player_name=str(person.get("fullName", f"Player {player_id}")),
                 position=position.get("abbreviation"),
+                bats=_normalize_handedness_code(player_payload.get("batSide", {}).get("code")),
+                throws=_normalize_handedness_code(player_payload.get("pitchHand", {}).get("code")),
             )
         )
 
@@ -978,6 +1039,8 @@ def _build_lineup(
     players: list[LineupPlayer],
     starting_pitcher_id: int | None,
     projected_starting_pitcher_id: int | None,
+    starting_pitcher_throws: str | None,
+    projected_starting_pitcher_throws: str | None,
     starter_avg_innings_pitched: float | None,
 ) -> Lineup:
     is_opener = starter_avg_innings_pitched is not None and starter_avg_innings_pitched < OPENER_IP_THRESHOLD
@@ -989,6 +1052,8 @@ def _build_lineup(
         as_of_timestamp=now,
         starting_pitcher_id=starting_pitcher_id,
         projected_starting_pitcher_id=projected_starting_pitcher_id,
+        starting_pitcher_throws=starting_pitcher_throws,
+        projected_starting_pitcher_throws=projected_starting_pitcher_throws,
         starter_avg_innings_pitched=starter_avg_innings_pitched,
         is_opener=is_opener,
         is_bullpen_game=is_opener,
@@ -1073,12 +1138,14 @@ def fetch_confirmed_lineups(
                     side,
                 )
                 starting_pitcher_id = _extract_feed_probable_pitcher_id(feed, side) or projected_pitcher_id
+                projected_pitcher_throws = _extract_feed_pitcher_throws(feed, side, projected_pitcher_id)
+                starting_pitcher_throws = _extract_feed_pitcher_throws(feed, side, starting_pitcher_id)
 
                 players = official_players
                 source = "mlb-api"
                 if not confirmed:
                     if projected_lineup is not None and projected_lineup.players:
-                        players = projected_lineup.players
+                        players = _enrich_players_from_feed(feed, side, projected_lineup.players)
                         source = projected_lineup.source
                     else:
                         players = []
@@ -1099,6 +1166,8 @@ def fetch_confirmed_lineups(
                         players=players,
                         starting_pitcher_id=starting_pitcher_id,
                         projected_starting_pitcher_id=projected_pitcher_id,
+                        starting_pitcher_throws=starting_pitcher_throws,
+                        projected_starting_pitcher_throws=projected_pitcher_throws,
                         starter_avg_innings_pitched=avg_ip,
                     )
                 )

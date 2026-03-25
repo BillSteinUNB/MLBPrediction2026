@@ -3,85 +3,117 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
-import re
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
-from math import prod
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import joblib
 import optuna
 import pandas as pd
+from lightgbm import LGBMRegressor, early_stopping as lgb_early_stopping
 from sklearn.base import clone
-from sklearn.metrics import accuracy_score, log_loss, roc_auc_score
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import TimeSeriesSplit
-from xgboost import XGBClassifier
+from xgboost import XGBRegressor
 
 from src.clients.weather_client import fetch_game_weather
 from src.model.artifact_runtime import collect_runtime_versions
-from src.model.data_builder import (
-    DEFAULT_OUTPUT_PATH,
-    _compute_data_version_hash,
-    _feature_columns,
-    build_training_dataset,
+from src.model.data_builder import DEFAULT_OUTPUT_PATH, build_training_dataset
+from src.model.xgboost_trainer import (
+    DEFAULT_EARLY_STOPPING_ROUNDS,
+    DEFAULT_MODEL_OUTPUT_DIR,
+    DEFAULT_RANDOM_STATE,
+    DEFAULT_SEARCH_SPACE,
+    DEFAULT_TIME_SERIES_SPLITS,
+    DEFAULT_TOP_FEATURE_COUNT,
+    DEFAULT_VALIDATION_FRACTION,
+    DEFAULT_XGBOOST_N_JOBS,
+    _build_model_version,
+    _extract_feature_importance_rankings,
+    _load_training_dataframe,
+    _normalize_best_params,
+    _refit_estimator_with_temporal_early_stopping,
+    _resolve_data_version_hash,
+    _resolve_experiment_output_dir,
+    _resolve_holdout_season,
+    _resolve_numeric_feature_columns,
+    _resolve_search_iterations,
+    _build_optuna_progress_callback,
+    _build_optuna_study_name,
+    _complete_optuna_params,
+    _split_temporal_validation_frame,
+    create_time_series_split,
 )
-from src.model.promotion import build_promotion_reason
-from src.ops.experiment_tracker import log_training_run
 
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL_OUTPUT_DIR = Path("data") / "models"
-DEFAULT_TIME_SERIES_SPLITS = 5
-DEFAULT_SEARCH_ITERATIONS = 100
-DEFAULT_RANDOM_STATE = 2026
-DEFAULT_TOP_FEATURE_COUNT = 25
-DEFAULT_EARLY_STOPPING_ROUNDS = 20
-DEFAULT_VALIDATION_FRACTION = 0.15
-DEFAULT_SEARCH_SPACE: dict[str, list[float | int]] = {
+DEFAULT_XGBOOST_BLEND_WEIGHT = 0.6
+DEFAULT_LIGHTGBM_BLEND_WEIGHT = 0.4
+
+DEFAULT_RUN_COUNT_SEARCH_ITERATIONS = 150
+DEFAULT_RUN_COUNT_MAX_FEATURE_COUNT = 80
+_RUN_COUNT_OFFENSE_METRICS = (
+    "wrc_plus",
+    "woba",
+    "xwoba",
+    "woba_minus_xwoba",
+    "iso",
+    "babip",
+    "k_pct",
+    "bb_pct",
+)
+DEFAULT_RUN_COUNT_SEARCH_SPACE: dict[str, list[float | int]] = {
     "max_depth": [3, 4, 5, 6, 7, 8],
-    "n_estimators": [100, 200, 300, 400, 500],
-    "learning_rate": [0.01, 0.03, 0.05, 0.07, 0.1],
-    "subsample": [0.7, 0.8, 0.9, 1.0],
-    "colsample_bytree": [0.6, 0.7, 0.8, 0.9, 1.0],
-    "min_child_weight": [1, 3, 5, 7],
-    "gamma": [0.0, 0.1, 0.3, 0.5],
-    "reg_alpha": [0.0, 0.01, 0.1, 1.0],
-    "reg_lambda": [0.5, 1.0, 2.0, 4.0],
+    "n_estimators": [200, 300, 400, 500, 600, 700, 800, 900, 1000],
+    "learning_rate": [0.005, 0.01, 0.02, 0.03, 0.05, 0.07, 0.1],
+    "subsample": [0.6, 0.7, 0.8, 0.9, 1.0],
+    "colsample_bytree": [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+    "min_child_weight": [1, 2, 3, 4, 5, 6, 7],
+    "gamma": [0.0, 0.05, 0.1, 0.2, 0.3, 0.5],
+    "reg_alpha": [1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10.0],
+    "reg_lambda": [0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 10.0],
 }
-_MODEL_SPECS = (
-    {"model_name": "f5_ml_model", "target_column": "f5_ml_result", "drop_ties": True},
-    {"model_name": "f5_rl_model", "target_column": "f5_rl_result", "drop_ties": False},
+
+DEFAULT_RUN_COUNT_MODEL_SPECS: tuple[dict[str, str], ...] = (
+    {"model_name": "f5_home_runs_model", "target_column": "f5_home_score"},
+    {"model_name": "f5_away_runs_model", "target_column": "f5_away_score"},
+    {"model_name": "full_game_home_runs_model", "target_column": "final_home_score"},
+    {"model_name": "full_game_away_runs_model", "target_column": "final_away_score"},
 )
 
 
-def _resolve_xgboost_n_jobs() -> int:
-    configured = os.getenv("MLB_XGBOOST_N_JOBS")
-    if configured is not None:
-        try:
-            return max(1, int(configured))
-        except ValueError:
-            logger.warning("Ignoring invalid MLB_XGBOOST_N_JOBS value: %s", configured)
+@dataclass(frozen=True, slots=True)
+class BlendedRunCountRegressor:
+    xgboost_model: XGBRegressor
+    lightgbm_model: LGBMRegressor
+    xgboost_weight: float = DEFAULT_XGBOOST_BLEND_WEIGHT
+    lightgbm_weight: float = DEFAULT_LIGHTGBM_BLEND_WEIGHT
 
-    detected_cpu_count = os.cpu_count() or 1
-    return max(1, detected_cpu_count - 1)
-
-
-DEFAULT_XGBOOST_N_JOBS = _resolve_xgboost_n_jobs()
+    def predict(self, dataframe: pd.DataFrame) -> pd.Series:
+        xgboost_predictions = pd.Series(self.xgboost_model.predict(dataframe), dtype=float)
+        lightgbm_predictions = pd.Series(self.lightgbm_model.predict(dataframe), dtype=float)
+        lightgbm_predictions = lightgbm_predictions.where(lightgbm_predictions.notna(), xgboost_predictions)
+        blended = (
+            self.xgboost_weight * xgboost_predictions
+            + self.lightgbm_weight * lightgbm_predictions
+        )
+        blended = blended.where(blended.notna(), xgboost_predictions)
+        return blended.clip(lower=0.0)
 
 
 @dataclass(frozen=True, slots=True)
-class ModelTrainingArtifact:
+class RunCountTrainingArtifact:
     model_name: str
     target_column: str
     model_version: str
     model_path: Path
     metadata_path: Path
     best_params: dict[str, float | int]
-    cv_best_log_loss: float
+    cv_best_rmse: float
     holdout_metrics: dict[str, float | None]
+    feature_columns: list[str]
     feature_importance_rankings: list[dict[str, float | str]]
     train_row_count: int
     holdout_row_count: int
@@ -93,54 +125,36 @@ class ModelTrainingArtifact:
     validation_fraction: float
     early_stopping_train_row_count: int
     early_stopping_validation_row_count: int
-    promoted_variant: str
-    promotion_reason: str
 
 
 @dataclass(frozen=True, slots=True)
-class TrainingRunResult:
+class RunCountTrainingResult:
     model_version: str
     data_version_hash: str
     holdout_season: int
     feature_columns: list[str]
     summary_path: Path
-    models: dict[str, ModelTrainingArtifact]
+    models: dict[str, RunCountTrainingArtifact]
 
 
-def create_time_series_split(
-    *,
-    row_count: int,
-    requested_splits: int = DEFAULT_TIME_SERIES_SPLITS,
-) -> TimeSeriesSplit:
-    """Create a temporal cross-validator that never shuffles future rows into training."""
-
-    if row_count < 3:
-        raise ValueError("TimeSeriesSplit requires at least 3 rows")
-
-    actual_splits = min(requested_splits, row_count - 1)
-    if actual_splits < 2:
-        raise ValueError("TimeSeriesSplit requires at least 2 splits")
-    return TimeSeriesSplit(n_splits=actual_splits)
-
-
-def train_f5_models(
+def train_run_count_models(
     *,
     training_data: pd.DataFrame | str | Path,
     output_dir: str | Path = DEFAULT_MODEL_OUTPUT_DIR,
     holdout_season: int | None = None,
-    search_space: Mapping[str, Sequence[float | int]] = DEFAULT_SEARCH_SPACE,
+    search_space: Mapping[str, Sequence[float | int]] = DEFAULT_RUN_COUNT_SEARCH_SPACE,
     time_series_splits: int = DEFAULT_TIME_SERIES_SPLITS,
-    search_iterations: int = DEFAULT_SEARCH_ITERATIONS,
+    search_iterations: int = DEFAULT_RUN_COUNT_SEARCH_ITERATIONS,
     random_state: int = DEFAULT_RANDOM_STATE,
     top_feature_count: int = DEFAULT_TOP_FEATURE_COUNT,
     early_stopping_rounds: int = DEFAULT_EARLY_STOPPING_ROUNDS,
     validation_fraction: float = DEFAULT_VALIDATION_FRACTION,
-) -> TrainingRunResult:
-    """Train and persist versioned XGBoost models for F5 moneyline and run line outcomes."""
+) -> RunCountTrainingResult:
+    """Train and persist run-count regressors for full-game and F5 score targets."""
 
     dataset = _load_training_dataframe(training_data)
-    feature_columns = _resolve_numeric_feature_columns(dataset)
-    if not feature_columns:
+    candidate_feature_columns = _resolve_run_count_candidate_feature_columns(dataset)
+    if not candidate_feature_columns:
         raise ValueError("Training data does not contain any numeric feature columns")
 
     effective_holdout_season = _resolve_holdout_season(dataset, holdout_season)
@@ -150,21 +164,22 @@ def train_f5_models(
     resolved_output_dir = Path(output_dir)
     resolved_output_dir.mkdir(parents=True, exist_ok=True)
 
-    artifacts: dict[str, ModelTrainingArtifact] = {}
-    for spec in _MODEL_SPECS:
+    artifacts: dict[str, RunCountTrainingArtifact] = {}
+    for spec in DEFAULT_RUN_COUNT_MODEL_SPECS:
+        model_name = str(spec["model_name"])
+        target_column = str(spec["target_column"])
         logger.info(
             "Training %s for holdout season %s with %s search iterations and %s time-series splits",
-            str(spec["model_name"]),
+            model_name,
             effective_holdout_season,
             _resolve_search_iterations(search_space, search_iterations),
             min(time_series_splits, max(len(dataset) - 1, 1)),
         )
         artifact = _train_single_model(
             dataset=dataset,
-            model_name=str(spec["model_name"]),
-            target_column=str(spec["target_column"]),
-            drop_ties=bool(spec["drop_ties"]),
-            feature_columns=feature_columns,
+            model_name=model_name,
+            target_column=target_column,
+            candidate_feature_columns=candidate_feature_columns,
             output_dir=resolved_output_dir,
             model_version=model_version,
             holdout_season=effective_holdout_season,
@@ -179,33 +194,34 @@ def train_f5_models(
         )
         artifacts[artifact.model_name] = artifact
 
-    summary_path = resolved_output_dir / f"training_run_{model_version}.json"
+    summary_path = resolved_output_dir / f"run_count_training_run_{model_version}.json"
     summary_payload = {
         "model_version": model_version,
         "data_version_hash": data_version_hash,
         "holdout_season": effective_holdout_season,
-        "feature_columns": feature_columns,
-        "promoted_variants": {
-            name: artifact.promoted_variant for name, artifact in artifacts.items()
-        },
+        "feature_columns": sorted(
+            {column for artifact in artifacts.values() for column in artifact.feature_columns}
+        ),
         "models": {name: _artifact_to_json_ready(artifact) for name, artifact in artifacts.items()},
     }
     summary_path.write_text(json.dumps(summary_payload, indent=2), encoding="utf-8")
 
-    return TrainingRunResult(
+    return RunCountTrainingResult(
         model_version=model_version,
         data_version_hash=data_version_hash,
         holdout_season=effective_holdout_season,
-        feature_columns=feature_columns,
+        feature_columns=sorted(
+            {column for artifact in artifacts.values() for column in artifact.feature_columns}
+        ),
         summary_path=summary_path,
         models=artifacts,
     )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Train both F5 XGBoost models from the persisted training parquet."""
+    """Train the run-count regressors from the persisted training parquet."""
 
-    parser = argparse.ArgumentParser(description="Train F5 XGBoost models with temporal CV")
+    parser = argparse.ArgumentParser(description="Train MLB run-count models with temporal CV")
     parser.add_argument("--training-data", default=str(DEFAULT_OUTPUT_PATH))
     parser.add_argument("--output-dir", default=str(DEFAULT_MODEL_OUTPUT_DIR))
     parser.add_argument("--experiment-name")
@@ -215,7 +231,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--refresh-training-data", action="store_true")
     parser.add_argument("--allow-backfill-years", action="store_true")
     parser.add_argument("--time-series-splits", type=int, default=DEFAULT_TIME_SERIES_SPLITS)
-    parser.add_argument("--search-iterations", type=int, default=DEFAULT_SEARCH_ITERATIONS)
+    parser.add_argument("--search-iterations", type=int, default=DEFAULT_RUN_COUNT_SEARCH_ITERATIONS)
     parser.add_argument("--random-state", type=int, default=DEFAULT_RANDOM_STATE)
     parser.add_argument("--early-stopping-rounds", type=int, default=DEFAULT_EARLY_STOPPING_ROUNDS)
     parser.add_argument("--validation-fraction", type=float, default=DEFAULT_VALIDATION_FRACTION)
@@ -236,8 +252,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
     resolved_output_dir = _resolve_experiment_output_dir(args.output_dir, args.experiment_name)
-
-    result = train_f5_models(
+    result = train_run_count_models(
         training_data=training_path,
         output_dir=resolved_output_dir,
         holdout_season=args.holdout_season,
@@ -246,18 +261,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         random_state=args.random_state,
         early_stopping_rounds=args.early_stopping_rounds,
         validation_fraction=args.validation_fraction,
-    )
-    log_training_run(
-        result,
-        experiment_name=args.experiment_name,
-        output_dir=resolved_output_dir,
-        training_data=training_path,
-        start_year=args.start_year,
-        end_year=args.end_year,
-        refresh_training_data=args.refresh_training_data,
-        allow_backfill_years=args.allow_backfill_years,
-        search_iterations=args.search_iterations,
-        time_series_splits=args.time_series_splits,
     )
     print(json.dumps(_run_result_to_json_ready(result), indent=2))
     return 0
@@ -268,8 +271,7 @@ def _train_single_model(
     dataset: pd.DataFrame,
     model_name: str,
     target_column: str,
-    drop_ties: bool,
-    feature_columns: list[str],
+    candidate_feature_columns: Sequence[str],
     output_dir: Path,
     model_version: str,
     holdout_season: int,
@@ -281,18 +283,26 @@ def _train_single_model(
     data_version_hash: str,
     early_stopping_rounds: int,
     validation_fraction: float,
-) -> ModelTrainingArtifact:
-    frame = _prepare_training_frame(dataset, target_column=target_column, drop_ties=drop_ties)
+) -> RunCountTrainingArtifact:
+    frame = _prepare_run_count_frame(dataset, target_column=target_column)
     train_frame = frame.loc[frame["season"] < holdout_season].copy()
     holdout_frame = frame.loc[frame["season"] == holdout_season].copy()
     if train_frame.empty:
         raise ValueError(f"No training rows found before holdout season {holdout_season}")
     if holdout_frame.empty:
         raise ValueError(f"No holdout rows found for season {holdout_season}")
+    feature_columns = _select_run_count_feature_columns(
+        train_frame,
+        target_column=target_column,
+        candidate_feature_columns=candidate_feature_columns,
+        max_feature_count=DEFAULT_RUN_COUNT_MAX_FEATURE_COUNT,
+    )
+    if not feature_columns:
+        raise ValueError(f"No run-count features selected for target {target_column}")
 
     (
         best_params,
-        cv_best_log_loss,
+        cv_best_rmse,
         optuna_best_trial_number,
         optuna_trial_count,
         optuna_study_name,
@@ -311,8 +321,6 @@ def _train_single_model(
         search_iterations=search_iterations,
         random_state=random_state,
     )
-    searched_estimator = _build_estimator(random_state=random_state)
-    searched_estimator.set_params(**best_params)
     (
         best_estimator,
         requested_n_estimators,
@@ -320,23 +328,24 @@ def _train_single_model(
         best_iteration,
         early_stopping_train_row_count,
         early_stopping_validation_row_count,
-    ) = _refit_estimator_with_temporal_early_stopping(
-        estimator=searched_estimator,
+    ) = _refit_blended_estimator_with_temporal_early_stopping(
+        best_params=best_params,
         training_frame=train_frame,
         feature_columns=feature_columns,
         target_column=target_column,
+        random_state=random_state,
         early_stopping_rounds=early_stopping_rounds,
         validation_fraction=validation_fraction,
     )
-    holdout_probabilities = best_estimator.predict_proba(holdout_frame[feature_columns])[:, 1]
-    holdout_predictions = best_estimator.predict(holdout_frame[feature_columns])
 
-    holdout_metrics = {
-        "accuracy": float(accuracy_score(holdout_frame[target_column], holdout_predictions)),
-        "log_loss": float(log_loss(holdout_frame[target_column], holdout_probabilities, labels=[0, 1])),
-        "roc_auc": _safe_roc_auc(holdout_frame[target_column], holdout_probabilities),
-    }
-    feature_importance_rankings = _extract_feature_importance_rankings(
+    holdout_predictions = best_estimator.predict(holdout_frame[list(feature_columns)])
+    holdout_metrics = _compute_holdout_metrics(
+        train_frame=train_frame,
+        holdout_frame=holdout_frame,
+        target_column=target_column,
+        holdout_predictions=holdout_predictions,
+    )
+    feature_importance_rankings = _extract_blended_feature_importance_rankings(
         best_estimator,
         feature_columns,
         top_feature_count=top_feature_count,
@@ -347,7 +356,6 @@ def _train_single_model(
 
     model_path = output_dir / f"{model_name}_{model_version}.joblib"
     joblib.dump(best_estimator, model_path)
-
     metadata_path = model_path.with_suffix(".metadata.json")
     metadata_payload = {
         "model_name": model_name,
@@ -357,11 +365,16 @@ def _train_single_model(
         "holdout_season": holdout_season,
         "train_row_count": int(len(train_frame)),
         "holdout_row_count": int(len(holdout_frame)),
-        "feature_columns": feature_columns,
+        "feature_columns": list(feature_columns),
         "best_params": best_params,
         "runtime_versions": collect_runtime_versions(),
+        "model_family": "xgboost_lightgbm_blend",
+        "blend_weights": {
+            "xgboost": DEFAULT_XGBOOST_BLEND_WEIGHT,
+            "lightgbm": DEFAULT_LIGHTGBM_BLEND_WEIGHT,
+        },
         "search_backend": "optuna",
-        "cv_best_log_loss": cv_best_log_loss,
+        "cv_best_rmse": cv_best_rmse,
         "optuna_best_trial_number": optuna_best_trial_number,
         "optuna_trial_count": optuna_trial_count,
         "optuna_study_name": optuna_study_name,
@@ -374,18 +387,6 @@ def _train_single_model(
         "validation_fraction": float(validation_fraction),
         "early_stopping_train_row_count": int(early_stopping_train_row_count),
         "early_stopping_validation_row_count": int(early_stopping_validation_row_count),
-        "promoted_variant": "base",
-        "promotion_reason": build_promotion_reason(
-            promoted_variant="base",
-            metrics_by_variant={
-                "base": {
-                    "log_loss": holdout_metrics["log_loss"],
-                    "roc_auc": holdout_metrics["roc_auc"],
-                    "accuracy": holdout_metrics["accuracy"],
-                    "brier": None,
-                }
-            },
-        ),
         "feature_importance_rankings": feature_importance_rankings,
         "search_space": {key: list(values) for key, values in search_space.items()},
         "time_series_splits": resolved_time_series_splits,
@@ -393,15 +394,16 @@ def _train_single_model(
     }
     metadata_path.write_text(json.dumps(metadata_payload, indent=2), encoding="utf-8")
 
-    return ModelTrainingArtifact(
+    artifact = RunCountTrainingArtifact(
         model_name=model_name,
         target_column=target_column,
         model_version=model_version,
         model_path=model_path,
         metadata_path=metadata_path,
         best_params=best_params,
-        cv_best_log_loss=cv_best_log_loss,
+        cv_best_rmse=cv_best_rmse,
         holdout_metrics=holdout_metrics,
+        feature_columns=list(feature_columns),
         feature_importance_rankings=feature_importance_rankings,
         train_row_count=len(train_frame),
         holdout_row_count=len(holdout_frame),
@@ -413,30 +415,32 @@ def _train_single_model(
         validation_fraction=float(validation_fraction),
         early_stopping_train_row_count=early_stopping_train_row_count,
         early_stopping_validation_row_count=early_stopping_validation_row_count,
-        promoted_variant="base",
-        promotion_reason=build_promotion_reason(
-            promoted_variant="base",
-            metrics_by_variant={
-                "base": {
-                    "log_loss": holdout_metrics["log_loss"],
-                    "roc_auc": holdout_metrics["roc_auc"],
-                    "accuracy": holdout_metrics["accuracy"],
-                    "brier": None,
-                }
+    )
+    summary_path = output_dir / f"{model_name}_training_run_{model_version}.json"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "model_version": model_version,
+                "data_version_hash": data_version_hash,
+                "holdout_season": holdout_season,
+                "artifact": _artifact_to_json_ready(artifact),
             },
+            indent=2,
         ),
+        encoding="utf-8",
     )
+    return artifact
 
 
-def _build_estimator(*, random_state: int) -> XGBClassifier:
-    return XGBClassifier(
-        objective="binary:logistic",
-        eval_metric="logloss",
-        random_state=random_state,
-        tree_method="hist",
-        n_jobs=DEFAULT_XGBOOST_N_JOBS,
-        verbosity=0,
-    )
+def _prepare_run_count_frame(
+    dataframe: pd.DataFrame,
+    *,
+    target_column: str,
+) -> pd.DataFrame:
+    frame = dataframe.copy()
+    frame[target_column] = pd.to_numeric(frame[target_column], errors="coerce")
+    frame = frame.loc[frame[target_column].notna()].copy()
+    return frame.sort_values(["scheduled_start", "game_pk"]).reset_index(drop=True)
 
 
 def _run_optuna_search(
@@ -501,7 +505,7 @@ def _run_optuna_search(
             target_trial_count=resolved_iterations,
         )
         study.optimize(
-            lambda trial: _objective_log_loss(
+            lambda trial: _objective_rmse(
                 trial,
                 train_frame=train_frame,
                 feature_columns=feature_columns,
@@ -535,7 +539,7 @@ def _run_optuna_search(
     )
 
 
-def _objective_log_loss(
+def _objective_rmse(
     trial: optuna.trial.Trial,
     *,
     train_frame: pd.DataFrame,
@@ -545,50 +549,67 @@ def _objective_log_loss(
     splitter: TimeSeriesSplit,
     random_state: int,
 ) -> float:
-    params = _suggest_optuna_params(trial, search_space=search_space)
+    params = _suggest_optuna_regressor_params(trial, search_space=search_space)
     feature_frame = train_frame[list(feature_columns)]
     target_series = train_frame[target_column]
     fold_losses: list[float] = []
 
     for fold_index, (train_indices, test_indices) in enumerate(splitter.split(train_frame), start=1):
-        estimator = _build_estimator(random_state=random_state)
-        estimator.set_params(**params)
-        estimator.fit(
+        xgboost_estimator = _build_estimator(random_state=random_state)
+        xgboost_estimator.set_params(**params)
+        xgboost_estimator.fit(
             feature_frame.iloc[train_indices],
             target_series.iloc[train_indices],
         )
-        probabilities = estimator.predict_proba(feature_frame.iloc[test_indices])[:, 1]
+        lightgbm_estimator = _build_lightgbm_estimator(random_state=random_state)
+        lightgbm_estimator.set_params(**_lightgbm_params_from_xgboost_params(params))
+        lightgbm_estimator.fit(
+            feature_frame.iloc[train_indices],
+            target_series.iloc[train_indices],
+        )
+        xgboost_predictions = pd.Series(
+            xgboost_estimator.predict(feature_frame.iloc[test_indices]),
+            dtype=float,
+        )
+        lightgbm_predictions = pd.Series(
+            lightgbm_estimator.predict(feature_frame.iloc[test_indices]),
+            dtype=float,
+        ).where(lambda series: series.notna(), xgboost_predictions)
+        predictions = (
+            DEFAULT_XGBOOST_BLEND_WEIGHT * xgboost_predictions
+            + DEFAULT_LIGHTGBM_BLEND_WEIGHT * lightgbm_predictions
+        ).where(lambda series: series.notna(), xgboost_predictions)
         fold_loss = float(
-            log_loss(
+            mean_squared_error(
                 target_series.iloc[test_indices],
-                probabilities,
-                labels=[0, 1],
+                predictions,
             )
+            ** 0.5
         )
         fold_losses.append(fold_loss)
         trial.report(sum(fold_losses) / len(fold_losses), step=fold_index)
         if trial.should_prune():
             raise optuna.TrialPruned(
-                f"Pruned at fold {fold_index} with mean log loss {sum(fold_losses) / len(fold_losses):.6f}"
+                f"Pruned at fold {fold_index} with mean RMSE {sum(fold_losses) / len(fold_losses):.6f}"
             )
 
     return float(sum(fold_losses) / len(fold_losses))
 
 
-def _suggest_optuna_params(
+def _suggest_optuna_regressor_params(
     trial: optuna.trial.Trial,
     *,
     search_space: Mapping[str, Sequence[float | int]],
 ) -> dict[str, float | int]:
-    if _matches_default_search_space(search_space):
+    if _matches_default_run_count_search_space(search_space):
         return {
             "max_depth": int(trial.suggest_int("max_depth", 3, 8)),
-            "n_estimators": int(trial.suggest_int("n_estimators", 100, 500, step=50)),
+            "n_estimators": int(trial.suggest_int("n_estimators", 200, 1000, step=50)),
             "learning_rate": float(trial.suggest_float("learning_rate", 0.005, 0.1, log=True)),
             "subsample": float(trial.suggest_float("subsample", 0.6, 1.0)),
             "colsample_bytree": float(trial.suggest_float("colsample_bytree", 0.5, 1.0)),
-            "min_child_weight": int(trial.suggest_int("min_child_weight", 1, 10)),
-            "gamma": float(trial.suggest_float("gamma", 0.0, 5.0)),
+            "min_child_weight": int(trial.suggest_int("min_child_weight", 1, 7)),
+            "gamma": float(trial.suggest_float("gamma", 0.0, 0.5)),
             "reg_alpha": float(trial.suggest_float("reg_alpha", 1e-4, 10.0, log=True)),
             "reg_lambda": float(trial.suggest_float("reg_lambda", 0.1, 10.0, log=True)),
         }
@@ -605,89 +626,106 @@ def _suggest_optuna_params(
     return _normalize_best_params(params)
 
 
-def _complete_optuna_params(
-    best_trial_params: Mapping[str, Any],
+def _compute_holdout_metrics(
     *,
-    search_space: Mapping[str, Sequence[float | int]],
-) -> dict[str, float | int]:
-    completed: dict[str, Any] = dict(best_trial_params)
-    for key, values in search_space.items():
-        options = list(values)
-        if len(options) == 1 and key not in completed:
-            completed[key] = options[0]
-    return _normalize_best_params(completed)
-
-
-def _matches_default_search_space(search_space: Mapping[str, Sequence[float | int]]) -> bool:
-    if set(search_space) != set(DEFAULT_SEARCH_SPACE):
-        return False
-    for key, values in DEFAULT_SEARCH_SPACE.items():
-        if list(search_space[key]) != list(values):
-            return False
-    return True
-
-
-def _build_optuna_study_name(
-    *,
-    model_name: str,
+    train_frame: pd.DataFrame,
+    holdout_frame: pd.DataFrame,
     target_column: str,
-    data_version_hash: str,
-    holdout_season: int,
-) -> str:
-    return f"{model_name}_{target_column}_{data_version_hash[:12]}_{holdout_season}"
+    holdout_predictions: Sequence[float],
+) -> dict[str, float | None]:
+    actual = pd.Series(pd.to_numeric(holdout_frame[target_column], errors="coerce"))
+    predicted = pd.Series(list(holdout_predictions), index=holdout_frame.index, dtype=float)
+    naive_prediction = float(pd.to_numeric(train_frame[target_column], errors="coerce").mean())
+    naive_series = pd.Series(
+        [naive_prediction] * len(actual),
+        index=holdout_frame.index,
+        dtype=float,
+    )
+    model_rmse = float(mean_squared_error(actual, predicted) ** 0.5)
+    naive_rmse = float(mean_squared_error(actual, naive_series) ** 0.5)
+    model_mae = float(mean_absolute_error(actual, predicted))
+    naive_mae = float(mean_absolute_error(actual, naive_series))
+    rmse_improvement_pct = (
+        ((naive_rmse - model_rmse) / naive_rmse) * 100.0 if naive_rmse > 0 else None
+    )
+    mae_improvement_pct = (
+        ((naive_mae - model_mae) / naive_mae) * 100.0 if naive_mae > 0 else None
+    )
+    return {
+        "mae": model_mae,
+        "rmse": model_rmse,
+        "r2": float(r2_score(actual, predicted)),
+        "actual_mean": float(actual.mean()),
+        "predicted_mean": float(predicted.mean()),
+        "naive_mean_prediction": naive_prediction,
+        "naive_mae": naive_mae,
+        "naive_rmse": naive_rmse,
+        "mae_improvement_vs_naive_pct": mae_improvement_pct,
+        "rmse_improvement_vs_naive_pct": rmse_improvement_pct,
+    }
 
 
-def _build_optuna_progress_callback(
+def _refit_blended_estimator_with_temporal_early_stopping(
     *,
-    model_name: str,
-    target_trial_count: int,
-) -> Any:
-    last_logged_progress = -1.0
+    best_params: Mapping[str, float | int],
+    training_frame: pd.DataFrame,
+    feature_columns: Sequence[str],
+    target_column: str,
+    random_state: int,
+    early_stopping_rounds: int,
+    validation_fraction: float,
+) -> tuple[BlendedRunCountRegressor, int, int, int | None, int, int]:
+    xgboost_estimator = _build_estimator(random_state=random_state)
+    xgboost_estimator.set_params(**best_params)
+    (
+        fitted_xgboost_estimator,
+        requested_n_estimators,
+        final_n_estimators,
+        best_iteration,
+        early_stopping_train_row_count,
+        early_stopping_validation_row_count,
+    ) = _refit_estimator_with_temporal_early_stopping(
+        estimator=xgboost_estimator,
+        training_frame=training_frame,
+        feature_columns=feature_columns,
+        target_column=target_column,
+        early_stopping_rounds=early_stopping_rounds,
+        validation_fraction=validation_fraction,
+    )
 
-    def _callback(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
-        nonlocal last_logged_progress
-        completed_trial_count = len(study.trials)
-        progress_fraction = min(1.0, completed_trial_count / max(target_trial_count, 1))
-        should_log = (
-            completed_trial_count == 1
-            or completed_trial_count == target_trial_count
-            or progress_fraction - last_logged_progress >= 0.05
-        )
-        if not should_log:
-            return
+    lightgbm_estimator = _build_lightgbm_estimator(random_state=random_state)
+    lightgbm_estimator.set_params(**_lightgbm_params_from_xgboost_params(best_params))
+    fitted_lightgbm_estimator = _refit_lightgbm_with_temporal_early_stopping(
+        estimator=lightgbm_estimator,
+        training_frame=training_frame,
+        feature_columns=feature_columns,
+        target_column=target_column,
+        early_stopping_rounds=early_stopping_rounds,
+        validation_fraction=validation_fraction,
+    )
 
-        last_logged_progress = progress_fraction
-        filled = int(round(progress_fraction * 20))
-        bar = "#" * filled + "-" * (20 - filled)
-        try:
-            best_value = study.best_value
-        except ValueError:
-            best_value = None
-        latest_value = trial.value if trial.value is not None else None
-        logger.info(
-            "Optuna progress %s [%s] %s/%s (%.1f%%) best=%s latest=%s state=%s",
-            model_name,
-            bar,
-            completed_trial_count,
-            target_trial_count,
-            progress_fraction * 100.0,
-            "n/a" if best_value is None else f"{best_value:.6f}",
-            "pruned" if latest_value is None else f"{latest_value:.6f}",
-            trial.state.name.lower(),
-        )
-
-    return _callback
+    return (
+        BlendedRunCountRegressor(
+            xgboost_model=fitted_xgboost_estimator,
+            lightgbm_model=fitted_lightgbm_estimator,
+        ),
+        requested_n_estimators,
+        final_n_estimators,
+        best_iteration,
+        early_stopping_train_row_count,
+        early_stopping_validation_row_count,
+    )
 
 
-def _refit_estimator_with_temporal_early_stopping(
+def _refit_lightgbm_with_temporal_early_stopping(
     *,
-    estimator: XGBClassifier,
+    estimator: LGBMRegressor,
     training_frame: pd.DataFrame,
     feature_columns: Sequence[str],
     target_column: str,
     early_stopping_rounds: int,
     validation_fraction: float,
-) -> tuple[XGBClassifier, int, int, int | None, int, int]:
+) -> LGBMRegressor:
     requested_n_estimators = int(estimator.get_params().get("n_estimators", 100))
     train_slice, validation_slice = _split_temporal_validation_frame(
         training_frame,
@@ -696,201 +734,174 @@ def _refit_estimator_with_temporal_early_stopping(
     if early_stopping_rounds <= 0 or validation_slice.empty:
         fitted_estimator = clone(estimator)
         fitted_estimator.fit(training_frame[list(feature_columns)], training_frame[target_column])
-        return (
-            fitted_estimator,
-            requested_n_estimators,
-            requested_n_estimators,
-            None,
-            int(len(training_frame)),
-            0,
-        )
+        return fitted_estimator
 
     early_stop_estimator = clone(estimator)
-    early_stop_estimator.set_params(early_stopping_rounds=int(early_stopping_rounds))
     early_stop_estimator.fit(
         train_slice[list(feature_columns)],
         train_slice[target_column],
         eval_set=[(validation_slice[list(feature_columns)], validation_slice[target_column])],
-        verbose=False,
+        eval_metric="rmse",
+        callbacks=[lgb_early_stopping(stopping_rounds=int(early_stopping_rounds), verbose=False)],
     )
-    best_iteration = getattr(early_stop_estimator, "best_iteration", None)
+    best_iteration = getattr(early_stop_estimator, "best_iteration_", None)
     final_n_estimators = requested_n_estimators
     if best_iteration is not None:
-        final_n_estimators = max(1, int(best_iteration) + 1)
+        final_n_estimators = max(1, int(best_iteration))
 
     final_estimator = clone(estimator)
     final_estimator.set_params(n_estimators=final_n_estimators)
     final_estimator.fit(training_frame[list(feature_columns)], training_frame[target_column])
-    return (
-        final_estimator,
-        requested_n_estimators,
-        final_n_estimators,
-        None if best_iteration is None else int(best_iteration),
-        int(len(train_slice)),
-        int(len(validation_slice)),
+    return final_estimator
+
+
+def _build_estimator(*, random_state: int) -> XGBRegressor:
+    return XGBRegressor(
+        objective="count:poisson",
+        eval_metric="rmse",
+        random_state=random_state,
+        tree_method="hist",
+        n_jobs=DEFAULT_XGBOOST_N_JOBS,
+        verbosity=0,
     )
 
 
-def _split_temporal_validation_frame(
-    dataframe: pd.DataFrame,
-    *,
-    validation_fraction: float,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    if dataframe.empty or validation_fraction <= 0:
-        return dataframe.copy(), dataframe.iloc[0:0].copy()
-    validation_row_count = min(
-        max(1, int(round(len(dataframe) * validation_fraction))),
-        max(len(dataframe) - 1, 0),
-    )
-    if validation_row_count <= 0:
-        return dataframe.copy(), dataframe.iloc[0:0].copy()
-    split_index = len(dataframe) - validation_row_count
-    return (
-        dataframe.iloc[:split_index].copy().reset_index(drop=True),
-        dataframe.iloc[split_index:].copy().reset_index(drop=True),
+def _build_lightgbm_estimator(*, random_state: int) -> LGBMRegressor:
+    return LGBMRegressor(
+        objective="poisson",
+        random_state=random_state,
+        n_jobs=DEFAULT_XGBOOST_N_JOBS,
+        verbosity=-1,
     )
 
 
-def _load_training_dataframe(training_data: pd.DataFrame | str | Path) -> pd.DataFrame:
-    if isinstance(training_data, pd.DataFrame):
-        dataframe = training_data.copy()
-    else:
-        dataframe = pd.read_parquet(Path(training_data))
-
-    if dataframe.empty:
-        raise ValueError("Training data is empty")
-
-    dataframe = dataframe.copy()
-    dataframe["scheduled_start"] = pd.to_datetime(dataframe["scheduled_start"], utc=True)
-    dataframe["season"] = pd.to_numeric(dataframe["season"], errors="raise").astype(int)
-    return dataframe.sort_values(["scheduled_start", "game_pk"]).reset_index(drop=True)
-
-
-def _resolve_numeric_feature_columns(dataframe: pd.DataFrame) -> list[str]:
-    return [
-        column
-        for column in _feature_columns(dataframe)
-        if pd.api.types.is_numeric_dtype(dataframe[column])
-        and _has_numeric_variation(dataframe[column])
-    ]
+def _lightgbm_params_from_xgboost_params(
+    params: Mapping[str, float | int],
+) -> dict[str, float | int]:
+    return {
+        "max_depth": int(params.get("max_depth", -1)),
+        "n_estimators": int(params.get("n_estimators", 100)),
+        "learning_rate": float(params.get("learning_rate", 0.05)),
+        "subsample": float(params.get("subsample", 1.0)),
+        "colsample_bytree": float(params.get("colsample_bytree", 1.0)),
+        "min_child_samples": max(5, int(round(float(params.get("min_child_weight", 1)) * 4))),
+        "min_split_gain": float(params.get("gamma", 0.0)),
+        "reg_alpha": float(params.get("reg_alpha", 0.0)),
+        "reg_lambda": float(params.get("reg_lambda", 0.0)),
+    }
 
 
-def _has_numeric_variation(series: pd.Series) -> bool:
-    non_null = series.dropna()
-    if non_null.empty:
+def _matches_default_run_count_search_space(
+    search_space: Mapping[str, Sequence[float | int]],
+) -> bool:
+    if set(search_space) != set(DEFAULT_RUN_COUNT_SEARCH_SPACE):
         return False
-    first_value = non_null.iloc[0]
-    return bool((non_null != first_value).any())
+    for key, values in DEFAULT_RUN_COUNT_SEARCH_SPACE.items():
+        if list(search_space[key]) != list(values):
+            return False
+    return True
 
 
-def _prepare_training_frame(
+def _resolve_run_count_candidate_feature_columns(dataframe: pd.DataFrame) -> list[str]:
+    candidate_columns = _resolve_numeric_feature_columns(dataframe)
+    filtered_columns: list[str] = []
+    candidate_set = set(candidate_columns)
+    for column in candidate_columns:
+        if any(token in column for token in ("_14g", "_60g", "_14s", "_60s")):
+            continue
+        if _is_redundant_team_offense_feature(column, candidate_set):
+            continue
+        filtered_columns.append(column)
+    return filtered_columns
+
+
+def _is_redundant_team_offense_feature(
+    column: str,
+    candidate_columns: set[str],
+) -> bool:
+    if not column.startswith(("home_team_", "away_team_")):
+        return False
+    if not any(f"_{metric}_" in column for metric in _RUN_COUNT_OFFENSE_METRICS):
+        return False
+    lineup_column = column.replace("_team_", "_lineup_", 1)
+    return lineup_column in candidate_columns
+
+
+def _select_run_count_feature_columns(
     dataframe: pd.DataFrame,
     *,
     target_column: str,
-    drop_ties: bool,
-) -> pd.DataFrame:
-    frame = dataframe.copy()
-    if drop_ties and "f5_tied_after_5" in frame.columns:
-        frame = frame.loc[pd.to_numeric(frame["f5_tied_after_5"], errors="coerce").fillna(0) == 0]
+    candidate_feature_columns: Sequence[str],
+    max_feature_count: int = DEFAULT_RUN_COUNT_MAX_FEATURE_COUNT,
+) -> list[str]:
+    if max_feature_count <= 0:
+        raise ValueError("max_feature_count must be positive")
+    if len(candidate_feature_columns) <= max_feature_count:
+        return list(candidate_feature_columns)
 
-    frame[target_column] = pd.to_numeric(frame[target_column], errors="raise").astype(int)
-    return frame.sort_values(["scheduled_start", "game_pk"]).reset_index(drop=True)
+    target_series = pd.to_numeric(dataframe[target_column], errors="coerce")
+    rankings: list[tuple[float, str]] = []
+    for column in candidate_feature_columns:
+        feature_series = pd.to_numeric(dataframe[column], errors="coerce")
+        correlation = feature_series.corr(target_series)
+        score = abs(float(correlation)) if pd.notna(correlation) else 0.0
+        rankings.append((score, column))
 
-
-def _resolve_holdout_season(dataframe: pd.DataFrame, requested_holdout_season: int | None) -> int:
-    available_seasons = sorted(int(season) for season in dataframe["season"].dropna().unique().tolist())
-    if not available_seasons:
-        raise ValueError("Training data does not contain any seasons")
-    if requested_holdout_season is None:
-        return available_seasons[-1]
-    if requested_holdout_season not in available_seasons:
-        raise ValueError(
-            f"Requested holdout season {requested_holdout_season} not present in training data"
-        )
-    return requested_holdout_season
+    rankings.sort(key=lambda item: (-item[0], item[1]))
+    selected_columns = [column for _, column in rankings[:max_feature_count]]
+    return sorted(selected_columns)
 
 
-def _resolve_data_version_hash(dataframe: pd.DataFrame) -> str:
-    if "data_version_hash" in dataframe.columns:
-        non_null_hashes = dataframe["data_version_hash"].dropna().astype(str).unique().tolist()
-        if len(non_null_hashes) == 1:
-            return non_null_hashes[0]
-    return _compute_data_version_hash(dataframe)
-
-
-def _build_model_version(data_version_hash: str) -> str:
-    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    return f"{timestamp}_{data_version_hash[:8]}"
-
-
-def _resolve_experiment_output_dir(
-    output_dir: str | Path,
-    experiment_name: str | None,
-) -> Path:
-    resolved_output_dir = Path(output_dir)
-    if not experiment_name:
-        return resolved_output_dir
-
-    slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", experiment_name.strip().lower()).strip("-.")
-    if not slug:
-        raise ValueError("experiment_name must contain at least one alphanumeric character")
-    return resolved_output_dir / slug
-
-
-def _resolve_search_iterations(
-    search_space: Mapping[str, Sequence[float | int]],
-    requested_iterations: int,
-) -> int:
-    if _matches_default_search_space(search_space):
-        return max(1, int(requested_iterations))
-    total_combinations = prod(max(len(values), 1) for values in search_space.values())
-    return max(1, min(requested_iterations, total_combinations))
-
-
-def _normalize_best_params(best_params: Mapping[str, Any]) -> dict[str, float | int]:
-    normalized: dict[str, float | int] = {}
-    for key, value in best_params.items():
-        if isinstance(value, bool):
-            normalized[key] = int(value)
-        elif isinstance(value, int):
-            normalized[key] = int(value)
-        else:
-            normalized[key] = float(value)
-    return normalized
-
-
-def _extract_feature_importance_rankings(
-    estimator: XGBClassifier,
+def _extract_blended_feature_importance_rankings(
+    estimator: BlendedRunCountRegressor,
     feature_columns: Sequence[str],
     *,
     top_feature_count: int,
 ) -> list[dict[str, float | str]]:
-    importances = getattr(estimator, "feature_importances_", None)
-    if importances is None:
-        return []
+    xgboost_rankings = _extract_feature_importance_rankings(
+        estimator.xgboost_model,
+        feature_columns,
+        top_feature_count=len(feature_columns),
+    )
+    xgboost_scores = {
+        str(item["feature"]): float(item["importance"])
+        for item in xgboost_rankings
+    }
 
-    rankings = [
-        {"feature": feature, "importance": float(importance)}
-        for feature, importance in zip(feature_columns, importances, strict=False)
+    lightgbm_importances = getattr(estimator.lightgbm_model, "feature_importances_", None)
+    lightgbm_scores: dict[str, float] = {}
+    if lightgbm_importances is not None:
+        total_importance = float(sum(float(value) for value in lightgbm_importances))
+        for feature_name, importance in zip(feature_columns, lightgbm_importances, strict=False):
+            if total_importance > 0:
+                lightgbm_scores[str(feature_name)] = float(importance) / total_importance
+            else:
+                lightgbm_scores[str(feature_name)] = 0.0
+
+    blended_scores: list[tuple[str, float]] = []
+    for feature_name in feature_columns:
+        normalized_name = str(feature_name)
+        blended_importance = (
+            DEFAULT_XGBOOST_BLEND_WEIGHT * xgboost_scores.get(normalized_name, 0.0)
+            + DEFAULT_LIGHTGBM_BLEND_WEIGHT * lightgbm_scores.get(normalized_name, 0.0)
+        )
+        blended_scores.append((normalized_name, float(blended_importance)))
+
+    blended_scores.sort(key=lambda item: (-item[1], item[0]))
+    return [
+        {"feature": feature_name, "importance": importance}
+        for feature_name, importance in blended_scores[:top_feature_count]
     ]
-    rankings.sort(key=lambda item: float(item["importance"]), reverse=True)
-    return rankings[:top_feature_count]
 
 
-def _safe_roc_auc(y_true: pd.Series, probabilities: Sequence[float]) -> float | None:
-    if pd.Series(y_true).nunique() < 2:
-        return None
-    return float(roc_auc_score(y_true, probabilities))
-
-
-def _artifact_to_json_ready(artifact: ModelTrainingArtifact) -> dict[str, Any]:
+def _artifact_to_json_ready(artifact: RunCountTrainingArtifact) -> dict[str, Any]:
     payload = asdict(artifact)
     payload["model_path"] = str(artifact.model_path)
     payload["metadata_path"] = str(artifact.metadata_path)
     return payload
 
 
-def _run_result_to_json_ready(result: TrainingRunResult) -> dict[str, Any]:
+def _run_result_to_json_ready(result: RunCountTrainingResult) -> dict[str, Any]:
     return {
         "model_version": result.model_version,
         "data_version_hash": result.data_version_hash,

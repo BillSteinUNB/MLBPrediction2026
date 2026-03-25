@@ -32,6 +32,58 @@ def _validate_innings_completed(value: float) -> float:
     return resolved
 
 
+def _is_first_five_market(market_type: str) -> bool:
+    return market_type in {"f5_ml", "f5_rl", "f5_total"}
+
+
+def _settle_moneyline(decision: BetDecision, *, home_score: int, away_score: int) -> BetResult:
+    if home_score == away_score:
+        return BetResult.PUSH
+
+    winning_side = "home" if home_score > away_score else "away"
+    return BetResult.WIN if decision.side == winning_side else BetResult.LOSS
+
+
+def _settle_runline(decision: BetDecision, *, home_score: int, away_score: int) -> BetResult:
+    home_margin = home_score - away_score
+    if decision.line_at_bet is not None:
+        selected_margin = float(home_margin if decision.side == "home" else -home_margin)
+        covered_margin = selected_margin + float(decision.line_at_bet)
+        if covered_margin > 0:
+            return BetResult.WIN
+        if covered_margin < 0:
+            return BetResult.LOSS
+        return BetResult.PUSH
+
+    if decision.side == "home":
+        return BetResult.WIN if home_margin >= 2 else BetResult.LOSS
+
+    return BetResult.WIN if home_margin <= 1 else BetResult.LOSS
+
+
+def _settle_total(decision: BetDecision, *, home_score: int, away_score: int) -> BetResult:
+    if decision.line_at_bet is None:
+        return BetResult.NO_ACTION
+
+    total_runs = home_score + away_score
+    line = float(decision.line_at_bet)
+    if decision.side == "over":
+        if total_runs > line:
+            return BetResult.WIN
+        if total_runs < line:
+            return BetResult.LOSS
+        return BetResult.PUSH
+
+    if decision.side == "under":
+        if total_runs < line:
+            return BetResult.WIN
+        if total_runs > line:
+            return BetResult.LOSS
+        return BetResult.PUSH
+
+    return BetResult.NO_ACTION
+
+
 def _profit_loss_for_result(decision: BetDecision, result: BetResult) -> float:
     if result is BetResult.WIN:
         return float(payout_for_american_odds(decision.odds_at_bet) * decision.kelly_stake)
@@ -77,39 +129,32 @@ def settle_bet(
     innings_completed: float,
     starter_scratched: bool = False,
 ) -> BetResult:
-    """Return the F5 settlement result for a single bet decision."""
+    """Return the settlement result for a single bet decision."""
 
     resolved_home_score = _validate_score("home_score", home_score)
     resolved_away_score = _validate_score("away_score", away_score)
     resolved_innings_completed = _validate_innings_completed(innings_completed)
 
-    if starter_scratched or resolved_innings_completed < 5:
-        return BetResult.NO_ACTION
-
     if resolved_home_score is None or resolved_away_score is None:
         return BetResult.NO_ACTION
 
-    if decision.market_type == "f5_ml":
-        if resolved_home_score == resolved_away_score:
-            return BetResult.PUSH
+    if _is_first_five_market(decision.market_type):
+        if starter_scratched or resolved_innings_completed < 5:
+            return BetResult.NO_ACTION
 
-        winning_side = "home" if resolved_home_score > resolved_away_score else "away"
-        return BetResult.WIN if decision.side == winning_side else BetResult.LOSS
+    if decision.market_type == "f5_ml" or decision.market_type == "full_game_ml":
+        return _settle_moneyline(decision, home_score=resolved_home_score, away_score=resolved_away_score)
 
-    home_margin = resolved_home_score - resolved_away_score
-    if decision.line_at_bet is not None:
-        selected_margin = float(home_margin if decision.side == "home" else -home_margin)
-        covered_margin = selected_margin + float(decision.line_at_bet)
-        if covered_margin > 0:
-            return BetResult.WIN
-        if covered_margin < 0:
-            return BetResult.LOSS
-        return BetResult.PUSH
+    if decision.market_type == "f5_rl" or decision.market_type == "full_game_rl":
+        return _settle_runline(decision, home_score=resolved_home_score, away_score=resolved_away_score)
 
-    if decision.side == "home":
-        return BetResult.WIN if home_margin >= 2 else BetResult.LOSS
+    if decision.market_type == "f5_total" or decision.market_type == "full_game_total":
+        return _settle_total(decision, home_score=resolved_home_score, away_score=resolved_away_score)
 
-    return BetResult.WIN if home_margin <= 1 else BetResult.LOSS
+    if starter_scratched or resolved_innings_completed < 5:
+        return BetResult.NO_ACTION
+
+    return BetResult.NO_ACTION
 
 
 def settle_game_bets(

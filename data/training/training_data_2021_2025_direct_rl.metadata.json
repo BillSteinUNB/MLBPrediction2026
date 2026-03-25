@@ -1,0 +1,23 @@
+{
+  "requested_years": [
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+  ],
+  "effective_years": [
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+  ],
+  "shortened_seasons_skipped": [],
+  "scheduled_start_before": null,
+  "row_count": 12169,
+  "feature_column_count": 233,
+  "feature_build_workers": 6,
+  "data_version_hash": "9063aa173ad8817b25a541ff046047b814fbd5c23270bdc052fa41614d3fdf8d",
+  "build_timestamp": "2026-03-24T12:03:32.139924+00:00"
+}

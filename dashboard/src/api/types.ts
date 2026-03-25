@@ -218,6 +218,7 @@ export interface SlateGame {
   notified: boolean
   paper_fallback: boolean
   input_status?: SlateInputStatus | null
+  narrative?: string | null
 }
 
 export interface SlateResponse {
@@ -320,4 +321,5 @@ export interface LiveSeasonGameResponse {
   forced_settled_result?: string | null
   forced_flat_profit_loss?: number | null
   settled_at?: string | null
+  narrative?: string | null
 }

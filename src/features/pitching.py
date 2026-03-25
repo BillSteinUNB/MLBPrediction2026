@@ -29,7 +29,7 @@ FASTBALL_PITCH_TYPES = {"FA", "FC", "FF", "FI", "FO", "FS", "FT", "SI", "SF"}
 FASTBALL_NAME_TOKENS = ("FASTBALL", "SINKER", "CUTTER", "SPLITTER")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DERIVED_CACHE_ROOT = REPO_ROOT / "data" / "raw" / "derived" / "pitching"
-START_METRICS_CACHE_VERSION = 1
+START_METRICS_CACHE_VERSION = 2
 METRIC_CANDIDATES: dict[str, tuple[str, ...]] = {
     "xfip": ("xfip", "xFIP"),
     "xera": ("xera", "xERA"),
@@ -45,9 +45,13 @@ METRIC_CANDIDATES: dict[str, tuple[str, ...]] = {
         "avg_fb_velocity",
     ),
     "pitch_mix_entropy": ("pitch_mix_entropy", "entropy"),
+    "csw_pct": ("csw_pct", "CSW%", "csw%"),
     "innings_pitched": ("innings_pitched", "IP", "ip"),
+    "pitch_count": ("pitch_count", "pitches", "Pitches", "pitch_count_total"),
 }
-METRICS: tuple[str, ...] = tuple(metric for metric in METRIC_CANDIDATES if metric != "innings_pitched")
+METRICS: tuple[str, ...] = tuple(
+    metric for metric in METRIC_CANDIDATES if metric not in {"innings_pitched", "pitch_count"}
+)
 DEFAULT_METRIC_BASELINES = {
     "xfip": 4.20,
     "xera": 4.10,
@@ -57,6 +61,9 @@ DEFAULT_METRIC_BASELINES = {
     "hr_fb_pct": 11.0,
     "avg_fastball_velocity": 93.5,
     "pitch_mix_entropy": 1.50,
+    "csw_pct": 29.0,
+    "pitch_count": 90.0,
+    "velo_delta": 0.0,
 }
 
 
@@ -199,6 +206,28 @@ def compute_pitching_features(
                             as_of_timestamp=as_of_timestamp,
                         )
                     )
+            velocity_short = _series_mean(context.current_history.tail(7)["avg_fastball_velocity"])
+            velocity_long = _series_mean(context.current_history.tail(60)["avg_fastball_velocity"])
+            velocity_delta = velocity_short - velocity_long
+            if math.isnan(velocity_delta):
+                velocity_delta = DEFAULT_METRIC_BASELINES["velo_delta"]
+            features.append(
+                GameFeatures(
+                    game_pk=game_pk,
+                    feature_name=f"{side_name}_starter_velo_delta_7v60s",
+                    feature_value=float(velocity_delta),
+                    window_size=None,
+                    as_of_timestamp=as_of_timestamp,
+                )
+            )
+            workload_features = _starter_workload_features(
+                game_pk=game_pk,
+                side_name=side_name,
+                context=context,
+                target_day=target_day,
+                as_of_timestamp=as_of_timestamp,
+            )
+            features.extend(workload_features)
 
     _persist_features(database_path, features)
     return features
@@ -383,6 +412,7 @@ def _normalize_start_metrics(dataframe: pd.DataFrame) -> pd.DataFrame:
             result[metric] = result[metric].fillna(baseline)
 
     result["innings_pitched"] = result["innings_pitched"].astype(float).fillna(0.0)
+    result["pitch_count"] = result["pitch_count"].astype(float).fillna(DEFAULT_METRIC_BASELINES["pitch_count"])
     return result.sort_values(["game_date", "game_pk", "team"]).reset_index(drop=True)
 
 
@@ -393,10 +423,80 @@ def _empty_start_metrics() -> pd.DataFrame:
         "team": pd.Series(dtype="str"),
         "pitcher_id": pd.Series(dtype="float64"),
         "innings_pitched": pd.Series(dtype="float64"),
+        "pitch_count": pd.Series(dtype="float64"),
     }
     for metric in METRICS:
         data[metric] = pd.Series(dtype="float64")
     return pd.DataFrame(data)
+
+
+def _starter_workload_features(
+    *,
+    game_pk: int,
+    side_name: str,
+    context: _PitchingContext,
+    target_day: date,
+    as_of_timestamp: datetime,
+) -> list[GameFeatures]:
+    default_days_rest = 5.0
+    default_pitch_count = DEFAULT_METRIC_BASELINES["pitch_count"]
+
+    if context.uses_team_composite:
+        days_rest = default_days_rest
+        last_pitch_count = default_pitch_count
+        cumulative_pitch_load = default_pitch_count
+    else:
+        history = context.current_history
+
+        if not history.empty and "game_date" in history.columns:
+            last_start_date = history["game_date"].iloc[-1]
+            if pd.notna(last_start_date):
+                days_rest = float((pd.Timestamp(target_day) - pd.to_datetime(last_start_date)).days)
+                days_rest = max(1.0, min(days_rest, 30.0))
+            else:
+                days_rest = default_days_rest
+        else:
+            days_rest = default_days_rest
+
+        if not history.empty and "pitch_count" in history.columns:
+            last_pitch_count_value = history["pitch_count"].iloc[-1]
+            if pd.notna(last_pitch_count_value) and float(last_pitch_count_value) > 0:
+                last_pitch_count = float(last_pitch_count_value)
+            else:
+                last_pitch_count = default_pitch_count
+
+            recent_counts = pd.to_numeric(history.tail(5)["pitch_count"], errors="coerce")
+            recent_counts = recent_counts.loc[recent_counts > 0]
+            cumulative_pitch_load = (
+                float(recent_counts.mean()) if not recent_counts.empty else default_pitch_count
+            )
+        else:
+            last_pitch_count = default_pitch_count
+            cumulative_pitch_load = default_pitch_count
+
+    return [
+        GameFeatures(
+            game_pk=game_pk,
+            feature_name=f"{side_name}_starter_days_rest",
+            feature_value=float(days_rest),
+            window_size=None,
+            as_of_timestamp=as_of_timestamp,
+        ),
+        GameFeatures(
+            game_pk=game_pk,
+            feature_name=f"{side_name}_starter_last_start_pitch_count",
+            feature_value=float(last_pitch_count),
+            window_size=None,
+            as_of_timestamp=as_of_timestamp,
+        ),
+        GameFeatures(
+            game_pk=game_pk,
+            feature_name=f"{side_name}_starter_cumulative_pitch_load_5s",
+            feature_value=float(cumulative_pitch_load),
+            window_size=None,
+            as_of_timestamp=as_of_timestamp,
+        ),
+    ]
 
 
 def _fetch_season_start_metrics(
@@ -551,6 +651,7 @@ def _compute_start_metrics(pitches: pd.DataFrame, league_hr_fb_rate: float) -> d
         return {
             **DEFAULT_METRIC_BASELINES,
             "innings_pitched": 0.0,
+            "pitch_count": 0.0,
         }
 
     terminal = _collapse_plate_appearances(pitches)
@@ -568,6 +669,7 @@ def _compute_start_metrics(pitches: pd.DataFrame, league_hr_fb_rate: float) -> d
 
     outs_recorded = sum(_event_outs(event_name) for event_name in events.tolist())
     innings_pitched = outs_recorded / 3 if outs_recorded else 0.0
+    pitch_count = len(pitches)
     expected_home_runs = fly_balls * (league_hr_fb_rate if league_hr_fb_rate > 0 else LEAGUE_HR_FB_RATE)
 
     k_pct = _safe_pct(strikeouts, batters_faced)
@@ -577,6 +679,7 @@ def _compute_start_metrics(pitches: pd.DataFrame, league_hr_fb_rate: float) -> d
 
     avg_fastball_velocity = _average_fastball_velocity(pitches)
     pitch_mix_entropy = _pitch_mix_entropy(pitches)
+    csw_pct = _csw_pct(pitches)
     xera = _estimate_xera(terminal)
     xfip = _estimate_xfip(
         strikeouts=strikeouts,
@@ -595,7 +698,9 @@ def _compute_start_metrics(pitches: pd.DataFrame, league_hr_fb_rate: float) -> d
         "hr_fb_pct": hr_fb_pct,
         "avg_fastball_velocity": avg_fastball_velocity,
         "pitch_mix_entropy": pitch_mix_entropy,
+        "csw_pct": csw_pct,
         "innings_pitched": innings_pitched,
+        "pitch_count": float(pitch_count),
     }
 
 
@@ -685,6 +790,26 @@ def _pitch_mix_entropy(pitches: pd.DataFrame) -> float:
 
     entropy = -sum((count / total) * math.log2(count / total) for count in pitch_counts if count > 0)
     return float(entropy)
+
+
+def _csw_pct(pitches: pd.DataFrame) -> float:
+    description_column = _first_column(pitches, ("description",))
+    if description_column is None:
+        return DEFAULT_METRIC_BASELINES["csw_pct"]
+
+    descriptions = pitches[description_column].astype(str).str.lower().str.strip()
+    total_pitches = len(descriptions)
+    if total_pitches <= 0:
+        return DEFAULT_METRIC_BASELINES["csw_pct"]
+
+    csw_count = descriptions.isin(
+        {
+            "called_strike",
+            "swinging_strike",
+            "swinging_strike_blocked",
+        }
+    ).sum()
+    return float((csw_count / total_pitches) * 100.0)
 
 
 def _estimate_xera(terminal: pd.DataFrame) -> float:

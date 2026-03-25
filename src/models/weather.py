@@ -15,6 +15,9 @@ class WeatherData(ModelBase):
     pressure_hpa: float = Field(gt=0)
     air_density: float = Field(gt=0)
     wind_factor: float
+    precipitation_probability: float | None = Field(default=None, ge=0, le=1)
+    precipitation_mm: float = Field(default=0.0, ge=0)
+    cloud_cover_pct: float | None = Field(default=None, ge=0, le=100)
     is_dome_default: bool = False
     forecast_time: UtcDatetime | None = None
     fetched_at: UtcDatetime | None = None

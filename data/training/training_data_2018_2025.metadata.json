@@ -23,8 +23,8 @@
   ],
   "scheduled_start_before": null,
   "row_count": 17035,
-  "feature_column_count": 233,
-  "feature_build_workers": 12,
-  "data_version_hash": "b3922ce15fd811dbbc9875cc0ff5ee310a879f4b4cd043c1c28ab9503721fddc",
-  "build_timestamp": "2026-03-21T15:53:40.872482+00:00"
+  "feature_column_count": 252,
+  "feature_build_workers": 8,
+  "data_version_hash": "2f59491cc736dc7c283c813b8d31c8827fd2e1503244e7e39906f16792fddef0",
+  "build_timestamp": "2026-03-25T20:21:42.522380+00:00"
 }

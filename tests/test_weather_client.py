@@ -122,6 +122,9 @@ def test_cache_round_trip_and_expiry(tmp_path: Path) -> None:
         pressure_hpa=1012.0,
         air_density=1.21,
         wind_factor=5.5,
+        precipitation_probability=0.35,
+        precipitation_mm=1.2,
+        cloud_cover_pct=82.0,
         is_dome_default=False,
         forecast_time=GAME_TIME,
         fetched_at=datetime.now(UTC),
@@ -133,6 +136,9 @@ def test_cache_round_trip_and_expiry(tmp_path: Path) -> None:
     assert cached_weather is not None
     assert cached_weather.temperature_f == pytest.approx(72.5)
     assert cached_weather.wind_factor == pytest.approx(5.5)
+    assert cached_weather.precipitation_probability == pytest.approx(0.35)
+    assert cached_weather.precipitation_mm == pytest.approx(1.2)
+    assert cached_weather.cloud_cover_pct == pytest.approx(82.0)
     assert cached_weather.forecast_time == GAME_TIME
 
     stale_weather = fresh_weather.model_copy(
@@ -257,6 +263,9 @@ def test_fetch_game_weather_fetches_open_air_and_then_uses_cache(
                 "dt": int(GAME_TIME.timestamp()),
                 "main": {"temp": 298.15, "humidity": 60, "pressure": 1015},
                 "wind": {"speed": 4.4704, "deg": 180},
+                "pop": 0.42,
+                "rain": {"3h": 1.8},
+                "clouds": {"all": 74},
             }
         ]
     }
@@ -277,6 +286,9 @@ def test_fetch_game_weather_fetches_open_air_and_then_uses_cache(
     assert fetched_weather.humidity_pct == 60
     assert fetched_weather.wind_speed_mph == pytest.approx(10.0, abs=0.1)
     assert fetched_weather.wind_factor > 0
+    assert fetched_weather.precipitation_probability == pytest.approx(0.42)
+    assert fetched_weather.precipitation_mm == pytest.approx(1.8)
+    assert fetched_weather.cloud_cover_pct == pytest.approx(74.0)
     assert fetched_weather.is_dome_default is False
 
     monkeypatch.setattr(

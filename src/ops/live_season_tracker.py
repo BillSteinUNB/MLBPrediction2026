@@ -181,27 +181,96 @@ def _ensure_live_season_tracking_table(connection: sqlite3.Connection) -> None:
         column_name="play_of_day_score",
         column_sql="REAL",
     )
-    _ensure_column(connection, table_name="live_season_tracking", column_name="source_model", column_sql="TEXT")
-    _ensure_column(connection, table_name="live_season_tracking", column_name="source_model_version", column_sql="TEXT")
+    _ensure_column(
+        connection, table_name="live_season_tracking", column_name="source_model", column_sql="TEXT"
+    )
+    _ensure_column(
+        connection,
+        table_name="live_season_tracking",
+        column_name="source_model_version",
+        column_sql="TEXT",
+    )
     _ensure_column(
         connection,
         table_name="live_season_tracking",
         column_name="forced_market_type",
         column_sql="TEXT",
     )
-    _ensure_column(connection, table_name="live_season_tracking", column_name="forced_side", column_sql="TEXT")
-    _ensure_column(connection, table_name="live_season_tracking", column_name="forced_source_model", column_sql="TEXT")
-    _ensure_column(connection, table_name="live_season_tracking", column_name="forced_source_model_version", column_sql="TEXT")
-    _ensure_column(connection, table_name="live_season_tracking", column_name="forced_book_name", column_sql="TEXT")
-    _ensure_column(connection, table_name="live_season_tracking", column_name="forced_odds_at_bet", column_sql="INTEGER")
-    _ensure_column(connection, table_name="live_season_tracking", column_name="forced_line_at_bet", column_sql="REAL")
-    _ensure_column(connection, table_name="live_season_tracking", column_name="forced_fair_probability", column_sql="REAL")
-    _ensure_column(connection, table_name="live_season_tracking", column_name="forced_model_probability", column_sql="REAL")
-    _ensure_column(connection, table_name="live_season_tracking", column_name="forced_edge_pct", column_sql="REAL")
-    _ensure_column(connection, table_name="live_season_tracking", column_name="forced_ev", column_sql="REAL")
-    _ensure_column(connection, table_name="live_season_tracking", column_name="forced_kelly_stake", column_sql="REAL")
-    _ensure_column(connection, table_name="live_season_tracking", column_name="forced_settled_result", column_sql="TEXT")
-    _ensure_column(connection, table_name="live_season_tracking", column_name="forced_flat_profit_loss", column_sql="REAL")
+    _ensure_column(
+        connection, table_name="live_season_tracking", column_name="forced_side", column_sql="TEXT"
+    )
+    _ensure_column(
+        connection,
+        table_name="live_season_tracking",
+        column_name="forced_source_model",
+        column_sql="TEXT",
+    )
+    _ensure_column(
+        connection,
+        table_name="live_season_tracking",
+        column_name="forced_source_model_version",
+        column_sql="TEXT",
+    )
+    _ensure_column(
+        connection,
+        table_name="live_season_tracking",
+        column_name="forced_book_name",
+        column_sql="TEXT",
+    )
+    _ensure_column(
+        connection,
+        table_name="live_season_tracking",
+        column_name="forced_odds_at_bet",
+        column_sql="INTEGER",
+    )
+    _ensure_column(
+        connection,
+        table_name="live_season_tracking",
+        column_name="forced_line_at_bet",
+        column_sql="REAL",
+    )
+    _ensure_column(
+        connection,
+        table_name="live_season_tracking",
+        column_name="forced_fair_probability",
+        column_sql="REAL",
+    )
+    _ensure_column(
+        connection,
+        table_name="live_season_tracking",
+        column_name="forced_model_probability",
+        column_sql="REAL",
+    )
+    _ensure_column(
+        connection,
+        table_name="live_season_tracking",
+        column_name="forced_edge_pct",
+        column_sql="REAL",
+    )
+    _ensure_column(
+        connection, table_name="live_season_tracking", column_name="forced_ev", column_sql="REAL"
+    )
+    _ensure_column(
+        connection,
+        table_name="live_season_tracking",
+        column_name="forced_kelly_stake",
+        column_sql="REAL",
+    )
+    _ensure_column(
+        connection,
+        table_name="live_season_tracking",
+        column_name="forced_settled_result",
+        column_sql="TEXT",
+    )
+    _ensure_column(
+        connection,
+        table_name="live_season_tracking",
+        column_name="forced_flat_profit_loss",
+        column_sql="REAL",
+    )
+    _ensure_column(
+        connection, table_name="live_season_tracking", column_name="narrative", column_sql="TEXT"
+    )
     connection.execute(
         "CREATE INDEX IF NOT EXISTS idx_live_season_tracking_date ON live_season_tracking (season, pipeline_date)"
     )
@@ -234,7 +303,9 @@ def _normalize_timestamp(value: datetime | None) -> datetime:
     return resolved.astimezone(UTC)
 
 
-def _actual_outcomes(home_score: int | None, away_score: int | None) -> tuple[int | None, int | None]:
+def _actual_outcomes(
+    home_score: int | None, away_score: int | None
+) -> tuple[int | None, int | None]:
     if home_score is None or away_score is None:
         return None, None
     margin = int(home_score) - int(away_score)
@@ -255,7 +326,10 @@ def _brier(probabilities: Sequence[float], outcomes: Sequence[int]) -> float | N
     if not probabilities or not outcomes:
         return None
     return float(
-        sum((float(probability) - int(outcome)) ** 2 for probability, outcome in zip(probabilities, outcomes))
+        sum(
+            (float(probability) - int(outcome)) ** 2
+            for probability, outcome in zip(probabilities, outcomes)
+        )
         / len(outcomes)
     )
 
@@ -263,7 +337,10 @@ def _brier(probabilities: Sequence[float], outcomes: Sequence[int]) -> float | N
 def _accuracy(probabilities: Sequence[float], outcomes: Sequence[int]) -> float | None:
     if not probabilities or not outcomes:
         return None
-    correct = sum((float(probability) >= 0.5) == bool(outcome) for probability, outcome in zip(probabilities, outcomes))
+    correct = sum(
+        (float(probability) >= 0.5) == bool(outcome)
+        for probability, outcome in zip(probabilities, outcomes)
+    )
     return float(correct / len(outcomes))
 
 
@@ -286,7 +363,9 @@ def _settle_live_pick(
             return "PUSH", 0.0
         winning_side = "home" if home_score > away_score else "away"
         result = "WIN" if side == winning_side else "LOSS"
-        return result, float(payout_for_american_odds(int(odds_at_bet)) if result == "WIN" else -1.0)
+        return result, float(
+            payout_for_american_odds(int(odds_at_bet)) if result == "WIN" else -1.0
+        )
 
     home_margin = int(home_score) - int(away_score)
     if line_at_bet is not None:
@@ -418,9 +497,10 @@ def capture_daily_result(
                 no_pick_reason,
                 error_message,
                 input_status_json,
+                narrative,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(season, game_pk) DO UPDATE SET
                 pipeline_date = excluded.pipeline_date,
                 matchup = excluded.matchup,
@@ -462,6 +542,7 @@ def capture_daily_result(
                 no_pick_reason = excluded.no_pick_reason,
                 error_message = excluded.error_message,
                 input_status_json = excluded.input_status_json,
+                narrative = excluded.narrative,
                 updated_at = excluded.updated_at
             """,
             [
@@ -508,6 +589,7 @@ def capture_daily_result(
                     game.no_pick_reason,
                     game.error_message,
                     json.dumps(game.input_status or {}, separators=(",", ":"), sort_keys=True),
+                    game.narrative,
                     captured_timestamp.isoformat(),
                 )
                 for game in result.games
@@ -549,7 +631,11 @@ def settle_tracked_games(
 
         refresh_dates: list[str] = []
         if pipeline_date is not None:
-            resolved_date = pipeline_date.isoformat() if isinstance(pipeline_date, date) and not isinstance(pipeline_date, datetime) else str(pipeline_date)
+            resolved_date = (
+                pipeline_date.isoformat()
+                if isinstance(pipeline_date, date) and not isinstance(pipeline_date, datetime)
+                else str(pipeline_date)
+            )
             refresh_dates = [resolved_date]
         else:
             date_rows = connection.execute(
@@ -560,7 +646,9 @@ def settle_tracked_games(
 
         for tracked_date in refresh_dates:
             try:
-                refreshed_schedule = _default_schedule_fetcher(date.fromisoformat(tracked_date), "prod")
+                refreshed_schedule = _default_schedule_fetcher(
+                    date.fromisoformat(tracked_date), "prod"
+                )
                 if not refreshed_schedule.empty:
                     _upsert_games(database_path, refreshed_schedule)
             except Exception:
@@ -570,7 +658,11 @@ def settle_tracked_games(
         where_clauses: list[str] = []
         params: list[Any] = []
         if pipeline_date is not None:
-            resolved_date = pipeline_date.isoformat() if isinstance(pipeline_date, date) and not isinstance(pipeline_date, datetime) else str(pipeline_date)
+            resolved_date = (
+                pipeline_date.isoformat()
+                if isinstance(pipeline_date, date) and not isinstance(pipeline_date, datetime)
+                else str(pipeline_date)
+            )
             where_clauses.append("pipeline_date = ?")
             params.append(resolved_date)
         if season is not None:
@@ -676,8 +768,12 @@ def build_live_season_summary(
 
     tracked_games = len(rows)
     settled_rows = [row for row in rows if row["actual_status"] == "final"]
-    pick_rows = [row for row in rows if row["status"] == "pick" and row["selected_market_type"] is not None]
-    graded_pick_rows = [row for row in pick_rows if row["settled_result"] in {"WIN", "LOSS", "PUSH"}]
+    pick_rows = [
+        row for row in rows if row["status"] == "pick" and row["selected_market_type"] is not None
+    ]
+    graded_pick_rows = [
+        row for row in pick_rows if row["settled_result"] in {"WIN", "LOSS", "PUSH"}
+    ]
     play_of_day_rows = [row for row in pick_rows if bool(row["is_play_of_day"])]
     forced_rows = [row for row in rows if row["forced_market_type"] is not None]
 
@@ -686,7 +782,9 @@ def build_live_season_summary(
     rl_probs: list[float] = []
     rl_outcomes: list[int] = []
     for row in settled_rows:
-        ml_outcome, rl_outcome = _actual_outcomes(row["actual_f5_home_score"], row["actual_f5_away_score"])
+        ml_outcome, rl_outcome = _actual_outcomes(
+            row["actual_f5_home_score"], row["actual_f5_away_score"]
+        )
         if ml_outcome is not None and row["f5_ml_home_prob"] is not None:
             ml_probs.append(float(row["f5_ml_home_prob"]))
             ml_outcomes.append(ml_outcome)
@@ -697,7 +795,9 @@ def build_live_season_summary(
     wins = sum(row["settled_result"] == "WIN" for row in graded_pick_rows)
     losses = sum(row["settled_result"] == "LOSS" for row in graded_pick_rows)
     pushes = sum(row["settled_result"] == "PUSH" for row in graded_pick_rows)
-    flat_profit_units = float(sum(float(row["flat_profit_loss"] or 0.0) for row in graded_pick_rows))
+    flat_profit_units = float(
+        sum(float(row["flat_profit_loss"] or 0.0) for row in graded_pick_rows)
+    )
     risked_bets = max(1, wins + losses + pushes) if graded_pick_rows else 0
     flat_roi = float(flat_profit_units / risked_bets) if risked_bets else None
     play_of_day_stats = _strategy_stats(
@@ -778,16 +878,24 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Track live MLB season paper slates and outcomes.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    capture_parser = subparsers.add_parser("capture", help="Run a dry slate and capture it as the official live-season snapshot.")
-    capture_parser.add_argument("--date", required=True, help="Target slate date in YYYY-MM-DD format.")
+    capture_parser = subparsers.add_parser(
+        "capture", help="Run a dry slate and capture it as the official live-season snapshot."
+    )
+    capture_parser.add_argument(
+        "--date", required=True, help="Target slate date in YYYY-MM-DD format."
+    )
     capture_parser.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
 
-    settle_parser = subparsers.add_parser("settle", help="Settle tracked live-season games using final scores already in the DB.")
+    settle_parser = subparsers.add_parser(
+        "settle", help="Settle tracked live-season games using final scores already in the DB."
+    )
     settle_parser.add_argument("--date", help="Optional YYYY-MM-DD slate date filter.")
     settle_parser.add_argument("--season", type=int, default=2026)
     settle_parser.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
 
-    report_parser = subparsers.add_parser("report", help="Emit a 2026 live-season summary JSON report.")
+    report_parser = subparsers.add_parser(
+        "report", help="Emit a 2026 live-season summary JSON report."
+    )
     report_parser.add_argument("--season", type=int, default=2026)
     report_parser.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
 
