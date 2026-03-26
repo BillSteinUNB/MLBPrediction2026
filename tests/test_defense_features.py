@@ -64,6 +64,21 @@ def _fake_team_logs_fetcher(team_logs: dict[tuple[int, str], pd.DataFrame]):
     return _fetcher
 
 
+def _defense_payload(rows: list[object]) -> list[tuple[int, str, int | None, str, float]]:
+    return sorted(
+        [
+            (
+                int(row.game_pk),
+                str(row.feature_name),
+                row.window_size,
+                row.as_of_timestamp.isoformat(),
+                round(float(row.feature_value), 8),
+            )
+            for row in rows
+        ]
+    )
+
+
 def test_compute_defense_features_excludes_current_game_applies_weights_and_adjusts_framing(
     tmp_path: Path,
 ) -> None:
@@ -507,3 +522,275 @@ def test_compute_defense_features_supports_current_team_log_schema(tmp_path: Pat
 
     assert by_name["home_team_defensive_efficiency_season"] != pytest.approx(0.700)
     assert by_name["away_team_defensive_efficiency_season"] != pytest.approx(0.700)
+
+
+def test_compute_defense_features_accepts_tz_aware_input_dates(tmp_path: Path) -> None:
+    from src.features.defense import compute_defense_features
+
+    db_path = tmp_path / "defense_tz.db"
+    init_db(db_path)
+    _seed_game(
+        db_path,
+        game_pk=806,
+        game_date="2025-04-04T20:05:00+00:00",
+        home_team="NYY",
+        away_team="BOS",
+    )
+
+    fielding_by_season = {
+        2025: pd.DataFrame(
+            [
+                {"game_date": pd.Timestamp("2025-04-01T00:00:00Z"), "team": "NYY", "position": "SS", "DRS": 2.0, "OAA": 1.0},
+                {"game_date": pd.Timestamp("2025-04-03T00:00:00Z"), "team": "BOS", "position": "SS", "DRS": 1.0, "OAA": 1.0},
+            ]
+        )
+    }
+    framing_by_season = {
+        2025: pd.DataFrame(
+            [
+                {"game_date": pd.Timestamp("2025-04-01T00:00:00Z"), "team": "NYY", "runs_extra_strikes": 1.0},
+                {"game_date": pd.Timestamp("2025-04-03T00:00:00Z"), "team": "BOS", "runs_extra_strikes": 1.0},
+            ]
+        )
+    }
+    team_logs = {
+        (2025, "NYY"): pd.DataFrame([{"Date": pd.Timestamp("2025-04-01T00:00:00Z"), "Opp": "BOS", "AB": 30, "H": 8, "HR": 1, "SO": 7, "SF": 1}]),
+        (2025, "BOS"): pd.DataFrame([{"Date": pd.Timestamp("2025-04-03T00:00:00Z"), "Opp": "NYY", "AB": 30, "H": 7, "HR": 0, "SO": 8, "SF": 1}]),
+    }
+
+    rows = compute_defense_features(
+        "2025-04-04",
+        db_path=db_path,
+        windows=(30,),
+        fielding_fetcher=_fake_fielding_fetcher(fielding_by_season),
+        framing_fetcher=_fake_framing_fetcher(framing_by_season),
+        team_logs_fetcher=_fake_team_logs_fetcher(team_logs),
+    )
+
+    assert rows
+
+
+def test_compute_defense_features_for_schedule_matches_day_by_day_results(
+    tmp_path: Path,
+) -> None:
+    from src.features.defense import (
+        compute_defense_features,
+        compute_defense_features_for_schedule,
+    )
+
+    schedule = pd.DataFrame(
+        [
+            {
+                "game_pk": 8801,
+                "game_date": "2025-04-03",
+                "home_team": "NYY",
+                "away_team": "BOS",
+                "is_abs_active": 1,
+            },
+            {
+                "game_pk": 8802,
+                "game_date": "2025-04-04",
+                "home_team": "BOS",
+                "away_team": "NYY",
+                "is_abs_active": 1,
+            },
+        ]
+    )
+
+    fielding_by_season = {
+        2025: pd.DataFrame(
+            [
+                {"game_date": "2025-04-01", "team": "NYY", "position": "SS", "DRS": 2.0, "OAA": 3.0},
+                {"game_date": "2025-04-02", "team": "NYY", "position": "C", "DRS": 1.0, "OAA": 2.0},
+                {"game_date": "2025-04-03", "team": "NYY", "position": "LF", "DRS": 4.0, "OAA": 1.0},
+                {"game_date": "2025-04-01", "team": "BOS", "position": "SS", "DRS": 1.0, "OAA": 1.0},
+                {"game_date": "2025-04-02", "team": "BOS", "position": "C", "DRS": 2.0, "OAA": 2.0},
+                {"game_date": "2025-04-03", "team": "BOS", "position": "LF", "DRS": 3.0, "OAA": 2.0},
+            ]
+        ),
+        2024: pd.DataFrame(
+            [
+                {"game_date": "2024-09-01", "team": "NYY", "position": "SS", "DRS": 6.0, "OAA": 5.0},
+                {"game_date": "2024-09-01", "team": "BOS", "position": "SS", "DRS": 4.0, "OAA": 3.0},
+            ]
+        ),
+    }
+    framing_by_season = {
+        2025: pd.DataFrame(
+            [
+                {"game_date": "2025-04-01", "team": "NYY", "runs_extra_strikes": 1.0},
+                {"game_date": "2025-04-02", "team": "NYY", "runs_extra_strikes": 2.0},
+                {"game_date": "2025-04-03", "team": "NYY", "runs_extra_strikes": 3.0},
+                {"game_date": "2025-04-01", "team": "BOS", "runs_extra_strikes": 1.0},
+                {"game_date": "2025-04-02", "team": "BOS", "runs_extra_strikes": 1.5},
+                {"game_date": "2025-04-03", "team": "BOS", "runs_extra_strikes": 2.0},
+            ]
+        ),
+        2024: pd.DataFrame(
+            [
+                {"game_date": "2024-09-01", "team": "NYY", "runs_extra_strikes": 2.0},
+                {"game_date": "2024-09-01", "team": "BOS", "runs_extra_strikes": 1.0},
+            ]
+        ),
+    }
+    team_logs = {
+        (2025, "NYY"): pd.DataFrame(
+            [
+                {"Date": "2025-04-01", "Opp": "BOS", "AB": 30, "H": 7, "HR": 1, "SO": 8, "SF": 1},
+                {"Date": "2025-04-02", "Opp": "BOS", "AB": 31, "H": 8, "HR": 1, "SO": 7, "SF": 1},
+                {"Date": "2025-04-03", "Opp": "BOS", "AB": 29, "H": 5, "HR": 0, "SO": 9, "SF": 1},
+            ]
+        ),
+        (2025, "BOS"): pd.DataFrame(
+            [
+                {"Date": "2025-04-01", "Opp": "NYY", "AB": 30, "H": 6, "HR": 1, "SO": 9, "SF": 1},
+                {"Date": "2025-04-02", "Opp": "NYY", "AB": 29, "H": 7, "HR": 0, "SO": 8, "SF": 1},
+                {"Date": "2025-04-03", "Opp": "NYY", "AB": 30, "H": 9, "HR": 1, "SO": 6, "SF": 1},
+            ]
+        ),
+        (2024, "NYY"): pd.DataFrame(
+            [{"Date": "2024-09-01", "Opp": "BOS", "AB": 30, "H": 7, "HR": 1, "SO": 8, "SF": 1}]
+        ),
+        (2024, "BOS"): pd.DataFrame(
+            [{"Date": "2024-09-01", "Opp": "NYY", "AB": 30, "H": 8, "HR": 1, "SO": 7, "SF": 1}]
+        ),
+    }
+
+    day_db_path = tmp_path / "defense_day.db"
+    bulk_db_path = tmp_path / "defense_bulk.db"
+    init_db(day_db_path)
+    init_db(bulk_db_path)
+    for row in schedule.to_dict(orient="records"):
+        _seed_game(
+            day_db_path,
+            game_pk=int(row["game_pk"]),
+            game_date=f"{row['game_date']}T20:05:00+00:00",
+            home_team=str(row["home_team"]),
+            away_team=str(row["away_team"]),
+            is_abs_active=int(row["is_abs_active"]),
+        )
+        _seed_game(
+            bulk_db_path,
+            game_pk=int(row["game_pk"]),
+            game_date=f"{row['game_date']}T20:05:00+00:00",
+            home_team=str(row["home_team"]),
+            away_team=str(row["away_team"]),
+            is_abs_active=int(row["is_abs_active"]),
+        )
+
+    expected_rows = []
+    for game_date in schedule["game_date"].tolist():
+        expected_rows.extend(
+            compute_defense_features(
+                game_date,
+                db_path=day_db_path,
+                fielding_fetcher=_fake_fielding_fetcher(fielding_by_season),
+                framing_fetcher=_fake_framing_fetcher(framing_by_season),
+                team_logs_fetcher=_fake_team_logs_fetcher(team_logs),
+            )
+        )
+
+    actual_rows = compute_defense_features_for_schedule(
+        schedule,
+        db_path=bulk_db_path,
+        fielding_fetcher=_fake_fielding_fetcher(fielding_by_season),
+        framing_fetcher=_fake_framing_fetcher(framing_by_season),
+        team_logs_fetcher=_fake_team_logs_fetcher(team_logs),
+    )
+
+    assert _defense_payload(actual_rows) == _defense_payload(expected_rows)
+
+
+def test_compute_defense_features_for_schedule_deduplicates_duplicate_game_rows(
+    tmp_path: Path,
+) -> None:
+    from src.features.defense import compute_defense_features_for_schedule
+
+    base_schedule = pd.DataFrame(
+        [
+            {
+                "game_pk": 9901,
+                "game_date": "2025-04-03",
+                "home_team": "NYY",
+                "away_team": "BOS",
+                "is_abs_active": 1,
+            }
+        ]
+    )
+    duplicate_schedule = pd.concat([base_schedule, base_schedule], ignore_index=True)
+
+    fielding_by_season = {
+        2025: pd.DataFrame(
+            [
+                {"game_date": "2025-04-01", "team": "NYY", "position": "SS", "DRS": 2.0, "OAA": 3.0},
+                {"game_date": "2025-04-01", "team": "BOS", "position": "SS", "DRS": 1.0, "OAA": 1.0},
+            ]
+        ),
+        2024: pd.DataFrame(
+            [
+                {"game_date": "2024-09-01", "team": "NYY", "position": "SS", "DRS": 6.0, "OAA": 5.0},
+                {"game_date": "2024-09-01", "team": "BOS", "position": "SS", "DRS": 4.0, "OAA": 3.0},
+            ]
+        ),
+    }
+    framing_by_season = {
+        2025: pd.DataFrame(
+            [
+                {"game_date": "2025-04-01", "team": "NYY", "runs_extra_strikes": 1.0},
+                {"game_date": "2025-04-01", "team": "BOS", "runs_extra_strikes": 1.0},
+            ]
+        ),
+        2024: pd.DataFrame(
+            [
+                {"game_date": "2024-09-01", "team": "NYY", "runs_extra_strikes": 2.0},
+                {"game_date": "2024-09-01", "team": "BOS", "runs_extra_strikes": 1.0},
+            ]
+        ),
+    }
+    team_logs = {
+        (2025, "NYY"): pd.DataFrame(
+            [{"Date": "2025-04-01", "Opp": "BOS", "AB": 30, "H": 7, "HR": 1, "SO": 8, "SF": 1}]
+        ),
+        (2025, "BOS"): pd.DataFrame(
+            [{"Date": "2025-04-01", "Opp": "NYY", "AB": 30, "H": 6, "HR": 1, "SO": 9, "SF": 1}]
+        ),
+        (2024, "NYY"): pd.DataFrame(
+            [{"Date": "2024-09-01", "Opp": "BOS", "AB": 30, "H": 7, "HR": 1, "SO": 8, "SF": 1}]
+        ),
+        (2024, "BOS"): pd.DataFrame(
+            [{"Date": "2024-09-01", "Opp": "NYY", "AB": 30, "H": 8, "HR": 1, "SO": 7, "SF": 1}]
+        ),
+    }
+
+    single_db_path = tmp_path / "defense_single.db"
+    duplicate_db_path = tmp_path / "defense_duplicate.db"
+    init_db(single_db_path)
+    init_db(duplicate_db_path)
+    for db_path in (single_db_path, duplicate_db_path):
+        _seed_game(
+            db_path,
+            game_pk=9901,
+            game_date="2025-04-03T20:05:00+00:00",
+            home_team="NYY",
+            away_team="BOS",
+            is_abs_active=1,
+        )
+
+    expected_rows = compute_defense_features_for_schedule(
+        base_schedule,
+        db_path=single_db_path,
+        windows=(30,),
+        fielding_fetcher=_fake_fielding_fetcher(fielding_by_season),
+        framing_fetcher=_fake_framing_fetcher(framing_by_season),
+        team_logs_fetcher=_fake_team_logs_fetcher(team_logs),
+    )
+    actual_rows = compute_defense_features_for_schedule(
+        duplicate_schedule,
+        db_path=duplicate_db_path,
+        windows=(30,),
+        fielding_fetcher=_fake_fielding_fetcher(fielding_by_season),
+        framing_fetcher=_fake_framing_fetcher(framing_by_season),
+        team_logs_fetcher=_fake_team_logs_fetcher(team_logs),
+    )
+
+    assert _defense_payload(actual_rows) == _defense_payload(expected_rows)

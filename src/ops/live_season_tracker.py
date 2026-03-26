@@ -22,7 +22,7 @@ from src.pipeline.daily import (
 
 UTC_TZ = timezone.utc
 _LOG_LOSS_EPSILON = 1e-15
-DEFAULT_PLAY_OF_DAY_MIN_EDGE = 0.05
+DEFAULT_PLAY_OF_DAY_MIN_EDGE = 0.06
 
 
 LIVE_SEASON_TRACKING_TABLE_SQL = """
@@ -389,7 +389,7 @@ def _play_of_day_score(decision: BetDecision | None) -> float | None:
         return None
     if float(decision.edge_pct) < DEFAULT_PLAY_OF_DAY_MIN_EDGE:
         return None
-    return float(decision.edge_pct) * float(decision.model_probability)
+    return float(decision.edge_pct)
 
 
 def _resolve_play_of_day_game_pks(games: Sequence[GameProcessingResult]) -> dict[int, float]:

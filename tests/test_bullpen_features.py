@@ -323,6 +323,98 @@ def test_compute_bullpen_features_returns_defaults_for_first_three_days(
     assert by_name["home_team_bullpen_high_leverage_available_count"] == 5.0
 
 
+def test_compute_bullpen_features_for_schedule_matches_day_by_day_results(
+    tmp_path: Path,
+) -> None:
+    from src.features.bullpen import (
+        compute_bullpen_features,
+        compute_bullpen_features_for_schedule,
+    )
+
+    metrics_fetcher = _fake_bullpen_metrics_fetcher(_bullpen_metrics_by_season())
+    schedule = pd.DataFrame(
+        [
+            {
+                "game_pk": 7001,
+                "game_date": "2025-04-10",
+                "scheduled_start": "2025-04-10T20:05:00+00:00",
+                "home_team": "NYY",
+                "away_team": "BOS",
+            },
+            {
+                "game_pk": 7002,
+                "game_date": "2025-04-11",
+                "scheduled_start": "2025-04-11T20:05:00+00:00",
+                "home_team": "BOS",
+                "away_team": "NYY",
+            },
+        ]
+    )
+
+    day_db_path = tmp_path / "bullpen_day.db"
+    bulk_db_path = tmp_path / "bullpen_bulk.db"
+    init_db(day_db_path)
+    init_db(bulk_db_path)
+    for row in schedule.to_dict(orient="records"):
+        _seed_game(
+            day_db_path,
+            game_pk=int(row["game_pk"]),
+            game_date=str(row["scheduled_start"]),
+            home_team=str(row["home_team"]),
+            away_team=str(row["away_team"]),
+        )
+        _seed_game(
+            bulk_db_path,
+            game_pk=int(row["game_pk"]),
+            game_date=str(row["scheduled_start"]),
+            home_team=str(row["home_team"]),
+            away_team=str(row["away_team"]),
+        )
+
+    expected_rows = []
+    for game_date in schedule["game_date"].tolist():
+        expected_rows.extend(
+            compute_bullpen_features(
+                game_date,
+                db_path=day_db_path,
+                bullpen_metrics_fetcher=metrics_fetcher,
+            )
+        )
+
+    actual_rows = compute_bullpen_features_for_schedule(
+        schedule,
+        db_path=bulk_db_path,
+        bullpen_metrics_fetcher=metrics_fetcher,
+    )
+
+    expected_payload = sorted(
+        [
+            (
+                row.game_pk,
+                row.feature_name,
+                row.window_size,
+                row.as_of_timestamp.isoformat(),
+                round(float(row.feature_value), 8),
+            )
+            for row in expected_rows
+        ]
+    )
+    actual_payload = sorted(
+        [
+            (
+                row.game_pk,
+                row.feature_name,
+                row.window_size,
+                row.as_of_timestamp.isoformat(),
+                round(float(row.feature_value), 8),
+            )
+            for row in actual_rows
+        ]
+    )
+
+    assert actual_payload == expected_payload
+
+
 def test_fetch_season_bullpen_metrics_reuses_persisted_cache(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

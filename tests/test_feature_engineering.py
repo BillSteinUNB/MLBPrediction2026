@@ -132,3 +132,28 @@ def test_feature_engineering_disables_abs_adjustments_for_exception_venue() -> N
     assert schedule_adjustments["abs_active"] == pytest.approx(0.0)
     assert schedule_adjustments["abs_walk_rate_delta"] == pytest.approx(0.0)
     assert schedule_adjustments["abs_strikeout_rate_delta"] == pytest.approx(0.0)
+
+
+def test_prepare_schedule_frame_deduplicates_game_pk_rows() -> None:
+    schedule = pd.DataFrame(
+        [
+            _schedule_row(
+                5301,
+                "2025-04-10T18:05:00Z",
+                "NYY",
+                "BOS",
+                "Yankee Stadium",
+            ),
+            _schedule_row(
+                5301,
+                "2025-04-10T18:05:00Z",
+                "NYY",
+                "BOS",
+                "Yankee Stadium",
+            ),
+        ]
+    )
+
+    prepared = _prepare_schedule_frame(schedule, require_final_scores=False)
+
+    assert prepared["game_pk"].tolist() == [5301]

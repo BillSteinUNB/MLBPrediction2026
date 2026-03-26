@@ -63,15 +63,19 @@ def compute_umpire_features(
     games = _load_games_for_date(database_path, target_day)
     if games.empty:
         return []
+    target_day_ts = pd.Timestamp(target_day)
 
     umpire_assignments = _load_umpire_assignments(target_day=target_day, refresh=refresh, umpire_fetcher=umpire_fetcher)
     if umpire_assignments.empty:
         return _persist_defaults(database_path, games, target_day, windows)
 
     current_assignments = umpire_assignments.loc[
-        umpire_assignments["game_date"] == target_day
+        umpire_assignments["game_date"] == target_day_ts
     ].copy()
     current_assignments = current_assignments.rename(columns={"plate_umpire": "current_plate_umpire"})
+
+    games["game_date"] = _to_tz_naive_datetime_series(games["game_date"])
+    current_assignments["game_date"] = _to_tz_naive_datetime_series(current_assignments["game_date"])
 
     games = games.merge(
         current_assignments[["game_date", "home_team", "away_team", "current_plate_umpire"]],
@@ -84,6 +88,8 @@ def compute_umpire_features(
     if prior_games.empty:
         return _persist_defaults(database_path, games, target_day, windows)
 
+    prior_games["game_date"] = _to_tz_naive_datetime_series(prior_games["game_date"])
+    umpire_assignments["game_date"] = _to_tz_naive_datetime_series(umpire_assignments["game_date"])
     prior_umpire_games = prior_games.merge(
         umpire_assignments[["game_date", "home_team", "away_team", "plate_umpire"]],
         how="inner",
@@ -182,7 +188,7 @@ def _load_games_for_date(db_path: Path, target_day: date) -> pd.DataFrame:
             params=(target_day.isoformat(),),
         )
     if not games.empty:
-        games["game_date"] = pd.to_datetime(games["game_date"], errors="coerce").dt.date
+        games["game_date"] = _to_tz_naive_datetime_series(games["game_date"]).dt.normalize()
     return games
 
 
@@ -218,7 +224,7 @@ def _load_prior_games(db_path: Path, target_day: date) -> pd.DataFrame:
     games["home_win"] = (
         games["final_home_score"].fillna(-1) > games["final_away_score"].fillna(-1)
     ).astype(float)
-    games["game_date"] = pd.to_datetime(games["game_date"], errors="coerce").dt.date
+    games["game_date"] = _to_tz_naive_datetime_series(games["game_date"]).dt.normalize()
     return games.dropna(subset=["game_date"]).reset_index(drop=True)
 
 
@@ -263,8 +269,14 @@ def _load_umpire_assignments(
 
 
 def _normalize_dates(values: pd.Series) -> pd.Series:
+    return _to_tz_naive_datetime_series(values).dt.normalize()
+
+
+def _to_tz_naive_datetime_series(values: pd.Series) -> pd.Series:
     parsed = pd.to_datetime(values, errors="coerce", format="mixed")
-    return parsed.dt.date
+    if getattr(parsed.dt, "tz", None) is not None:
+        return parsed.dt.tz_convert(None)
+    return parsed
 
 
 def _normalize_team_code(value: object) -> str | None:

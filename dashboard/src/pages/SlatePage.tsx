@@ -108,6 +108,22 @@ const statusBoxStyle: React.CSSProperties = {
   background: "var(--bg-elevated)",
 };
 
+const collapsibleStyle: React.CSSProperties = {
+  border: "1px solid var(--border)",
+  borderRadius: 10,
+  padding: 10,
+  background: "var(--bg-elevated)",
+};
+
+const collapsibleSummaryStyle: React.CSSProperties = {
+  cursor: "pointer",
+  listStyle: "none",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
+};
+
 const decisionBoxStyle: React.CSSProperties = {
   borderRadius: 14,
   padding: "20px 20px 20px 24px",
@@ -191,17 +207,6 @@ function fmtRuns(value: number | null | undefined): string {
   return value.toFixed(2);
 }
 
-function formatBookLabel(value: string | null | undefined): string {
-  if (!value) return "—";
-  if (value.startsWith("estimate:full-game:")) {
-    return `Estimate via ${value.replace("estimate:full-game:", "")}`;
-  }
-  if (value.startsWith("sbr:")) {
-    return `SBR ${value.replace("sbr:", "")}`;
-  }
-  return value;
-}
-
 function fairAmericanOdds(probability: number | null | undefined): string {
   if (
     probability === null ||
@@ -232,8 +237,11 @@ function teamNameForSide(game: SlateGame, side: "home" | "away"): string {
   return side === "home" ? teams.homeTeam : teams.awayTeam;
 }
 
-function projectedSpreadLabel(game: SlateGame): string {
-  const margin = game.prediction?.projected_f5_home_margin;
+function projectedSpreadLabel(game: SlateGame, scope: "f5" | "full" = "f5"): string {
+  const margin =
+    scope === "f5"
+      ? game.prediction?.projected_f5_home_margin
+      : game.prediction?.projected_full_game_home_margin;
   if (margin === null || margin === undefined || Number.isNaN(margin) || Math.abs(margin) < 0.01) {
     return "Pick'em";
   }
@@ -241,6 +249,17 @@ function projectedSpreadLabel(game: SlateGame): string {
     return `${teamNameForSide(game, "home")} ${fmtPoint(-margin)}`;
   }
   return `${teamNameForSide(game, "away")} ${fmtPoint(margin)}`;
+}
+
+function marketLineLabel(
+  game: SlateGame,
+  side: "home" | "away",
+  point: number | null | undefined,
+): string {
+  if (point === null || point === undefined || Number.isNaN(point)) {
+    return teamNameForSide(game, side);
+  }
+  return `${teamNameForSide(game, side)} ${fmtPoint(point)}`;
 }
 
 function marketLabel(marketType: string): string {
@@ -260,6 +279,52 @@ function sourceModelLabel(value: string | null | undefined): string {
   return value;
 }
 void sourceModelLabel;
+
+function bet365DecisionOddsLabel(game: SlateGame): string | null {
+  const decision = game.selected_decision;
+  const input = game.input_status;
+  if (!decision || !input) return null;
+  if (decision.market_type === "f5_ml") {
+    const odds =
+      decision.side === "home" ? input.bet365_f5_ml_home_odds : input.bet365_f5_ml_away_odds;
+    return odds !== null && odds !== undefined ? fmtOdds(odds) : null;
+  }
+  if (decision.market_type === "f5_rl") {
+    const point =
+      decision.side === "home" ? input.bet365_f5_rl_home_point : input.bet365_f5_rl_away_point;
+    const odds =
+      decision.side === "home" ? input.bet365_f5_rl_home_odds : input.bet365_f5_rl_away_odds;
+    if (odds === null || odds === undefined) return null;
+    return `${marketLineLabel(game, decision.side as "home" | "away", point)} ${fmtOdds(odds)}`;
+  }
+  return null;
+}
+
+function consensusDecisionOddsLabel(game: SlateGame): string | null {
+  const decision = game.selected_decision;
+  const input = game.input_status;
+  if (!decision || !input) return null;
+  if (decision.market_type === "f5_ml") {
+    const odds =
+      decision.side === "home"
+        ? input.consensus_f5_ml_home_odds
+        : input.consensus_f5_ml_away_odds;
+    return odds !== null && odds !== undefined ? fmtOdds(odds) : null;
+  }
+  if (decision.market_type === "f5_rl") {
+    const point =
+      decision.side === "home"
+        ? input.consensus_f5_rl_home_point
+        : input.consensus_f5_rl_away_point;
+    const odds =
+      decision.side === "home"
+        ? input.consensus_f5_rl_home_odds
+        : input.consensus_f5_rl_away_odds;
+    if (odds === null || odds === undefined) return null;
+    return `${marketLineLabel(game, decision.side as "home" | "away", point)} ${fmtOdds(odds)}`;
+  }
+  return null;
+}
 
 function statusBadge(label: string, tone: "neutral" | "good" | "warn" | "bad"): React.ReactElement {
   const palette = {
@@ -301,13 +366,16 @@ function recommendedSide(game: SlateGame, market: "ml" | "rl"): { side: string; 
     : { side: "away", probability: game.prediction.f5_rl_away_prob };
 }
 
-function GameCard({ game }: { game: SlateGame }) {
+function GameCard({ game, isPlayOfDay }: { game: SlateGame; isPlayOfDay: boolean }) {
   const mlLean = recommendedSide(game, "ml");
   const rlLean = recommendedSide(game, "rl");
   const decision = game.selected_decision;
   const forcedDecision = game.forced_decision;
   const input = game.input_status;
+  const valuePlay = (decision?.edge_pct ?? 0) >= 0.06;
   const estimatedDecision = Boolean(decision?.book_name?.startsWith("estimate:"));
+  const bet365DecisionView = bet365DecisionOddsLabel(game);
+  const consensusDecisionView = consensusDecisionOddsLabel(game);
   const recommendedTeam =
     decision?.side === "home" || decision?.side === "away"
       ? teamNameForSide(game, decision.side)
@@ -335,6 +403,8 @@ function GameCard({ game }: { game: SlateGame }) {
           {game.status === "pick" && statusBadge("Pick", "good")}
           {game.status === "no_pick" && statusBadge("No pick", "warn")}
           {game.status === "error" && statusBadge("Error", "bad")}
+          {isPlayOfDay && statusBadge("Play of Day", "good")}
+          {valuePlay && statusBadge("Value Play", "good")}
           {game.paper_fallback && statusBadge("Paper fallback", "neutral")}
           {estimatedDecision && statusBadge("Estimated market", "warn")}
         </div>
@@ -487,6 +557,21 @@ function GameCard({ game }: { game: SlateGame }) {
                 {" "}&ndash;{" "}
                 {fmtRuns(game.prediction.projected_f5_home_runs)} {teamNameForSide(game, "home")}
               </span>
+            </div>
+          ) : null}
+
+          {bet365DecisionView || consensusDecisionView ? (
+            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 4 }}>
+              {bet365DecisionView ? (
+                <div style={{ fontSize: 12, color: "rgba(243,246,251,0.75)" }}>
+                  bet365: {bet365DecisionView}
+                </div>
+              ) : null}
+              {consensusDecisionView ? (
+                <div style={{ fontSize: 12, color: "rgba(243,246,251,0.55)" }}>
+                  Market avg: {consensusDecisionView}
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -649,68 +734,108 @@ function GameCard({ game }: { game: SlateGame }) {
         </div>
       </div>
 
-      <div style={statBlockStyle}>
-        <TooltipLabel
-          label="Model Read"
-          as="div"
-          style={{ fontSize: 12, color: "var(--text)", fontWeight: 700, textTransform: "uppercase" }}
-        />
-        <div style={{ marginTop: 8, fontSize: 14, color: "var(--text-h)" }}>
-          Estimated F5 score: {teamNameForSide(game, "away")} {fmtRuns(game.prediction?.projected_f5_away_runs)} - {teamNameForSide(game, "home")} {fmtRuns(game.prediction?.projected_f5_home_runs)}
+      <details style={collapsibleStyle}>
+        <summary style={collapsibleSummaryStyle}>
+          <TooltipLabel
+            label="Model Read"
+            as="span"
+            style={{ fontSize: 12, color: "var(--text)", fontWeight: 700, textTransform: "uppercase" }}
+          />
+          <span style={mutedStyle}>Click to expand</span>
+        </summary>
+        <div style={{ marginTop: 10, fontSize: 14, color: "var(--text-h)" }}>
+          F5 score: {teamNameForSide(game, "away")} {fmtRuns(game.prediction?.projected_f5_away_runs)} - {fmtRuns(game.prediction?.projected_f5_home_runs)} {teamNameForSide(game, "home")}
         </div>
         <div style={{ ...mutedStyle, marginTop: 6 }}>
-          Projected F5 total: {fmtRuns(game.prediction?.projected_f5_total_runs)}
+          F5 total: {fmtRuns(game.prediction?.projected_f5_total_runs)}
         </div>
         <div style={mutedStyle}>
-          Projected F5 spread: {projectedSpreadLabel(game)}
+          F5 spread: {projectedSpreadLabel(game, "f5")}
         </div>
-      </div>
+        <div style={{ marginTop: 10, fontSize: 14, color: "var(--text-h)" }}>
+          Full game score: {teamNameForSide(game, "away")} {fmtRuns(game.prediction?.projected_full_game_away_runs)} - {fmtRuns(game.prediction?.projected_full_game_home_runs)} {teamNameForSide(game, "home")}
+        </div>
+        <div style={{ ...mutedStyle, marginTop: 6 }}>
+          Full game total: {fmtRuns(game.prediction?.projected_full_game_total_runs)}
+        </div>
+        <div style={mutedStyle}>
+          Full game spread: {projectedSpreadLabel(game, "full")}
+        </div>
+        <div style={mutedStyle}>
+          Full game ML lean: {game.prediction?.full_game_ml_home_prob !== null && game.prediction?.full_game_ml_home_prob !== undefined && game.prediction?.full_game_ml_away_prob !== null && game.prediction?.full_game_ml_away_prob !== undefined
+            ? game.prediction.full_game_ml_home_prob >= game.prediction.full_game_ml_away_prob
+              ? `${teamNameForSide(game, "home")} (${fmtPct(game.prediction.full_game_ml_home_prob)})`
+              : `${teamNameForSide(game, "away")} (${fmtPct(game.prediction.full_game_ml_away_prob)})`
+            : "—"}
+        </div>
+      </details>
 
-      <div style={statBlockStyle}>
-        <TooltipLabel
-          label="Full Game Market"
-          as="div"
-          style={{ fontSize: 12, color: "var(--text)", fontWeight: 700, textTransform: "uppercase" }}
-        />
-        <div style={{ marginTop: 8, fontSize: 14, color: "var(--text-h)" }}>
-          Home ML {fmtOdds(input?.full_game_home_ml)} {input?.full_game_home_ml_book ? `(${input.full_game_home_ml_book})` : ""}
+      <details style={collapsibleStyle}>
+        <summary style={collapsibleSummaryStyle}>
+          <TooltipLabel
+            label="Full Game Market"
+            as="span"
+            style={{ fontSize: 12, color: "var(--text)", fontWeight: 700, textTransform: "uppercase" }}
+          />
+          <span style={mutedStyle}>Click to expand</span>
+        </summary>
+        <div style={{ marginTop: 10, fontSize: 14, color: "var(--text-h)" }}>
+          bet365 Home ML {fmtOdds(input?.bet365_full_game_home_ml)}
         </div>
         <div style={{ fontSize: 14, color: "var(--text-h)" }}>
-          Away ML {fmtOdds(input?.full_game_away_ml)} {input?.full_game_away_ml_book ? `(${input.full_game_away_ml_book})` : ""}
+          bet365 Away ML {fmtOdds(input?.bet365_full_game_away_ml)}
         </div>
         <div style={{ ...mutedStyle, marginTop: 8 }}>
-          Home RL {input?.full_game_home_spread ?? "—"} ({fmtOdds(input?.full_game_home_spread_odds)}) {input?.full_game_home_spread_book ? `• ${input.full_game_home_spread_book}` : ""}
+          bet365 Home RL {fmtPoint(input?.bet365_full_game_home_spread)} ({fmtOdds(input?.bet365_full_game_home_spread_odds)})
         </div>
         <div style={mutedStyle}>
-          Away RL {input?.full_game_away_spread ?? "—"} ({fmtOdds(input?.full_game_away_spread_odds)}) {input?.full_game_away_spread_book ? `• ${input.full_game_away_spread_book}` : ""}
+          bet365 Away RL {fmtPoint(input?.bet365_full_game_away_spread)} ({fmtOdds(input?.bet365_full_game_away_spread_odds)})
         </div>
-      </div>
+        <div style={{ ...mutedStyle, marginTop: 8 }}>
+          Market avg Home ML {fmtOdds(input?.consensus_full_game_home_ml)}
+        </div>
+        <div style={mutedStyle}>
+          Market avg Away ML {fmtOdds(input?.consensus_full_game_away_ml)}
+        </div>
+        <div style={{ ...mutedStyle, marginTop: 8 }}>
+          Market avg Home RL {fmtPoint(input?.consensus_full_game_home_spread)} ({fmtOdds(input?.consensus_full_game_home_spread_odds)})
+        </div>
+        <div style={mutedStyle}>
+          Market avg Away RL {fmtPoint(input?.consensus_full_game_away_spread)} ({fmtOdds(input?.consensus_full_game_away_spread_odds)})
+        </div>
+      </details>
 
-      <div style={statusBoxStyle}>
-        <TooltipLabel
-          label="Inputs"
-          as="div"
-          style={{ fontSize: 12, color: "var(--text)", fontWeight: 700, textTransform: "uppercase" }}
-        />
-        <div style={{ marginTop: 8, ...mutedStyle }}>
+      <details style={statusBoxStyle}>
+        <summary style={collapsibleSummaryStyle}>
+          <TooltipLabel
+            label="Inputs"
+            as="span"
+            style={{ fontSize: 12, color: "var(--text)", fontWeight: 700, textTransform: "uppercase" }}
+          />
+          <span style={mutedStyle}>Click to expand</span>
+        </summary>
+        <div style={{ marginTop: 10, ...mutedStyle }}>
           Away lineup: {input?.away_lineup_available ? "available" : "missing"} • {input?.away_lineup_source ?? "—"} • {input?.away_lineup_confirmed ? "confirmed" : "projected/schedule"}
         </div>
         <div style={mutedStyle}>
           Home lineup: {input?.home_lineup_available ? "available" : "missing"} • {input?.home_lineup_source ?? "—"} • {input?.home_lineup_confirmed ? "confirmed" : "projected/schedule"}
         </div>
         <div style={mutedStyle}>
-          F5 odds: {input?.odds_available ? `available (${(input?.odds_books ?? []).map((book) => formatBookLabel(book)).join(", ") || "book(s)"})` : "missing"}
+          F5 ML: bet365 {fmtOdds(input?.bet365_f5_ml_home_odds)} / {fmtOdds(input?.bet365_f5_ml_away_odds)} • avg {fmtOdds(input?.consensus_f5_ml_home_odds)} / {fmtOdds(input?.consensus_f5_ml_away_odds)}
+        </div>
+        <div style={mutedStyle}>
+          F5 RL: bet365 {fmtPoint(input?.bet365_f5_rl_home_point)} ({fmtOdds(input?.bet365_f5_rl_home_odds)}) / {fmtPoint(input?.bet365_f5_rl_away_point)} ({fmtOdds(input?.bet365_f5_rl_away_odds)}) • avg {fmtPoint(input?.consensus_f5_rl_home_point)} ({fmtOdds(input?.consensus_f5_rl_home_odds)}) / {fmtPoint(input?.consensus_f5_rl_away_point)} ({fmtOdds(input?.consensus_f5_rl_away_odds)})
         </div>
         <div style={mutedStyle}>
           F5 source: {input?.odds_available ? `${(input?.f5_odds_sources ?? []).join(", ") || "—"}${input?.f5_odds_estimated ? " • preview estimate" : ""}` : "missing"}
         </div>
         <div style={mutedStyle}>
-          Full-game odds: {input?.full_game_odds_available ? `available (${input?.full_game_odds_books.join(", ") || "book(s)"})` : "missing"}
+          Books tracked: {input?.odds_available ? `${(input?.odds_books ?? []).length} F5 • ${(input?.full_game_odds_books ?? []).length} full-game` : "missing"}
         </div>
         <div style={mutedStyle}>
           Weather: {input?.weather_available ? "available" : "missing"}
         </div>
-      </div>
+      </details>
     </article>
   );
 }
@@ -760,6 +885,22 @@ const SlatePage: React.FC = () => {
         game.input_status?.home_lineup_confirmed || game.input_status?.away_lineup_confirmed
     ).length;
     return { games: games.length, picks, projectedLineups, confirmedLineups };
+  }, [data]);
+
+  const playOfDayGamePk = useMemo(() => {
+    const ranked = (data?.games ?? [])
+      .filter((game) => game.selected_decision)
+      .map((game) => ({
+        gamePk: game.game_pk,
+        edgePct: game.selected_decision?.edge_pct ?? 0,
+        modelProbability: game.selected_decision?.model_probability ?? 0,
+      }))
+      .filter((game) => game.edgePct >= 0.06)
+      .sort((left, right) => {
+        if (right.edgePct !== left.edgePct) return right.edgePct - left.edgePct;
+        return right.modelProbability - left.modelProbability;
+      });
+    return ranked[0]?.gamePk ?? null;
   }, [data]);
 
   return (
@@ -818,7 +959,11 @@ const SlatePage: React.FC = () => {
       {!loading && !error && data && data.games.length > 0 ? (
         <div style={gamesGridStyle}>
           {data.games.map((game) => (
-            <GameCard key={`${game.game_pk}-${game.matchup}`} game={game} />
+            <GameCard
+              key={`${game.game_pk}-${game.matchup}`}
+              game={game}
+              isPlayOfDay={playOfDayGamePk === game.game_pk}
+            />
           ))}
         </div>
       ) : null}

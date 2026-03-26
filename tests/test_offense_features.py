@@ -605,6 +605,60 @@ def test_compute_offensive_features_falls_back_to_actual_woba_when_team_xwoba_is
     assert by_name["home_team_barrel_pct_2g"] == pytest.approx(7.0)
 
 
+def test_compute_game_level_metrics_prefers_game_pk_alignment_for_team_xwoba() -> None:
+    from src.features.offense import _compute_game_level_metrics
+
+    raw_logs = pd.DataFrame(
+        {
+            "game_pk": [9002, 9001],
+            "Date": ["2025-04-02", "2025-04-01"],
+            "AB": [32, 30],
+            "H": [8, 10],
+            "2B": [1, 2],
+            "3B": [0, 0],
+            "HR": [1, 1],
+            "BB": [2, 3],
+            "SO": [7, 6],
+            "HBP": [1, 1],
+            "SF": [1, 1],
+        }
+    )
+    statcast_metrics = _season_statcast_xwoba()[2025].loc[
+        lambda df: df["team"].eq("NYY")
+    ].copy()
+
+    result = _compute_game_level_metrics(raw_logs, statcast_metrics=statcast_metrics)
+
+    assert result["game_pk"].tolist() == [9001, 9002]
+    assert result["xwoba"].iloc[0] == pytest.approx(((0.39 * 4) + (0.27 * 5)) / 9)
+    assert result["xwoba"].iloc[1] == pytest.approx(((0.34 * 4) + (0.32 * 4)) / 8)
+    assert result["woba_minus_xwoba"].abs().gt(0).all()
+
+
+def test_normalize_statcast_offense_metrics_strips_timezone_from_game_dates() -> None:
+    from src.features.offense import _normalize_statcast_offense_metrics
+
+    normalized = _normalize_statcast_offense_metrics(
+        pd.DataFrame(
+            [
+                {
+                    "game_pk": 9001,
+                    "game_date": "2025-04-01T00:00:00+00:00",
+                    "team": "NYY",
+                    "player_id": 101,
+                    "pa": 4,
+                    "xwoba": 0.350,
+                    "bbe": 2,
+                    "barrel_pct": 12.5,
+                }
+            ]
+        )
+    )
+
+    assert normalized["game_date"].dt.tz is None
+    assert normalized["game_date"].dt.strftime("%Y-%m-%d").tolist() == ["2025-04-01"]
+
+
 def test_build_statcast_offense_metrics_derives_batting_team_and_barrel_pct() -> None:
     from src.features.offense import _build_statcast_offense_metrics
 

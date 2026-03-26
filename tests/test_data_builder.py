@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -32,6 +32,7 @@ from src.features.offense import compute_offensive_features
 from src.features.pitching import compute_pitching_features
 from src.model.data_builder import (
     _compute_team_batting_splits,
+    _precompute_team_batting_splits_for_all_dates,
     _derive_matchup_interaction_features,
     _feature_rows_to_frame,
     _fill_missing_feature_values,
@@ -706,6 +707,8 @@ def test_build_training_dataset_integrates_real_feature_modules_and_matches_infe
     assert "home_team_drs_season" in dataset.columns
     assert "home_team_bullpen_xfip" in dataset.columns
     assert "home_team_log5_30g" in dataset.columns
+    assert "home_team_runs_scored_7g" in dataset.columns
+    assert "away_team_runs_allowed_14g" in dataset.columns
     assert "home_offense_runs_scored_7g" not in dataset.columns
     assert "home_starter_xfip_prior" not in dataset.columns
     assert "home_team_wrc_plus_prior" not in dataset.columns
@@ -1145,7 +1148,7 @@ def test_build_training_dataset_skips_roster_turnover_without_lineup_history(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured: dict[str, dict[str, float] | None] = {}
+    captured: dict[str, object | None] = {}
 
     def capture_turnover(name: str):
         def _capture(*_args, **kwargs):
@@ -1154,11 +1157,17 @@ def test_build_training_dataset_skips_roster_turnover_without_lineup_history(
 
         return _capture
 
+    def capture_defense_bulk(*_args, **kwargs):
+        captured["defense"] = kwargs.get("roster_turnover_lookup")
+        return []
+
     monkeypatch.setattr("src.model.data_builder.compute_offensive_features", capture_turnover("offense"))
     monkeypatch.setattr("src.model.data_builder.compute_pitching_features", capture_turnover("pitching"))
     monkeypatch.setattr("src.model.data_builder.compute_defense_features", capture_turnover("defense"))
+    monkeypatch.setattr("src.model.data_builder.compute_defense_features_for_schedule", capture_defense_bulk)
     monkeypatch.setattr("src.model.data_builder.compute_bullpen_features", lambda *_args, **_kwargs: [])
     monkeypatch.setattr("src.model.data_builder.compute_baseline_features", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr("src.model.data_builder.compute_baseline_features_for_schedule", lambda *_args, **_kwargs: [])
 
     schedule = pd.DataFrame(
         [
@@ -1249,8 +1258,10 @@ def test_build_training_dataset_uses_retrosheet_lineup_ids_when_no_history_is_pr
     monkeypatch.setattr("src.model.data_builder.compute_offensive_features", _capture_offense)
     monkeypatch.setattr("src.model.data_builder.compute_pitching_features", lambda *_args, **_kwargs: [])
     monkeypatch.setattr("src.model.data_builder.compute_defense_features", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr("src.model.data_builder.compute_defense_features_for_schedule", lambda *_args, **_kwargs: [])
     monkeypatch.setattr("src.model.data_builder.compute_bullpen_features", lambda *_args, **_kwargs: [])
     monkeypatch.setattr("src.model.data_builder.compute_baseline_features", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr("src.model.data_builder.compute_baseline_features_for_schedule", lambda *_args, **_kwargs: [])
 
     retrosheet_lineups = pd.DataFrame(
         [
@@ -1647,6 +1658,78 @@ def test_compute_team_batting_splits_falls_back_to_event_woba_when_xwoba_missing
     assert splits["TB"]["vs_RHP"] == pytest.approx(LEAGUE_WOBA_BASELINE)
 
 
+def test_filter_frame_to_end_date_handles_mixed_timezone_game_dates() -> None:
+    from src.model.data_builder import _filter_frame_to_end_date
+
+    filtered = _filter_frame_to_end_date(
+        pd.DataFrame(
+            {
+                "game_date": [
+                    "2025-04-01",
+                    "2025-04-02T00:00:00+00:00",
+                    "2025-04-03T00:00:00+00:00",
+                ],
+                "value": [1, 2, 3],
+            }
+        ),
+        datetime(2025, 4, 2).date(),
+    )
+
+    assert filtered["value"].tolist() == [1, 2]
+
+
+def test_bulk_batting_splits_match_per_day() -> None:
+    rows: list[dict[str, object]] = []
+    start_day = datetime(2025, 4, 1).date()
+    game_pk = 20_000
+    for day_offset in range(60):
+        game_day = start_day + timedelta(days=day_offset)
+        for at_bat_number in range(1, 9):
+            rows.append(
+                {
+                    "game_pk": game_pk,
+                    "game_date": game_day.isoformat(),
+                    "at_bat_number": at_bat_number,
+                    "pitch_number": 1,
+                    "inning_topbot": "Top",
+                    "away_team": "NYY",
+                    "home_team": "BOS",
+                    "p_throws": "L" if at_bat_number <= 4 else "R",
+                    "events": "single",
+                    "estimated_woba_using_speedangle": 0.300 + (day_offset * 0.001) + (at_bat_number * 0.002),
+                }
+            )
+        for at_bat_number in range(9, 17):
+            rows.append(
+                {
+                    "game_pk": game_pk,
+                    "game_date": game_day.isoformat(),
+                    "at_bat_number": at_bat_number,
+                    "pitch_number": 1,
+                    "inning_topbot": "Bot",
+                    "away_team": "NYY",
+                    "home_team": "BOS",
+                    "p_throws": "L" if at_bat_number <= 12 else "R",
+                    "events": "single",
+                    "estimated_woba_using_speedangle": 0.280 + (day_offset * 0.0015) + (at_bat_number * 0.001),
+                }
+            )
+        game_pk += 1
+
+    frame = pd.DataFrame(rows)
+    target_days = [start_day + timedelta(days=offset) for offset in range(60)]
+    bulk_lookup = _precompute_team_batting_splits_for_all_dates(frame, target_days)
+
+    assert set(bulk_lookup.keys()) == set(target_days)
+    for target_day in target_days:
+        expected = _compute_team_batting_splits(frame, target_day)
+        actual = bulk_lookup[target_day]
+        assert actual.keys() == expected.keys()
+        for team, expected_splits in expected.items():
+            assert actual[team]["vs_LHP"] == pytest.approx(expected_splits["vs_LHP"], abs=1e-9)
+            assert actual[team]["vs_RHP"] == pytest.approx(expected_splits["vs_RHP"], abs=1e-9)
+
+
 def test_build_live_feature_frame_uses_official_game_date_not_utc_rollover(
     tmp_path: Path,
 ) -> None:
@@ -1695,7 +1778,7 @@ def test_build_live_feature_frame_threads_roster_turnover_into_live_feature_modu
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured: dict[str, dict[str, float] | None] = {}
+    captured: dict[str, object | None] = {}
 
     def capture_turnover(name: str):
         def _capture(*_args, **kwargs):
@@ -1704,11 +1787,17 @@ def test_build_live_feature_frame_threads_roster_turnover_into_live_feature_modu
 
         return _capture
 
+    def capture_defense_bulk(*_args, **kwargs):
+        captured["defense"] = kwargs.get("roster_turnover_lookup")
+        return []
+
     monkeypatch.setattr("src.model.data_builder.compute_offensive_features", capture_turnover("offense"))
     monkeypatch.setattr("src.model.data_builder.compute_pitching_features", capture_turnover("pitching"))
     monkeypatch.setattr("src.model.data_builder.compute_defense_features", capture_turnover("defense"))
+    monkeypatch.setattr("src.model.data_builder.compute_defense_features_for_schedule", capture_defense_bulk)
     monkeypatch.setattr("src.model.data_builder.compute_bullpen_features", lambda *_args, **_kwargs: [])
     monkeypatch.setattr("src.model.data_builder.compute_baseline_features", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr("src.model.data_builder.compute_baseline_features_for_schedule", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(
         "src.model.data_builder.fetch_statcast_range",
         lambda *_args, **_kwargs: _fake_team_batting_split_statcast_frame(),
@@ -1822,7 +1911,8 @@ def test_build_live_feature_frame_threads_roster_turnover_into_live_feature_modu
     assert captured["offense"]["NYY"] == pytest.approx(1.0)
     assert captured["offense"]["BOS"] == pytest.approx(0.0)
     assert captured["pitching"] == captured["offense"]
-    assert captured["defense"] == captured["offense"]
+    assert captured["defense"][("2025-04-10", "NYY")] == pytest.approx(1.0)
+    assert captured["defense"][("2025-04-10", "BOS")] == pytest.approx(0.0)
     assert frame.iloc[0]["home_lineup_lhb_pct"] == pytest.approx(5 / 9)
     assert frame.iloc[0]["home_lineup_known_bats_pct"] == pytest.approx(1.0)
     assert frame.iloc[0]["home_lineup_platoon_advantage_pct"] == pytest.approx(4 / 9)
@@ -1893,6 +1983,8 @@ def test_fill_missing_feature_values_uses_module_defaults_instead_of_dataset_mea
                 "home_team_bullpen_xfip": pd.NA,
                 "home_team_pythagorean_wp_30g": pd.NA,
                 "away_team_log5_30g": pd.NA,
+                "home_team_runs_scored_7g": pd.NA,
+                "away_team_runs_allowed_14g": pd.NA,
                 "park_runs_factor": pd.NA,
                 "park_hr_factor": pd.NA,
                 "abs_active": pd.NA,
@@ -1936,6 +2028,8 @@ def test_fill_missing_feature_values_uses_module_defaults_instead_of_dataset_mea
                 "home_team_bullpen_xfip": 3.1,
                 "home_team_pythagorean_wp_30g": 0.74,
                 "away_team_log5_30g": 0.22,
+                "home_team_runs_scored_7g": 5.6,
+                "away_team_runs_allowed_14g": 4.1,
                 "park_runs_factor": 1.17,
                 "park_hr_factor": 1.11,
                 "abs_active": 0.0,
@@ -1972,6 +2066,14 @@ def test_fill_missing_feature_values_uses_module_defaults_instead_of_dataset_mea
     assert first_row["home_team_bullpen_xfip"] == pytest.approx(DEFAULT_XFIP)
     assert first_row["home_team_pythagorean_wp_30g"] == pytest.approx(0.5)
     assert first_row["away_team_log5_30g"] == pytest.approx(0.5)
+    assert first_row["home_team_runs_scored_7g"] == pytest.approx(4.5)
+    assert first_row["away_team_runs_allowed_14g"] == pytest.approx(4.5)
+    assert first_row["home_team_woba_vs_LHP"] == pytest.approx(LEAGUE_WOBA_BASELINE)
+    assert first_row["home_team_woba_vs_RHP"] == pytest.approx(LEAGUE_WOBA_BASELINE)
+    assert first_row["home_team_woba_vs_opposing_hand"] == pytest.approx(LEAGUE_WOBA_BASELINE)
+    assert first_row["away_team_woba_vs_LHP"] == pytest.approx(LEAGUE_WOBA_BASELINE)
+    assert first_row["away_team_woba_vs_RHP"] == pytest.approx(LEAGUE_WOBA_BASELINE)
+    assert first_row["away_team_woba_vs_opposing_hand"] == pytest.approx(LEAGUE_WOBA_BASELINE)
     assert first_row["park_runs_factor"] == pytest.approx(1.0)
     assert first_row["park_hr_factor"] == pytest.approx(1.0)
     assert first_row["abs_active"] == pytest.approx(1.0)
@@ -1983,6 +2085,10 @@ def test_fill_missing_feature_values_uses_module_defaults_instead_of_dataset_mea
 
     assert second_row["home_team_woba_7g"] == pytest.approx(0.401)
     assert second_row["away_starter_xfip_7s"] == pytest.approx(2.35)
+    assert second_row["home_team_runs_scored_7g"] == pytest.approx(5.6)
+    assert second_row["away_team_runs_allowed_14g"] == pytest.approx(4.1)
+    assert second_row["home_team_woba_vs_LHP"] == pytest.approx(LEAGUE_WOBA_BASELINE)
+    assert second_row["away_team_woba_vs_RHP"] == pytest.approx(LEAGUE_WOBA_BASELINE)
     assert second_row["weather_composite"] == pytest.approx(1.08)
 
 

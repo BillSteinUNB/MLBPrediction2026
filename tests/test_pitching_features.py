@@ -408,6 +408,37 @@ def test_normalize_start_metrics_fills_missing_pitch_count_with_baseline() -> No
     assert normalized.loc[0, "pitch_count"] == pytest.approx(DEFAULT_METRIC_BASELINES["pitch_count"])
 
 
+def test_normalize_start_metrics_strips_timezone_from_game_dates() -> None:
+    from src.features.pitching import _normalize_start_metrics
+
+    normalized = _normalize_start_metrics(
+        pd.DataFrame(
+            [
+                {
+                    "game_pk": 1,
+                    "game_date": "2025-04-01T00:00:00+00:00",
+                    "team": "NYY",
+                    "pitcher_id": 100,
+                    "xFIP": 3.4,
+                    "xERA": 3.5,
+                    "K%": 25.0,
+                    "BB%": 7.0,
+                    "GB%": 44.0,
+                    "HR/FB": 10.0,
+                    "avg_fastball_velocity": 95.2,
+                    "pitch_mix_entropy": 1.7,
+                    "csw_pct": 30.0,
+                    "innings_pitched": 6.0,
+                    "pitch_count": 95.0,
+                }
+            ]
+        )
+    )
+
+    assert normalized["game_date"].dt.tz is None
+    assert normalized["game_date"].dt.strftime("%Y-%m-%d").tolist() == ["2025-04-01"]
+
+
 def test_compute_start_metrics_returns_pitch_count() -> None:
     from src.features.pitching import _compute_start_metrics
 

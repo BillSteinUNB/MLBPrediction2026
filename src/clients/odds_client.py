@@ -101,6 +101,37 @@ def _resolve_api_key(api_key: str | None) -> str:
     return resolved_api_key
 
 
+def _resolve_api_keys(api_key: str | None) -> list[str]:
+    if api_key:
+        return [api_key]
+
+    load_dotenv(DEFAULT_ENV_FILE)
+    candidates: list[str] = []
+    primary_key = os.getenv("ODDS_API_KEY")
+    pooled_keys = os.getenv("ODDS_API_KEYS", "")
+    if primary_key:
+        candidates.append(primary_key)
+    if pooled_keys:
+        candidates.extend(
+            token.strip()
+            for token in pooled_keys.split(",")
+            if isinstance(token, str) and token.strip()
+        )
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        deduped.append(candidate)
+
+    if not deduped:
+        raise OddsApiError("ODDS_API_KEY or ODDS_API_KEYS is required to fetch odds")
+
+    return deduped
+
+
 def _usage_month(now: datetime | None = None) -> str:
     current_time = now or datetime.now(timezone.utc)
     return current_time.astimezone(timezone.utc).strftime("%Y-%m")
@@ -750,6 +781,316 @@ def build_estimated_f5_ml_snapshots(
     )
 
 
+def _api_key_fingerprint(api_key: str) -> str:
+    digest = blake2b(api_key.encode("utf-8"), digest_size=8).hexdigest()
+    return digest[:12]
+
+
+def _first_of_next_month(now: datetime | None = None) -> datetime:
+    current_time = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    year = current_time.year + (1 if current_time.month == 12 else 0)
+    month = 1 if current_time.month == 12 else current_time.month + 1
+    return datetime(year, month, 1, tzinfo=timezone.utc)
+
+
+def _ensure_key_tracking_tables(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS odds_api_key_usage (
+            key_fingerprint TEXT NOT NULL,
+            usage_month TEXT NOT NULL,
+            api_usage_count INTEGER NOT NULL DEFAULT 0 CHECK (api_usage_count >= 0),
+            quota_limit INTEGER NOT NULL DEFAULT 500 CHECK (quota_limit > 0),
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (key_fingerprint, usage_month)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS odds_api_key_status (
+            key_fingerprint TEXT PRIMARY KEY,
+            key_label TEXT NOT NULL,
+            is_limited INTEGER NOT NULL DEFAULT 0 CHECK (is_limited IN (0, 1)),
+            limited_at TEXT,
+            reset_at TEXT,
+            last_error TEXT,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
+def _register_api_key(connection: sqlite3.Connection, api_key: str) -> str:
+    _ensure_key_tracking_tables(connection)
+    key_fingerprint = _api_key_fingerprint(api_key)
+    connection.execute(
+        """
+        INSERT INTO odds_api_key_status (key_fingerprint, key_label)
+        VALUES (?, ?)
+        ON CONFLICT(key_fingerprint) DO UPDATE SET
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (key_fingerprint, f"odds_api_{key_fingerprint}"),
+    )
+    return key_fingerprint
+
+
+def _clear_expired_key_limits(connection: sqlite3.Connection, now: datetime | None = None) -> None:
+    _ensure_key_tracking_tables(connection)
+    current_time = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    connection.execute(
+        """
+        UPDATE odds_api_key_status
+        SET is_limited = 0,
+            limited_at = NULL,
+            reset_at = NULL,
+            last_error = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE is_limited = 1
+          AND reset_at IS NOT NULL
+          AND reset_at <= ?
+        """,
+        (current_time.isoformat(),),
+    )
+
+
+def _mark_key_limited(
+    connection: sqlite3.Connection,
+    *,
+    api_key: str,
+    reason: str,
+    now: datetime | None = None,
+) -> None:
+    _ensure_key_tracking_tables(connection)
+    current_time = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    reset_at = _first_of_next_month(current_time)
+    key_fingerprint = _register_api_key(connection, api_key)
+    connection.execute(
+        """
+        UPDATE odds_api_key_status
+        SET is_limited = 1,
+            limited_at = ?,
+            reset_at = ?,
+            last_error = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE key_fingerprint = ?
+        """,
+        (
+            current_time.isoformat(),
+            reset_at.isoformat(),
+            reason,
+            key_fingerprint,
+        ),
+    )
+    logger.warning(
+        "Marked Odds API key %s as limited until %s",
+        key_fingerprint,
+        reset_at.date().isoformat(),
+    )
+
+
+def _is_key_limited(connection: sqlite3.Connection, *, api_key: str) -> bool:
+    _clear_expired_key_limits(connection)
+    key_fingerprint = _register_api_key(connection, api_key)
+    row = connection.execute(
+        """
+        SELECT is_limited
+        FROM odds_api_key_status
+        WHERE key_fingerprint = ?
+        """,
+        (key_fingerprint,),
+    ).fetchone()
+    return bool(int(row[0])) if row else False
+
+
+def _get_key_usage_count(
+    connection: sqlite3.Connection,
+    *,
+    api_key: str,
+    usage_month: str,
+    allow_legacy_fallback: bool = False,
+) -> int:
+    _ensure_key_tracking_tables(connection)
+    key_fingerprint = _register_api_key(connection, api_key)
+    row = connection.execute(
+        """
+        SELECT api_usage_count
+        FROM odds_api_key_usage
+        WHERE key_fingerprint = ? AND usage_month = ?
+        """,
+        (key_fingerprint, usage_month),
+    ).fetchone()
+    if row:
+        return int(row[0])
+    if allow_legacy_fallback:
+        return _get_usage_count(connection, usage_month)
+    return 0
+
+
+def _set_key_usage_count(
+    connection: sqlite3.Connection,
+    *,
+    api_key: str,
+    usage_month: str,
+    usage_count: int,
+    quota_limit: int = ODDS_API_MONTHLY_LIMIT,
+) -> None:
+    _ensure_key_tracking_tables(connection)
+    key_fingerprint = _register_api_key(connection, api_key)
+    connection.execute(
+        """
+        INSERT INTO odds_api_key_usage (key_fingerprint, usage_month, api_usage_count, quota_limit)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(key_fingerprint, usage_month) DO UPDATE SET
+            api_usage_count = excluded.api_usage_count,
+            quota_limit = excluded.quota_limit,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (key_fingerprint, usage_month, usage_count, quota_limit),
+    )
+    total_row = connection.execute(
+        """
+        SELECT COALESCE(SUM(api_usage_count), 0)
+        FROM odds_api_key_usage
+        WHERE usage_month = ?
+        """,
+        (usage_month,),
+    ).fetchone()
+    _set_usage_count(
+        connection,
+        usage_month,
+        int(total_row[0]) if total_row else 0,
+        quota_limit,
+    )
+
+
+def _record_key_usage(
+    connection: sqlite3.Connection,
+    *,
+    api_key: str,
+    usage_month: str,
+    headers: Mapping[str, str],
+    estimated_cost: int,
+    quota_limit: int,
+) -> None:
+    current_usage = _get_key_usage_count(connection, api_key=api_key, usage_month=usage_month)
+    header_usage = headers.get("x-requests-used")
+    header_last = headers.get("x-requests-last")
+
+    if header_usage is not None:
+        next_usage = max(current_usage, int(header_usage))
+    elif header_last is not None:
+        next_usage = current_usage + int(header_last)
+    else:
+        next_usage = current_usage + estimated_cost
+
+    _set_key_usage_count(
+        connection,
+        api_key=api_key,
+        usage_month=usage_month,
+        usage_count=next_usage,
+        quota_limit=quota_limit,
+    )
+    if next_usage >= quota_limit:
+        _mark_key_limited(
+            connection,
+            api_key=api_key,
+            reason=f"monthly quota exhausted for {usage_month}",
+        )
+
+
+def _ensure_key_quota_available(
+    connection: sqlite3.Connection,
+    *,
+    api_key: str,
+    usage_month: str,
+    additional_cost: int,
+    quota_limit: int,
+    allow_legacy_fallback: bool = False,
+) -> None:
+    current_usage = _get_key_usage_count(
+        connection,
+        api_key=api_key,
+        usage_month=usage_month,
+        allow_legacy_fallback=allow_legacy_fallback,
+    )
+    if current_usage + additional_cost > quota_limit:
+        _mark_key_limited(
+            connection,
+            api_key=api_key,
+            reason=(
+                f"Odds API monthly limit would be exceeded: "
+                f"{current_usage} used + {additional_cost} requested > {quota_limit}"
+            ),
+        )
+        raise OddsApiRateLimitError(
+            f"Odds API monthly limit would be exceeded: {current_usage} used + {additional_cost} requested > {quota_limit}"
+        )
+
+
+def _select_available_api_key(
+    connection: sqlite3.Connection,
+    *,
+    api_keys: Sequence[str],
+    usage_month: str,
+    additional_cost: int,
+    quota_limit: int,
+    allow_legacy_fallback: bool = False,
+) -> str:
+    _ensure_key_tracking_tables(connection)
+    _clear_expired_key_limits(connection)
+    reset_at = _first_of_next_month()
+    for candidate in api_keys:
+        _register_api_key(connection, candidate)
+        if _is_key_limited(connection, api_key=candidate):
+            continue
+        try:
+            _ensure_key_quota_available(
+                connection,
+                api_key=candidate,
+                usage_month=usage_month,
+                additional_cost=max(1, additional_cost),
+                quota_limit=quota_limit,
+                allow_legacy_fallback=allow_legacy_fallback,
+            )
+            return candidate
+        except OddsApiRateLimitError:
+            continue
+
+    raise OddsApiRateLimitError(
+        f"All configured Odds API keys are limited until {reset_at.date().isoformat()}"
+    )
+
+
+def get_odds_api_key_statuses(
+    db_path: str | Path = DEFAULT_DB_PATH,
+) -> list[dict[str, Any]]:
+    database_path = init_db(db_path)
+    with sqlite3.connect(database_path) as connection:
+        _ensure_key_tracking_tables(connection)
+        _clear_expired_key_limits(connection)
+        rows = connection.execute(
+            """
+            SELECT key_fingerprint, key_label, is_limited, limited_at, reset_at, last_error, updated_at
+            FROM odds_api_key_status
+            ORDER BY key_label ASC
+            """
+        ).fetchall()
+    return [
+        {
+            "key_fingerprint": str(row[0]),
+            "key_label": str(row[1]),
+            "is_limited": bool(int(row[2])),
+            "limited_at": row[3],
+            "reset_at": row[4],
+            "last_error": row[5],
+            "updated_at": row[6],
+        }
+        for row in rows
+    ]
+
+
 def american_to_implied(odds: int) -> float:
     """Convert American odds to implied probability."""
 
@@ -782,7 +1123,16 @@ def get_monthly_usage(
     init_db(db_path)
     usage_month = month or _usage_month()
     with sqlite3.connect(db_path) as connection:
-        return _get_usage_count(connection, usage_month)
+        _ensure_key_tracking_tables(connection)
+        row = connection.execute(
+            """
+            SELECT COALESCE(SUM(api_usage_count), 0)
+            FROM odds_api_key_usage
+            WHERE usage_month = ?
+            """,
+            (usage_month,),
+        ).fetchone()
+        return int(row[0]) if row else 0
 
 
 def fetch_mlb_odds(
@@ -799,18 +1149,10 @@ def fetch_mlb_odds(
 ) -> list[OddsSnapshot]:
     """Fetch MLB F5 odds, persist snapshots, and track monthly API usage."""
 
-    resolved_api_key = _resolve_api_key(api_key)
+    resolved_api_keys = _resolve_api_keys(api_key)
+    allow_legacy_fallback = len(resolved_api_keys) == 1
     database_path = init_db(db_path)
     usage_month = _usage_month()
-
-    events_params: dict[str, str] = {
-        "apiKey": resolved_api_key,
-        "dateFormat": "iso",
-    }
-    if commence_time_from is not None:
-        events_params["commenceTimeFrom"] = _to_iso_z(commence_time_from)
-    if commence_time_to is not None:
-        events_params["commenceTimeTo"] = _to_iso_z(commence_time_to)
 
     client_context = nullcontext(client) if client is not None else httpx.Client(base_url=ODDS_API_BASE_URL, timeout=30.0)
     snapshots: list[OddsSnapshot] = []
@@ -819,13 +1161,53 @@ def fetch_mlb_odds(
     with client_context as http_client, sqlite3.connect(database_path) as connection:
         connection.execute("PRAGMA foreign_keys = ON")
         _ensure_usage_table(connection)
+        _ensure_key_tracking_tables(connection)
 
-        events_response = http_client.get(ODDS_API_EVENTS_PATH, params=events_params)
-        events_response.raise_for_status()
+        events_payload: list[Mapping[str, Any]] | None = None
+        last_events_error: Exception | None = None
+        for _ in range(len(resolved_api_keys)):
+            resolved_api_key = _select_available_api_key(
+                connection,
+                api_keys=resolved_api_keys,
+                usage_month=usage_month,
+                additional_cost=1,
+                quota_limit=quota_limit,
+                allow_legacy_fallback=allow_legacy_fallback,
+            )
+            events_params: dict[str, str] = {
+                "apiKey": resolved_api_key,
+                "dateFormat": "iso",
+            }
+            if commence_time_from is not None:
+                events_params["commenceTimeFrom"] = _to_iso_z(commence_time_from)
+            if commence_time_to is not None:
+                events_params["commenceTimeTo"] = _to_iso_z(commence_time_to)
+            try:
+                events_response = http_client.get(ODDS_API_EVENTS_PATH, params=events_params)
+                events_response.raise_for_status()
+                raw_payload = events_response.json()
+                if not isinstance(raw_payload, list):
+                    raise OddsApiError("Unexpected events response payload")
+                events_payload = raw_payload
+                break
+            except httpx.HTTPStatusError as exc:
+                last_events_error = exc
+                if exc.response.status_code == 429:
+                    _mark_key_limited(
+                        connection,
+                        api_key=resolved_api_key,
+                        reason="received HTTP 429 while fetching events",
+                    )
+                    connection.commit()
+                    continue
+                raise
 
-        events_payload = events_response.json()
-        if not isinstance(events_payload, list):
-            raise OddsApiError("Unexpected events response payload")
+        if events_payload is None:
+            if last_events_error is not None:
+                raise last_events_error
+            raise OddsApiRateLimitError(
+                f"All configured Odds API keys are limited until {_first_of_next_month().date().isoformat()}"
+            )
 
         for event in events_payload:
             commence_time = _parse_iso_datetime(event["commence_time"])
@@ -841,45 +1223,63 @@ def fetch_mlb_odds(
                 if game_pk is None:
                     continue
 
-                _ensure_quota_available(
-                    connection,
-                    usage_month=usage_month,
-                    additional_cost=per_event_cost,
-                    quota_limit=quota_limit,
-                )
-
-                event_params: dict[str, str] = {
-                    "apiKey": resolved_api_key,
-                    "regions": regions,
-                    "markets": ",".join(ODDS_API_F5_MARKETS),
-                    "oddsFormat": "american",
-                    "dateFormat": "iso",
-                }
-                if bookmakers:
-                    event_params["bookmakers"] = ",".join(bookmakers)
-
-                try:
-                    event_response = http_client.get(
-                        f"/v4/sports/{ODDS_API_SPORT_KEY}/events/{event['id']}/odds",
-                        params=event_params,
+                event_payload: dict[str, Any] | None = None
+                event_response: httpx.Response | None = None
+                for _ in range(len(resolved_api_keys)):
+                    resolved_api_key = _select_available_api_key(
+                        connection,
+                        api_keys=resolved_api_keys,
+                        usage_month=usage_month,
+                        additional_cost=per_event_cost,
+                        quota_limit=quota_limit,
+                        allow_legacy_fallback=allow_legacy_fallback,
                     )
-                    event_response.raise_for_status()
-                except httpx.HTTPStatusError as exc:
-                    if exc.response.status_code != 429:
-                        raise
+                    event_params: dict[str, str] = {
+                        "apiKey": resolved_api_key,
+                        "regions": regions,
+                        "markets": ",".join(ODDS_API_F5_MARKETS),
+                        "oddsFormat": "american",
+                        "dateFormat": "iso",
+                    }
+                    if bookmakers:
+                        event_params["bookmakers"] = ",".join(bookmakers)
+                    try:
+                        event_response = http_client.get(
+                            f"/v4/sports/{ODDS_API_SPORT_KEY}/events/{event['id']}/odds",
+                            params=event_params,
+                        )
+                        event_response.raise_for_status()
+                        raw_event_payload = event_response.json()
+                        if not isinstance(raw_event_payload, dict):
+                            raise OddsApiError("Unexpected event odds response payload")
+                        event_payload = raw_event_payload
+                        break
+                    except httpx.HTTPStatusError as exc:
+                        if exc.response.status_code != 429:
+                            raise
+                        _mark_key_limited(
+                            connection,
+                            api_key=resolved_api_key,
+                            reason=(
+                                f"received HTTP 429 while fetching event {event.get('id')}"
+                            ),
+                        )
+                        logger.warning(
+                            "Odds API key %s hit a 429 while fetching event %s; trying the next key",
+                            _api_key_fingerprint(resolved_api_key),
+                            event.get("id"),
+                        )
+                        connection.commit()
+                        continue
+                if event_payload is None or event_response is None:
                     logger.warning(
-                        "Odds API rate limited while fetching event %s (%s vs %s); continuing with partial slate",
+                        "All configured Odds API keys were exhausted while fetching event %s; continuing with partial slate",
                         event.get("id"),
-                        event.get("away_team"),
-                        event.get("home_team"),
                     )
                     connection.commit()
                     if request_pause_seconds > 0:
                         time.sleep(request_pause_seconds)
                     continue
-                event_payload = event_response.json()
-                if not isinstance(event_payload, dict):
-                    raise OddsApiError("Unexpected event odds response payload")
 
                 event_snapshots: list[OddsSnapshot] = []
                 for bookmaker in event_payload.get("bookmakers", []):
@@ -931,8 +1331,9 @@ def fetch_mlb_odds(
                             )
                         )
 
-                _record_usage(
+                _record_key_usage(
                     connection,
+                    api_key=resolved_api_key,
                     usage_month=usage_month,
                     headers=dict(event_response.headers),
                     estimated_cost=per_event_cost,
@@ -966,24 +1367,11 @@ def fetch_mlb_full_game_odds_context(
 ) -> dict[int, dict[str, Any]]:
     """Fetch public full-game MLB odds context for display purposes."""
 
-    resolved_api_key = _resolve_api_key(api_key)
+    resolved_api_keys = _resolve_api_keys(api_key)
+    allow_legacy_fallback = len(resolved_api_keys) == 1
     database_path = init_db(db_path)
     usage_month = _usage_month()
     request_cost = _quota_cost(regions, bookmakers)
-
-    params: dict[str, str] = {
-        "apiKey": resolved_api_key,
-        "regions": regions,
-        "markets": "h2h,spreads",
-        "oddsFormat": "american",
-        "dateFormat": "iso",
-    }
-    if commence_time_from is not None:
-        params["commenceTimeFrom"] = _to_iso_z(commence_time_from)
-    if commence_time_to is not None:
-        params["commenceTimeTo"] = _to_iso_z(commence_time_to)
-    if bookmakers:
-        params["bookmakers"] = ",".join(bookmakers)
 
     client_context = (
         nullcontext(client)
@@ -994,21 +1382,60 @@ def fetch_mlb_full_game_odds_context(
     with client_context as http_client, sqlite3.connect(database_path) as connection:
         connection.execute("PRAGMA foreign_keys = ON")
         _ensure_usage_table(connection)
-        _ensure_quota_available(
-            connection,
-            usage_month=usage_month,
-            additional_cost=request_cost,
-            quota_limit=quota_limit,
-        )
+        _ensure_key_tracking_tables(connection)
 
-        response = http_client.get(ODDS_API_ODDS_PATH, params=params)
-        response.raise_for_status()
+        response: httpx.Response | None = None
+        last_error: Exception | None = None
+        for _ in range(len(resolved_api_keys)):
+            resolved_api_key = _select_available_api_key(
+                connection,
+                api_keys=resolved_api_keys,
+                usage_month=usage_month,
+                additional_cost=request_cost,
+                quota_limit=quota_limit,
+                allow_legacy_fallback=allow_legacy_fallback,
+            )
+            params: dict[str, str] = {
+                "apiKey": resolved_api_key,
+                "regions": regions,
+                "markets": "h2h,spreads",
+                "oddsFormat": "american",
+                "dateFormat": "iso",
+            }
+            if commence_time_from is not None:
+                params["commenceTimeFrom"] = _to_iso_z(commence_time_from)
+            if commence_time_to is not None:
+                params["commenceTimeTo"] = _to_iso_z(commence_time_to)
+            if bookmakers:
+                params["bookmakers"] = ",".join(bookmakers)
+            try:
+                response = http_client.get(ODDS_API_ODDS_PATH, params=params)
+                response.raise_for_status()
+                break
+            except httpx.HTTPStatusError as exc:
+                last_error = exc
+                if exc.response.status_code == 429:
+                    _mark_key_limited(
+                        connection,
+                        api_key=resolved_api_key,
+                        reason="received HTTP 429 while fetching full-game odds context",
+                    )
+                    connection.commit()
+                    continue
+                raise
+        if response is None:
+            if last_error is not None:
+                raise last_error
+            raise OddsApiRateLimitError(
+                f"All configured Odds API keys are limited until {_first_of_next_month().date().isoformat()}"
+            )
         payload = response.json()
         if not isinstance(payload, list):
             raise OddsApiError("Unexpected full-game odds response payload")
 
-        _record_usage(
+        _record_key_usage(
             connection,
+            api_key=resolved_api_key,
             usage_month=usage_month,
             headers=dict(response.headers),
             estimated_cost=request_cost,

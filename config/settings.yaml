@@ -518,7 +518,7 @@ abs_exceptions:
   - Little League Classic
 
 thresholds:
-  edge_min: 0.03
+  edge_min: 0.06
   kelly_fraction: 0.25
   max_drawdown: 0.3
   min_games_rolling: 7

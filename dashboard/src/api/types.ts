@@ -149,10 +149,22 @@ export interface OverviewResponse {
 export interface SlatePrediction {
   game_pk: number
   model_version: string
+  full_game_ml_home_prob?: number | null
+  full_game_ml_away_prob?: number | null
+  full_game_rl_home_prob?: number | null
+  full_game_rl_away_prob?: number | null
+  full_game_total_over_prob?: number | null
+  full_game_total_under_prob?: number | null
   f5_ml_home_prob: number
   f5_ml_away_prob: number
   f5_rl_home_prob: number
   f5_rl_away_prob: number
+  f5_total_over_prob?: number | null
+  f5_total_under_prob?: number | null
+  projected_full_game_home_runs?: number | null
+  projected_full_game_away_runs?: number | null
+  projected_full_game_total_runs?: number | null
+  projected_full_game_home_margin?: number | null
   projected_f5_home_runs?: number | null
   projected_f5_away_runs?: number | null
   projected_f5_total_runs?: number | null
@@ -191,18 +203,42 @@ export interface SlateInputStatus {
   odds_books: string[]
   f5_odds_estimated: boolean
   f5_odds_sources: string[]
+  bet365_f5_ml_home_odds?: number | null
+  bet365_f5_ml_away_odds?: number | null
+  consensus_f5_ml_home_odds?: number | null
+  consensus_f5_ml_away_odds?: number | null
+  bet365_f5_rl_home_point?: number | null
+  bet365_f5_rl_home_odds?: number | null
+  bet365_f5_rl_away_point?: number | null
+  bet365_f5_rl_away_odds?: number | null
+  consensus_f5_rl_home_point?: number | null
+  consensus_f5_rl_home_odds?: number | null
+  consensus_f5_rl_away_point?: number | null
+  consensus_f5_rl_away_odds?: number | null
   full_game_odds_available: boolean
   full_game_odds_books: string[]
   full_game_home_ml?: number | null
   full_game_home_ml_book?: string | null
   full_game_away_ml?: number | null
   full_game_away_ml_book?: string | null
+  bet365_full_game_home_ml?: number | null
+  bet365_full_game_away_ml?: number | null
+  consensus_full_game_home_ml?: number | null
+  consensus_full_game_away_ml?: number | null
   full_game_home_spread?: number | null
   full_game_home_spread_odds?: number | null
   full_game_home_spread_book?: string | null
   full_game_away_spread?: number | null
   full_game_away_spread_odds?: number | null
   full_game_away_spread_book?: string | null
+  bet365_full_game_home_spread?: number | null
+  bet365_full_game_home_spread_odds?: number | null
+  bet365_full_game_away_spread?: number | null
+  bet365_full_game_away_spread_odds?: number | null
+  consensus_full_game_home_spread?: number | null
+  consensus_full_game_home_spread_odds?: number | null
+  consensus_full_game_away_spread?: number | null
+  consensus_full_game_away_spread_odds?: number | null
   weather_available: boolean
 }
 
@@ -210,6 +246,8 @@ export interface SlateGame {
   game_pk: number
   matchup: string
   status: string
+  game_status?: string | null
+  is_completed: boolean
   prediction?: SlatePrediction | null
   selected_decision?: SlateDecision | null
   forced_decision?: SlateDecision | null

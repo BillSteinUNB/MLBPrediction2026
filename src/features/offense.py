@@ -9,7 +9,11 @@ from typing import Any, Callable
 
 import pandas as pd
 
-from src.clients.statcast_client import fetch_batting_stats, fetch_statcast_range, fetch_team_game_logs
+from src.clients.statcast_client import (
+    fetch_batting_stats,
+    fetch_statcast_range,
+    fetch_team_game_logs,
+)
 from src.db import DEFAULT_DB_PATH, init_db, sqlite_connection
 from src.features.marcel_blend import blend_value, get_regression_weight
 from src.models.features import GameFeatures
@@ -149,18 +153,38 @@ def compute_offensive_features(
             team_frame = team_metrics.get(team, pd.DataFrame())
             team_priors = prior_team_baselines.get(team, {})
             season_games_played = len(team_frame)
-            roster_turnover_pct = None if roster_turnover_by_team is None else roster_turnover_by_team.get(team)
+            roster_turnover_pct = (
+                None if roster_turnover_by_team is None else roster_turnover_by_team.get(team)
+            )
             for window in windows:
                 current_window_metrics = _rolling_metrics_as_of(
                     team_frame=team_frame,
-                    metric_names=("woba", "xwoba", "woba_minus_xwoba", "iso", "barrel_pct", "babip", "k_pct", "bb_pct"),
+                    metric_names=(
+                        "woba",
+                        "xwoba",
+                        "woba_minus_xwoba",
+                        "iso",
+                        "barrel_pct",
+                        "babip",
+                        "k_pct",
+                        "bb_pct",
+                    ),
                     window=window,
                     min_periods=min_periods,
                 )
 
                 current_team_values = {
                     metric: current_window_metrics[metric].value
-                    for metric in ("woba", "xwoba", "woba_minus_xwoba", "iso", "barrel_pct", "babip", "k_pct", "bb_pct")
+                    for metric in (
+                        "woba",
+                        "xwoba",
+                        "woba_minus_xwoba",
+                        "iso",
+                        "barrel_pct",
+                        "babip",
+                        "k_pct",
+                        "bb_pct",
+                    )
                 }
                 current_team_values["wrc_plus"] = _team_wrc_plus(
                     current_team_values["woba"],
@@ -272,7 +296,7 @@ def _load_season_games(
         return pd.DataFrame(columns=["game_pk", "game_date"])
 
     games["game_pk"] = pd.to_numeric(games["game_pk"], errors="coerce").astype("Int64")
-    games["game_date"] = pd.to_datetime(games["game_date"], errors="coerce")
+    games["game_date"] = _to_tz_naive_datetime_series(games["game_date"])
     games = games.dropna(subset=["game_pk", "game_date"]).copy()
     if games.empty:
         return pd.DataFrame(columns=["game_pk", "game_date"])
@@ -297,7 +321,9 @@ def _build_team_game_metrics(
         raw_logs = team_logs_fetcher(season, team, refresh=refresh)
         team_statcast = statcast_metrics.loc[statcast_metrics["team"] == team].copy()
         game_metrics = _compute_game_level_metrics(raw_logs, statcast_metrics=team_statcast)
-        filtered = game_metrics.loc[game_metrics["game_date"].dt.date < target_day].reset_index(drop=True)
+        filtered = game_metrics.loc[game_metrics["game_date"].dt.date < target_day].reset_index(
+            drop=True
+        )
         team_frames[team] = filtered
 
         if not filtered.empty:
@@ -336,7 +362,9 @@ def _build_prior_team_baselines(
             "wrc_plus": _team_wrc_plus(team_woba, league_woba),
             "woba": team_woba,
             "xwoba": team_xwoba,
-            "woba_minus_xwoba": team_woba - team_xwoba if pd.notna(team_woba) and pd.notna(team_xwoba) else 0.0,
+            "woba_minus_xwoba": team_woba - team_xwoba
+            if pd.notna(team_woba) and pd.notna(team_xwoba)
+            else 0.0,
             "iso": _series_mean(prior_frame["iso"]),
             "barrel_pct": _series_mean(prior_frame["barrel_pct"]),
             "babip": _series_mean(prior_frame["babip"]),
@@ -383,8 +411,12 @@ def _build_lineup_metric_lookup(
             continue
 
         normalized_player_ids = [int(player_id) for player_id in player_ids]
-        lineup_frame = batting_stats.loc[batting_stats["player_id"].isin(normalized_player_ids)].copy()
-        lineup_xwoba = batter_xwoba.loc[batter_xwoba["player_id"].isin(normalized_player_ids)].copy()
+        lineup_frame = batting_stats.loc[
+            batting_stats["player_id"].isin(normalized_player_ids)
+        ].copy()
+        lineup_xwoba = batter_xwoba.loc[
+            batter_xwoba["player_id"].isin(normalized_player_ids)
+        ].copy()
         if lineup_frame.empty and lineup_xwoba.empty:
             continue
 
@@ -418,9 +450,13 @@ def _build_lineup_prior_metric_lookup(
             batting_stats_fetcher(prior_season, min_pa=0, refresh=refresh)
         )
     except Exception:
-        prior_batting_stats = pd.DataFrame(columns=["player_id", "game_date", "game_pk", "pa", *METRICS])
+        prior_batting_stats = pd.DataFrame(
+            columns=["player_id", "game_date", "game_pk", "pa", *METRICS]
+        )
     if prior_batting_stats.empty:
-        prior_batting_stats = pd.DataFrame(columns=["player_id", "game_date", "game_pk", "pa", *METRICS])
+        prior_batting_stats = pd.DataFrame(
+            columns=["player_id", "game_date", "game_pk", "pa", *METRICS]
+        )
 
     prior_statcast_metrics = _normalize_statcast_offense_metrics(statcast_metrics)
     if prior_batting_stats.empty and prior_statcast_metrics.empty:
@@ -531,7 +567,9 @@ def _aggregate_prior_lineup_metrics(
     metric_rows: dict[str, list[float]] = {metric: [] for metric in METRICS}
 
     for player_id in player_ids:
-        player_frame = prior_lineup_frame.loc[prior_lineup_frame["player_id"] == int(player_id)].copy()
+        player_frame = prior_lineup_frame.loc[
+            prior_lineup_frame["player_id"] == int(player_id)
+        ].copy()
         player_statcast = prior_statcast_frame.loc[
             prior_statcast_frame["player_id"] == int(player_id)
         ].copy()
@@ -544,7 +582,9 @@ def _aggregate_prior_lineup_metrics(
                 metric_rows["xwoba"].append(_default_metric_baseline("xwoba"))
                 metric_rows["barrel_pct"].append(_default_metric_baseline("barrel_pct"))
                 if actual_source_available:
-                    metric_rows["woba_minus_xwoba"].append(_default_metric_baseline("woba_minus_xwoba"))
+                    metric_rows["woba_minus_xwoba"].append(
+                        _default_metric_baseline("woba_minus_xwoba")
+                    )
             continue
 
         actual_woba: float | None = None
@@ -565,13 +605,19 @@ def _aggregate_prior_lineup_metrics(
         xwoba_value: float | None = None
         barrel_pct_value: float | None = None
         if not player_statcast.empty:
-            expected_weights = player_statcast["pa"].where(player_statcast["pa"] > 0, 1.0).astype(float)
+            expected_weights = (
+                player_statcast["pa"].where(player_statcast["pa"] > 0, 1.0).astype(float)
+            )
             xwoba_value = _weighted_metric_mean(
                 player_statcast["xwoba"],
                 weights=expected_weights,
-                default=actual_woba if actual_woba is not None else _default_metric_baseline("xwoba"),
+                default=actual_woba
+                if actual_woba is not None
+                else _default_metric_baseline("xwoba"),
             )
-            bbe_weights = player_statcast["bbe"].where(player_statcast["bbe"] > 0, 0.0).astype(float)
+            bbe_weights = (
+                player_statcast["bbe"].where(player_statcast["bbe"] > 0, 0.0).astype(float)
+            )
             if float(bbe_weights.sum()) > 0:
                 barrel_pct_value = _weighted_metric_mean(
                     player_statcast["barrel_pct"],
@@ -595,9 +641,7 @@ def _aggregate_prior_lineup_metrics(
         elif actual_source_available and xwoba_value is not None:
             metric_rows["woba_minus_xwoba"].append(_default_metric_baseline("woba_minus_xwoba"))
 
-    populated_metrics = {
-        metric: values for metric, values in metric_rows.items() if values
-    }
+    populated_metrics = {metric: values for metric, values in metric_rows.items() if values}
     if not populated_metrics:
         return None, False
 
@@ -614,7 +658,9 @@ def _normalize_batting_stats(dataframe: pd.DataFrame) -> pd.DataFrame:
 
     normalized = dataframe.copy()
     derived_metrics = _derive_offensive_metrics(normalized)
-    player_id_column = _first_column(normalized, ("player_id", "playerid", "key_mlbam", "mlb_id", "id"))
+    player_id_column = _first_column(
+        normalized, ("player_id", "playerid", "key_mlbam", "mlb_id", "id")
+    )
     pa_column = _first_column(normalized, ("PA", "pa", "plate appearances", "_PA"))
     if player_id_column is None:
         return pd.DataFrame(columns=["player_id", "game_date", "game_pk", "pa", *METRICS])
@@ -647,9 +693,9 @@ def _normalize_batting_stats(dataframe: pd.DataFrame) -> pd.DataFrame:
 
     result = pd.DataFrame(index=normalized.index)
     result["game_date"] = (
-        pd.to_datetime(normalized[date_column], errors="coerce")
+        _to_tz_naive_datetime_series(normalized[date_column])
         if date_column is not None
-        else pd.Series(pd.NaT, index=normalized.index)
+        else pd.Series(pd.NaT, index=normalized.index, dtype="datetime64[ns]")
     )
 
     for output_column, source_column in column_map.items():
@@ -675,9 +721,9 @@ def _normalize_batting_stats(dataframe: pd.DataFrame) -> pd.DataFrame:
         _default_metric_baseline("woba")
     )
     result["xwoba"] = pd.to_numeric(result["xwoba"], errors="coerce").fillna(result["woba"])
-    result["woba_minus_xwoba"] = pd.to_numeric(
-        result["woba_minus_xwoba"], errors="coerce"
-    ).fillna(result["woba"] - result["xwoba"])
+    result["woba_minus_xwoba"] = pd.to_numeric(result["woba_minus_xwoba"], errors="coerce").fillna(
+        result["woba"] - result["xwoba"]
+    )
     result["barrel_pct"] = pd.to_numeric(result["barrel_pct"], errors="coerce")
     result = result.fillna(
         {
@@ -776,9 +822,16 @@ def _compute_game_level_metrics(
     total_bases = singles + doubles * 2 + triples * 3 + home_runs * 4
 
     actual_woba = _series_from_value(woba_numerator / woba_denominator.replace(0, pd.NA))
+    game_pk_column = _first_column(raw_logs, ("game_pk", "gameid", "game_id"))
+
     result = pd.DataFrame(
         {
-            "game_date": pd.to_datetime(raw_logs[date_column], errors="coerce"),
+            "game_pk": (
+                pd.to_numeric(raw_logs[game_pk_column], errors="coerce").astype("Int64")
+                if game_pk_column is not None
+                else pd.Series(pd.NA, index=raw_logs.index, dtype="Int64")
+            ),
+            "game_date": _to_tz_naive_datetime_series(raw_logs[date_column]),
             "woba_numerator": woba_numerator,
             "woba_denominator": woba_denominator,
             "woba": actual_woba,
@@ -806,13 +859,16 @@ def _compute_game_level_metrics(
     result["xwoba"] = _series_from_value(xwoba)
     result["woba_minus_xwoba"] = _series_from_value(result["woba"] - result["xwoba"])
     result["barrel_pct"] = _series_from_value(barrel_pct)
-    result = result.dropna(subset=["game_date"]).sort_values("game_date").reset_index(drop=True)
+    result = result.dropna(subset=["game_date"]).sort_values(["game_date", "game_pk"]).reset_index(
+        drop=True
+    )
     return result
 
 
 def _empty_game_metrics_frame() -> pd.DataFrame:
     return pd.DataFrame(
         {
+            "game_pk": pd.Series(dtype="Int64"),
             "game_date": pd.to_datetime(pd.Series([], dtype="datetime64[ns]"), utc=False),
             "woba_numerator": pd.Series([], dtype=float),
             "woba_denominator": pd.Series([], dtype=float),
@@ -930,7 +986,9 @@ def _build_statcast_offense_metrics(
         if bb_type_column is not None
         else pd.Series(False, index=terminal.index, dtype=bool)
     )
-    barrel_mask = _is_barrel_mask(launch_speed=launch_speed, launch_angle=launch_angle) & batted_ball_mask
+    barrel_mask = (
+        _is_barrel_mask(launch_speed=launch_speed, launch_angle=launch_angle) & batted_ball_mask
+    )
 
     metrics = pd.DataFrame(
         {
@@ -948,7 +1006,9 @@ def _build_statcast_offense_metrics(
         return _empty_statcast_offense_metrics_frame()
 
     season_lookup = season_games.loc[:, ["game_pk", "game_date"]].drop_duplicates().copy()
-    season_lookup["game_pk"] = pd.to_numeric(season_lookup["game_pk"], errors="coerce").astype("Int64")
+    season_lookup["game_pk"] = pd.to_numeric(season_lookup["game_pk"], errors="coerce").astype(
+        "Int64"
+    )
     season_lookup["game_date"] = pd.to_datetime(season_lookup["game_date"], errors="coerce")
     metrics = metrics.merge(season_lookup, on="game_pk", how="inner")
     metrics = metrics.dropna(subset=["game_date"]).copy()
@@ -993,11 +1053,7 @@ def _normalize_statcast_offense_metrics(dataframe: pd.DataFrame) -> pd.DataFrame
         normalized,
         ("barrel_pct", "barrel%", "barrel_rate", "barrel_batted_rate"),
     )
-    if (
-        game_pk_column is None
-        or game_date_column is None
-        or player_id_column is None
-    ):
+    if game_pk_column is None or game_date_column is None or player_id_column is None:
         return _empty_statcast_offense_metrics_frame()
 
     team_values = (
@@ -1009,9 +1065,11 @@ def _normalize_statcast_offense_metrics(dataframe: pd.DataFrame) -> pd.DataFrame
     result = pd.DataFrame(
         {
             "game_pk": pd.to_numeric(normalized[game_pk_column], errors="coerce").astype("Int64"),
-            "game_date": pd.to_datetime(normalized[game_date_column], errors="coerce"),
+            "game_date": _to_tz_naive_datetime_series(normalized[game_date_column]),
             "team": team_values.astype(str).str.strip().str.upper(),
-            "player_id": pd.to_numeric(normalized[player_id_column], errors="coerce").astype("Int64"),
+            "player_id": pd.to_numeric(normalized[player_id_column], errors="coerce").astype(
+                "Int64"
+            ),
             "pa": (
                 pd.to_numeric(normalized[pa_column], errors="coerce")
                 if pa_column is not None
@@ -1078,15 +1136,41 @@ def _align_statcast_team_metric(
     alignment = pd.DataFrame(
         {
             "_row_index": raw_logs.index,
-            "game_date": pd.to_datetime(game_dates, errors="coerce"),
+            "game_pk": (
+                pd.to_numeric(raw_logs["game_pk"], errors="coerce").astype("Int64")
+                if "game_pk" in raw_logs.columns
+                else pd.Series(pd.NA, index=raw_logs.index, dtype="Int64")
+            ),
+            "game_date": _to_tz_naive_datetime_series(game_dates),
         }
     )
     alignment = alignment.dropna(subset=["game_date"]).copy()
     if alignment.empty:
         return pd.Series(float("nan"), index=raw_logs.index, dtype=float)
 
-    alignment["_date_slot"] = alignment.groupby("game_date", sort=False).cumcount()
+    if alignment["game_pk"].notna().any():
+        team_game_metrics = team_game_metrics.copy()
+        team_game_metrics["game_pk"] = pd.to_numeric(
+            team_game_metrics["game_pk"], errors="coerce"
+        ).astype("Int64")
+        merged = alignment.merge(
+            team_game_metrics.loc[:, ["game_pk", metric]],
+            on="game_pk",
+            how="left",
+        )
+        aligned_metric = pd.Series(float("nan"), index=raw_logs.index, dtype=float)
+        aligned_metric.loc[merged["_row_index"].astype(int)] = pd.to_numeric(
+            merged[metric], errors="coerce"
+        ).values
+        return aligned_metric
+
+    # Normalize both sides to tz-naive before merge to avoid datetime64[us] vs datetime64[us, UTC] conflict
+    alignment["game_date"] = _to_tz_naive_datetime_series(alignment["game_date"])
+
     team_game_metrics = team_game_metrics.sort_values(["game_date", "game_pk"]).copy()
+    team_game_metrics["game_date"] = _to_tz_naive_datetime_series(team_game_metrics["game_date"])
+
+    alignment["_date_slot"] = alignment.groupby("game_date", sort=False).cumcount()
     team_game_metrics["_date_slot"] = team_game_metrics.groupby("game_date", sort=False).cumcount()
 
     merged = alignment.merge(
@@ -1106,7 +1190,9 @@ def _aggregate_team_statcast_game_metrics(statcast_metrics: pd.DataFrame) -> pd.
         return pd.DataFrame(columns=["game_pk", "game_date", "xwoba", "barrel_pct"])
 
     rows: list[dict[str, float | int | pd.Timestamp]] = []
-    for (game_pk, game_date), group in statcast_metrics.groupby(["game_pk", "game_date"], dropna=True):
+    for (game_pk, game_date), group in statcast_metrics.groupby(
+        ["game_pk", "game_date"], dropna=True
+    ):
         weights = group["pa"].where(group["pa"] > 0, 1.0).astype(float)
         bbe_weights = group["bbe"].where(group["bbe"] > 0, 0.0).astype(float)
         rows.append(
@@ -1134,8 +1220,14 @@ def _collapse_plate_appearances(pitches: pd.DataFrame) -> pd.DataFrame:
 
     at_bat_column = _first_column(pitches, ("at_bat_number",))
     if at_bat_column is not None:
-        sort_columns = [column for column in ("game_pk", at_bat_column, "pitch_number") if column in pitches.columns]
-        group_columns = [column for column in ("game_pk", at_bat_column) if column in pitches.columns]
+        sort_columns = [
+            column
+            for column in ("game_pk", at_bat_column, "pitch_number")
+            if column in pitches.columns
+        ]
+        group_columns = [
+            column for column in ("game_pk", at_bat_column) if column in pitches.columns
+        ]
         terminal = pitches.sort_values(sort_columns).groupby(group_columns, as_index=False).tail(1)
         return terminal.reset_index(drop=True)
 
@@ -1261,6 +1353,14 @@ def _series_mean(values: pd.Series) -> float:
     if numeric.dropna().empty:
         return float("nan")
     return float(numeric.mean())
+
+
+def _to_tz_naive_datetime_series(values: Any) -> pd.Series:
+    if values is None:
+        return pd.Series(dtype="datetime64[ns]")
+
+    parsed = pd.to_datetime(values, errors="coerce", utc=True, format="mixed")
+    return parsed.dt.tz_convert(None)
 
 
 def _is_barrel(exit_velocity: float, launch_angle: float) -> bool:

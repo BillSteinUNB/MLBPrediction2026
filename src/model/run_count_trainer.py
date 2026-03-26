@@ -29,6 +29,7 @@ from src.model.xgboost_trainer import (
     DEFAULT_TOP_FEATURE_COUNT,
     DEFAULT_VALIDATION_FRACTION,
     DEFAULT_XGBOOST_N_JOBS,
+    DEFAULT_XGBOOST_DEVICE,
     _build_model_version,
     _extract_feature_importance_rankings,
     _load_training_dataframe,
@@ -94,10 +95,11 @@ class BlendedRunCountRegressor:
     def predict(self, dataframe: pd.DataFrame) -> pd.Series:
         xgboost_predictions = pd.Series(self.xgboost_model.predict(dataframe), dtype=float)
         lightgbm_predictions = pd.Series(self.lightgbm_model.predict(dataframe), dtype=float)
-        lightgbm_predictions = lightgbm_predictions.where(lightgbm_predictions.notna(), xgboost_predictions)
+        lightgbm_predictions = lightgbm_predictions.where(
+            lightgbm_predictions.notna(), xgboost_predictions
+        )
         blended = (
-            self.xgboost_weight * xgboost_predictions
-            + self.lightgbm_weight * lightgbm_predictions
+            self.xgboost_weight * xgboost_predictions + self.lightgbm_weight * lightgbm_predictions
         )
         blended = blended.where(blended.notna(), xgboost_predictions)
         return blended.clip(lower=0.0)
@@ -231,7 +233,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--refresh-training-data", action="store_true")
     parser.add_argument("--allow-backfill-years", action="store_true")
     parser.add_argument("--time-series-splits", type=int, default=DEFAULT_TIME_SERIES_SPLITS)
-    parser.add_argument("--search-iterations", type=int, default=DEFAULT_RUN_COUNT_SEARCH_ITERATIONS)
+    parser.add_argument(
+        "--search-iterations", type=int, default=DEFAULT_RUN_COUNT_SEARCH_ITERATIONS
+    )
     parser.add_argument("--random-state", type=int, default=DEFAULT_RANDOM_STATE)
     parser.add_argument("--early-stopping-rounds", type=int, default=DEFAULT_EARLY_STOPPING_ROUNDS)
     parser.add_argument("--validation-fraction", type=float, default=DEFAULT_VALIDATION_FRACTION)
@@ -554,7 +558,9 @@ def _objective_rmse(
     target_series = train_frame[target_column]
     fold_losses: list[float] = []
 
-    for fold_index, (train_indices, test_indices) in enumerate(splitter.split(train_frame), start=1):
+    for fold_index, (train_indices, test_indices) in enumerate(
+        splitter.split(train_frame), start=1
+    ):
         xgboost_estimator = _build_estimator(random_state=random_state)
         xgboost_estimator.set_params(**params)
         xgboost_estimator.fit(
@@ -648,9 +654,7 @@ def _compute_holdout_metrics(
     rmse_improvement_pct = (
         ((naive_rmse - model_rmse) / naive_rmse) * 100.0 if naive_rmse > 0 else None
     )
-    mae_improvement_pct = (
-        ((naive_mae - model_mae) / naive_mae) * 100.0 if naive_mae > 0 else None
-    )
+    mae_improvement_pct = ((naive_mae - model_mae) / naive_mae) * 100.0 if naive_mae > 0 else None
     return {
         "mae": model_mae,
         "rmse": model_rmse,
@@ -863,10 +867,7 @@ def _extract_blended_feature_importance_rankings(
         feature_columns,
         top_feature_count=len(feature_columns),
     )
-    xgboost_scores = {
-        str(item["feature"]): float(item["importance"])
-        for item in xgboost_rankings
-    }
+    xgboost_scores = {str(item["feature"]): float(item["importance"]) for item in xgboost_rankings}
 
     lightgbm_importances = getattr(estimator.lightgbm_model, "feature_importances_", None)
     lightgbm_scores: dict[str, float] = {}
@@ -881,10 +882,9 @@ def _extract_blended_feature_importance_rankings(
     blended_scores: list[tuple[str, float]] = []
     for feature_name in feature_columns:
         normalized_name = str(feature_name)
-        blended_importance = (
-            DEFAULT_XGBOOST_BLEND_WEIGHT * xgboost_scores.get(normalized_name, 0.0)
-            + DEFAULT_LIGHTGBM_BLEND_WEIGHT * lightgbm_scores.get(normalized_name, 0.0)
-        )
+        blended_importance = DEFAULT_XGBOOST_BLEND_WEIGHT * xgboost_scores.get(
+            normalized_name, 0.0
+        ) + DEFAULT_LIGHTGBM_BLEND_WEIGHT * lightgbm_scores.get(normalized_name, 0.0)
         blended_scores.append((normalized_name, float(blended_importance)))
 
     blended_scores.sort(key=lambda item: (-item[1], item[0]))
@@ -908,7 +908,9 @@ def _run_result_to_json_ready(result: RunCountTrainingResult) -> dict[str, Any]:
         "holdout_season": result.holdout_season,
         "feature_columns": result.feature_columns,
         "summary_path": str(result.summary_path),
-        "models": {name: _artifact_to_json_ready(artifact) for name, artifact in result.models.items()},
+        "models": {
+            name: _artifact_to_json_ready(artifact) for name, artifact in result.models.items()
+        },
     }
 
 

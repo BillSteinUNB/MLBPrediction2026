@@ -122,9 +122,9 @@ def compute_pitching_features(
     )
 
     lineups = _load_lineups_for_date(target_day, lineup_fetcher)
-    current_metrics = current_metrics.loc[current_metrics["game_date"].dt.date < target_day].reset_index(
-        drop=True
-    )
+    current_metrics = current_metrics.loc[
+        current_metrics["game_date"].dt.date < target_day
+    ].reset_index(drop=True)
 
     pitcher_histories = _group_history(current_metrics, "pitcher_id")
     team_histories = _group_history(current_metrics, "team")
@@ -147,10 +147,14 @@ def compute_pitching_features(
         ):
             team = str(game[team_key])
             starter_id = _coerce_int(game.get(starter_key))
-            roster_turnover_pct = None if roster_turnover_by_team is None else roster_turnover_by_team.get(team)
+            roster_turnover_pct = (
+                None if roster_turnover_by_team is None else roster_turnover_by_team.get(team)
+            )
             lineup = lineups.get((game_pk, team))
             if lineup is not None:
-                starter_id = lineup.starting_pitcher_id or lineup.projected_starting_pitcher_id or starter_id
+                starter_id = (
+                    lineup.starting_pitcher_id or lineup.projected_starting_pitcher_id or starter_id
+                )
 
             context = _build_pitching_context(
                 team=team,
@@ -187,7 +191,11 @@ def compute_pitching_features(
                 starts_count = len(sample)
                 season_starts_count = len(context.current_history)
                 for metric in METRICS:
-                    current_value = _series_mean(sample[metric]) if starts_count >= min_periods else float("nan")
+                    current_value = (
+                        _series_mean(sample[metric])
+                        if starts_count >= min_periods
+                        else float("nan")
+                    )
                     feature_value = _apply_metric_blend(
                         metric=metric,
                         current_value=current_value,
@@ -334,13 +342,17 @@ def _build_baselines(dataframe: pd.DataFrame, key_column: str) -> dict[Any, dict
     baselines: dict[Any, dict[str, float]] = {}
     for group_key, group in dataframe.groupby(key_column, dropna=True):
         baselines[group_key] = {
-            metric: _series_mean(group[metric]) if not group.empty else DEFAULT_METRIC_BASELINES[metric]
+            metric: _series_mean(group[metric])
+            if not group.empty
+            else DEFAULT_METRIC_BASELINES[metric]
             for metric in METRICS
         }
     return baselines
 
 
-def _fallback_baseline(prior_metrics: pd.DataFrame, current_metrics: pd.DataFrame) -> dict[str, float]:
+def _fallback_baseline(
+    prior_metrics: pd.DataFrame, current_metrics: pd.DataFrame
+) -> dict[str, float]:
     reference = prior_metrics if not prior_metrics.empty else current_metrics
     if reference.empty:
         return dict(DEFAULT_METRIC_BASELINES)
@@ -381,12 +393,12 @@ def _normalize_start_metrics(dataframe: pd.DataFrame) -> pd.DataFrame:
     normalized = dataframe.copy()
     result = pd.DataFrame()
     result["game_pk"] = _to_numeric_series(normalized.get(_first_column(normalized, ("game_pk",))))
-    result["game_date"] = pd.to_datetime(
-        normalized.get(_first_column(normalized, ("game_date", "Date", "date"))),
-        errors="coerce",
-        utc=False,
+    result["game_date"] = _to_tz_naive_datetime_series(
+        normalized.get(_first_column(normalized, ("game_date", "Date", "date")))
     )
-    result["team"] = _string_series(normalized.get(_first_column(normalized, ("team", "Team")))).str.upper()
+    result["team"] = _string_series(
+        normalized.get(_first_column(normalized, ("team", "Team")))
+    ).str.upper()
     result["pitcher_id"] = _to_numeric_series(
         normalized.get(_first_column(normalized, ("pitcher_id", "pitcher", "player_id", "ID")))
     )
@@ -412,7 +424,9 @@ def _normalize_start_metrics(dataframe: pd.DataFrame) -> pd.DataFrame:
             result[metric] = result[metric].fillna(baseline)
 
     result["innings_pitched"] = result["innings_pitched"].astype(float).fillna(0.0)
-    result["pitch_count"] = result["pitch_count"].astype(float).fillna(DEFAULT_METRIC_BASELINES["pitch_count"])
+    result["pitch_count"] = (
+        result["pitch_count"].astype(float).fillna(DEFAULT_METRIC_BASELINES["pitch_count"])
+    )
     return result.sort_values(["game_date", "game_pk", "team"]).reset_index(drop=True)
 
 
@@ -451,7 +465,10 @@ def _starter_workload_features(
         if not history.empty and "game_date" in history.columns:
             last_start_date = history["game_date"].iloc[-1]
             if pd.notna(last_start_date):
-                days_rest = float((pd.Timestamp(target_day) - pd.to_datetime(last_start_date)).days)
+                _last_ts = pd.to_datetime(last_start_date)
+                if _last_ts.tzinfo is not None:
+                    _last_ts = _last_ts.tz_convert(None)
+                days_rest = float((pd.Timestamp(target_day) - _last_ts).days)
                 days_rest = max(1.0, min(days_rest, 30.0))
             else:
                 days_rest = default_days_rest
@@ -552,7 +569,10 @@ def _load_start_rows(
         if game_pk is None or pd.isna(game_date):
             continue
 
-        for team_key, pitcher_key in (("home_team", "home_starter_id"), ("away_team", "away_starter_id")):
+        for team_key, pitcher_key in (
+            ("home_team", "home_starter_id"),
+            ("away_team", "away_starter_id"),
+        ):
             pitcher_id = _coerce_int(game.get(pitcher_key))
             team = str(game.get(team_key) or "").strip().upper()
             if pitcher_id is None or not team:
@@ -576,7 +596,9 @@ def _start_metrics_cache_path(season: int, start_rows: pd.DataFrame) -> Path:
         "%Y-%m-%d"
     )
     normalized["team"] = normalized["team"].astype(str).str.strip().str.upper()
-    normalized["pitcher_id"] = pd.to_numeric(normalized["pitcher_id"], errors="coerce").astype("Int64")
+    normalized["pitcher_id"] = pd.to_numeric(normalized["pitcher_id"], errors="coerce").astype(
+        "Int64"
+    )
     normalized = normalized.sort_values(["game_date", "game_pk", "team", "pitcher_id"]).reset_index(
         drop=True
     )
@@ -600,7 +622,7 @@ def _build_start_metrics_from_statcast(
         empty = _empty_start_metrics()
         empty = empty.reindex(range(len(start_rows))).reset_index(drop=True)
         empty["game_pk"] = start_rows["game_pk"].astype(int)
-        empty["game_date"] = pd.to_datetime(start_rows["game_date"], errors="coerce")
+        empty["game_date"] = _to_tz_naive_datetime_series(start_rows["game_date"])
         empty["team"] = start_rows["team"].astype(str)
         empty["pitcher_id"] = start_rows["pitcher_id"].astype(int)
         return empty
@@ -640,7 +662,9 @@ def _calculate_league_hr_fb_rate(statcast_frame: pd.DataFrame) -> float:
         return LEAGUE_HR_FB_RATE
 
     fly_balls = terminal["bb_type"].astype(str).str.lower().isin({"fly_ball", "popup"}).sum()
-    home_runs = terminal.get("events", pd.Series(dtype=object)).astype(str).str.lower().eq("home_run").sum()
+    home_runs = (
+        terminal.get("events", pd.Series(dtype=object)).astype(str).str.lower().eq("home_run").sum()
+    )
     if fly_balls <= 0:
         return LEAGUE_HR_FB_RATE
     return float(home_runs / fly_balls)
@@ -670,7 +694,9 @@ def _compute_start_metrics(pitches: pd.DataFrame, league_hr_fb_rate: float) -> d
     outs_recorded = sum(_event_outs(event_name) for event_name in events.tolist())
     innings_pitched = outs_recorded / 3 if outs_recorded else 0.0
     pitch_count = len(pitches)
-    expected_home_runs = fly_balls * (league_hr_fb_rate if league_hr_fb_rate > 0 else LEAGUE_HR_FB_RATE)
+    expected_home_runs = fly_balls * (
+        league_hr_fb_rate if league_hr_fb_rate > 0 else LEAGUE_HR_FB_RATE
+    )
 
     k_pct = _safe_pct(strikeouts, batters_faced)
     bb_pct = _safe_pct(walks, batters_faced)
@@ -709,8 +735,12 @@ def _collapse_plate_appearances(pitches: pd.DataFrame) -> pd.DataFrame:
         return pitches.copy()
 
     if "at_bat_number" in pitches.columns:
-        sort_columns = [column for column in ("at_bat_number", "pitch_number") if column in pitches.columns]
-        terminal = pitches.sort_values(sort_columns).groupby("at_bat_number", as_index=False).tail(1)
+        sort_columns = [
+            column for column in ("at_bat_number", "pitch_number") if column in pitches.columns
+        ]
+        terminal = (
+            pitches.sort_values(sort_columns).groupby("at_bat_number", as_index=False).tail(1)
+        )
         return terminal.reset_index(drop=True)
 
     if "events" in pitches.columns:
@@ -760,11 +790,18 @@ def _average_fastball_velocity(pitches: pd.DataFrame) -> float:
 
     fastball_mask = pd.Series(False, index=pitches.index)
     if pitch_type_column is not None:
-        fastball_mask |= pitches[pitch_type_column].astype(str).str.upper().isin(FASTBALL_PITCH_TYPES)
+        fastball_mask |= (
+            pitches[pitch_type_column].astype(str).str.upper().isin(FASTBALL_PITCH_TYPES)
+        )
     if pitch_name_column is not None:
-        fastball_mask |= pitches[pitch_name_column].astype(str).str.upper().str.contains(
-            "|".join(FASTBALL_NAME_TOKENS),
-            regex=True,
+        fastball_mask |= (
+            pitches[pitch_name_column]
+            .astype(str)
+            .str.upper()
+            .str.contains(
+                "|".join(FASTBALL_NAME_TOKENS),
+                regex=True,
+            )
         )
 
     fastball_velocities = _to_numeric_series(pitches.loc[fastball_mask, velocity_column]).dropna()
@@ -788,7 +825,9 @@ def _pitch_mix_entropy(pitches: pd.DataFrame) -> float:
     if total <= 0:
         return DEFAULT_METRIC_BASELINES["pitch_mix_entropy"]
 
-    entropy = -sum((count / total) * math.log2(count / total) for count in pitch_counts if count > 0)
+    entropy = -sum(
+        (count / total) * math.log2(count / total) for count in pitch_counts if count > 0
+    )
     return float(entropy)
 
 
@@ -866,7 +905,10 @@ def _persist_features(db_path: Path, features: Sequence[GameFeatures]) -> None:
               AND as_of_timestamp = ?
               AND ((window_size IS NULL AND ? IS NULL) OR window_size = ?)
             """,
-            [(game_pk, feature_name, as_of, window_size, window_size) for game_pk, feature_name, _, window_size, as_of in rows],
+            [
+                (game_pk, feature_name, as_of, window_size, window_size)
+                for game_pk, feature_name, _, window_size, as_of in rows
+            ],
         )
         connection.executemany(
             """
@@ -891,6 +933,14 @@ def _to_numeric_series(values: Any) -> pd.Series:
     if values is None:
         return pd.Series(dtype=float)
     return pd.to_numeric(values, errors="coerce")
+
+
+def _to_tz_naive_datetime_series(values: Any) -> pd.Series:
+    if values is None:
+        return pd.Series(dtype="datetime64[ns]")
+
+    parsed = pd.to_datetime(values, errors="coerce", utc=True, format="mixed")
+    return parsed.dt.tz_convert(None)
 
 
 def _string_series(values: Any) -> pd.Series:

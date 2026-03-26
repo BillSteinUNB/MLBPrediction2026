@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from collections import deque
 from collections.abc import Callable, Sequence
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
@@ -113,6 +114,363 @@ def compute_bullpen_features(
 
     _persist_features(database_path, features)
     return features
+
+
+def compute_bullpen_features_for_schedule(
+    schedule: pd.DataFrame,
+    *,
+    db_path: str | Path = DEFAULT_DB_PATH,
+    pitch_count_windows: Sequence[int] = DEFAULT_PITCH_COUNT_WINDOWS,
+    ir_window: int = DEFAULT_IR_WINDOW,
+    top_reliever_count: int = DEFAULT_TOP_RELIEVER_COUNT,
+    min_season_days: int = DEFAULT_MIN_SEASON_DAYS,
+    refresh: bool = False,
+    bullpen_metrics_fetcher: _BullpenMetricsFetcher | None = None,
+    team_logs_fetcher: _TeamLogsFetcher = fetch_team_game_logs,
+) -> list[GameFeatures]:
+    """Compute bullpen features for an entire schedule slice in one pass.
+
+    This avoids recomputing team/day bullpen history for each individual target date.
+    """
+
+    if schedule.empty:
+        return []
+
+    database_path = Path(db_path)
+    init_db(database_path)
+
+    working_schedule = schedule.copy()
+    working_schedule["game_pk"] = pd.to_numeric(working_schedule["game_pk"], errors="coerce").astype(int)
+    working_schedule["game_date"] = pd.to_datetime(working_schedule["game_date"], errors="coerce").dt.date
+    working_schedule["home_team"] = working_schedule["home_team"].astype(str).str.strip().str.upper()
+    working_schedule["away_team"] = working_schedule["away_team"].astype(str).str.strip().str.upper()
+    if "scheduled_start" in working_schedule.columns:
+        working_schedule["scheduled_start"] = pd.to_datetime(
+            working_schedule["scheduled_start"], utc=True, errors="coerce"
+        )
+
+    season_start_by_year = {
+        int(season): _resolve_season_start_date(database_path, int(season))
+        for season in sorted(
+            {
+                int(value)
+                for value in pd.to_datetime(working_schedule["game_date"], errors="coerce").dt.year.dropna().tolist()
+            }
+        )
+    }
+
+    features: list[GameFeatures] = []
+    for season, season_schedule in working_schedule.groupby(
+        pd.to_datetime(working_schedule["game_date"], errors="coerce").dt.year, sort=True
+    ):
+        season_int = int(season)
+        target_dates = sorted(
+            {value for value in season_schedule["game_date"].dropna().tolist()}
+        )
+        if not target_dates:
+            continue
+        if bullpen_metrics_fetcher is None:
+            metrics_frame = _fetch_season_bullpen_metrics(
+                season_int,
+                db_path=database_path,
+                end_date=date(season_int, 12, 31),
+                refresh=refresh,
+                team_logs_fetcher=team_logs_fetcher,
+            )
+        else:
+            metrics_frame = bullpen_metrics_fetcher(
+                season_int,
+                db_path=database_path,
+                end_date=None,
+                refresh=refresh,
+            )
+
+        normalized_metrics = _normalize_bullpen_metrics(metrics_frame)
+        metrics_start_day = (
+            pd.Timestamp(normalized_metrics["game_date"].min()).date()
+            if not normalized_metrics.empty
+            else season_start_by_year.get(season_int, min(target_dates))
+        )
+        season_lookup = _build_bullpen_feature_lookup_for_schedule(
+            schedule=season_schedule,
+            bullpen_metrics=normalized_metrics,
+            target_dates=target_dates,
+            season_start=min(season_start_by_year.get(season_int, min(target_dates)), metrics_start_day),
+            pitch_count_windows=pitch_count_windows,
+            ir_window=ir_window,
+            top_reliever_count=top_reliever_count,
+            min_season_days=min_season_days,
+        )
+
+        for game in season_schedule.to_dict(orient="records"):
+            game_pk = int(game["game_pk"])
+            game_day = game["game_date"]
+            as_of_timestamp = _schedule_as_of_timestamp(game_day, game.get("scheduled_start"))
+            for side_name, team_key in (("home", "home_team"), ("away", "away_team")):
+                team = str(game[team_key]).strip().upper()
+                feature_values = season_lookup.get((team, game_day))
+                if feature_values is None:
+                    season_day = max((game_day - season_start_by_year.get(season_int, game_day)).days + 1, 1)
+                    feature_values = _default_feature_values(
+                        pitch_count_windows=pitch_count_windows,
+                        ir_window=ir_window,
+                        top_reliever_count=top_reliever_count,
+                    )
+                    if season_day > min_season_days:
+                        feature_values = _default_feature_values(
+                            pitch_count_windows=pitch_count_windows,
+                            ir_window=ir_window,
+                            top_reliever_count=top_reliever_count,
+                        )
+                for feature_name, feature_value, window_size in feature_values:
+                    features.append(
+                        GameFeatures(
+                            game_pk=game_pk,
+                            feature_name=f"{side_name}_team_{feature_name}",
+                            feature_value=float(feature_value),
+                            window_size=window_size,
+                            as_of_timestamp=as_of_timestamp,
+                        )
+                    )
+
+    _persist_features(database_path, features)
+    return features
+
+
+def _build_bullpen_feature_lookup_for_schedule(
+    *,
+    schedule: pd.DataFrame,
+    bullpen_metrics: pd.DataFrame,
+    target_dates: Sequence[date],
+    season_start: date,
+    pitch_count_windows: Sequence[int],
+    ir_window: int,
+    top_reliever_count: int,
+    min_season_days: int,
+) -> dict[tuple[str, date], list[tuple[str, float, int | None]]]:
+    if schedule.empty:
+        return {}
+
+    if bullpen_metrics.empty:
+        teams = sorted(
+            {
+                str(team).strip().upper()
+                for column in ("home_team", "away_team")
+                for team in schedule[column].dropna().tolist()
+            }
+        )
+        return {
+            (team, target_day): _default_feature_values(
+                pitch_count_windows=pitch_count_windows,
+                ir_window=ir_window,
+                top_reliever_count=top_reliever_count,
+            )
+            for team in teams
+            for target_day in target_dates
+        }
+
+    metrics = bullpen_metrics.copy()
+    metrics["game_day"] = pd.to_datetime(metrics["game_date"], errors="coerce").dt.date
+    metrics = metrics.dropna(subset=["game_day", "team"]).copy()
+    if metrics.empty:
+        return {}
+
+    metrics["ip_weighted_xfip"] = metrics["xfip"] * metrics["innings_pitched"]
+    team_day_pitcher = (
+        metrics.groupby(["team", "game_day", "pitcher_id"], dropna=True, as_index=False)
+        .agg(day_pitch_count=("pitch_count", "sum"))
+        .sort_values(["team", "game_day", "pitcher_id"])
+    )
+    team_day_totals = (
+        metrics.groupby(["team", "game_day"], as_index=False)
+        .agg(
+            team_pitch_count=("pitch_count", "sum"),
+            ip_total=("innings_pitched", "sum"),
+            xfip_weighted_total=("ip_weighted_xfip", "sum"),
+        )
+        .sort_values(["team", "game_day"])
+    )
+    team_game_ir = (
+        metrics.groupby(["team", "game_day", "game_pk"], as_index=False)
+        .agg(
+            inherited_runners=("inherited_runners", "max"),
+            inherited_runners_scored=("inherited_runners_scored", "max"),
+        )
+        .sort_values(["team", "game_day", "game_pk"])
+    )
+
+    target_dates_by_team: dict[str, list[date]] = {}
+    for game in schedule.to_dict(orient="records"):
+        game_day = game["game_date"]
+        for key in ("home_team", "away_team"):
+            team = str(game[key]).strip().upper()
+            target_dates_by_team.setdefault(team, []).append(game_day)
+    for team, values in list(target_dates_by_team.items()):
+        target_dates_by_team[team] = sorted(set(values))
+
+    lookup: dict[tuple[str, date], list[tuple[str, float, int | None]]] = {}
+    for team, team_target_dates in target_dates_by_team.items():
+        day_pitcher_rows = team_day_pitcher.loc[team_day_pitcher["team"] == team]
+        day_total_rows = team_day_totals.loc[team_day_totals["team"] == team]
+        game_ir_rows = team_game_ir.loc[team_game_ir["team"] == team]
+
+        pitcher_rows_by_day: dict[date, list[tuple[int, float]]] = {}
+        for row in day_pitcher_rows.itertuples(index=False):
+            if pd.isna(row.pitcher_id):
+                continue
+            pitcher_rows_by_day.setdefault(row.game_day, []).append((int(row.pitcher_id), float(row.day_pitch_count)))
+
+        total_rows_by_day: dict[date, tuple[float, float, float]] = {}
+        for row in day_total_rows.itertuples(index=False):
+            total_rows_by_day[row.game_day] = (
+                float(row.team_pitch_count),
+                float(row.ip_total),
+                float(row.xfip_weighted_total),
+            )
+
+        ir_rows_sorted = [
+            (
+                row.game_day,
+                float(row.inherited_runners),
+                float(row.inherited_runners_scored),
+            )
+            for row in game_ir_rows.itertuples(index=False)
+        ]
+
+        pitcher_usage: dict[int, float] = {}
+        pitcher_last_day: dict[int, date] = {}
+        pitch_window_sums = {int(window): 0.0 for window in pitch_count_windows}
+        pitch_window_queues = {int(window): deque() for window in pitch_count_windows}
+        ir_queue: deque[tuple[float, float]] = deque()
+        ir_totals = {"runners": 0.0, "scored": 0.0}
+        cumulative_ip = 0.0
+        cumulative_xfip_weighted = 0.0
+
+        all_metric_days = sorted(
+            {
+                *pitcher_rows_by_day.keys(),
+                *total_rows_by_day.keys(),
+                *(row_day for row_day, _ir, _is in ir_rows_sorted),
+            }
+        )
+        metric_day_index = 0
+        ir_index = 0
+
+        for target_day in team_target_dates:
+            while metric_day_index < len(all_metric_days) and all_metric_days[metric_day_index] < target_day:
+                metric_day = all_metric_days[metric_day_index]
+                for pitcher_id, pitch_count in pitcher_rows_by_day.get(metric_day, []):
+                    pitcher_usage[pitcher_id] = pitcher_usage.get(pitcher_id, 0.0) + float(pitch_count)
+                    pitcher_last_day[pitcher_id] = metric_day
+
+                if metric_day in total_rows_by_day:
+                    day_pitch_count, ip_total, xfip_weighted_total = total_rows_by_day[metric_day]
+                    cumulative_ip += ip_total
+                    cumulative_xfip_weighted += xfip_weighted_total
+                    for window in pitch_count_windows:
+                        window_int = int(window)
+                        queue = pitch_window_queues[window_int]
+                        queue.append((metric_day, float(day_pitch_count)))
+                        pitch_window_sums[window_int] += float(day_pitch_count)
+
+                metric_day_index += 1
+
+            while ir_index < len(ir_rows_sorted) and ir_rows_sorted[ir_index][0] < target_day:
+                _game_day, inherited_runners, inherited_scored = ir_rows_sorted[ir_index]
+                ir_queue.append((inherited_runners, inherited_scored))
+                ir_totals["runners"] += inherited_runners
+                ir_totals["scored"] += inherited_scored
+                while len(ir_queue) > ir_window:
+                    expired_runners, expired_scored = ir_queue.popleft()
+                    ir_totals["runners"] -= expired_runners
+                    ir_totals["scored"] -= expired_scored
+                ir_index += 1
+
+            for window in pitch_count_windows:
+                window_int = int(window)
+                queue = pitch_window_queues[window_int]
+                start_day = target_day - timedelta(days=window_int)
+                while queue and queue[0][0] < start_day:
+                    _expired_day, expired_pitch_count = queue.popleft()
+                    pitch_window_sums[window_int] -= expired_pitch_count
+
+            season_day = max((target_day - season_start).days + 1, 1)
+            if season_day <= min_season_days or not pitcher_usage:
+                lookup[(team, target_day)] = _default_feature_values(
+                    pitch_count_windows=pitch_count_windows,
+                    ir_window=ir_window,
+                    top_reliever_count=top_reliever_count,
+                )
+                continue
+
+            ranked_relievers = sorted(
+                pitcher_usage.items(),
+                key=lambda item: (
+                    -float(item[1]),
+                    -pitcher_last_day.get(int(item[0]), season_start).toordinal(),
+                    int(item[0]),
+                ),
+            )[:top_reliever_count]
+
+            if ranked_relievers:
+                rest_days = {
+                    int(pitcher_id): max((target_day - pitcher_last_day[int(pitcher_id)]).days - 1, 0)
+                    for pitcher_id, _usage in ranked_relievers
+                }
+                average_rest_days = float(sum(rest_days.values()) / len(rest_days))
+                availability_count = float(
+                    sum(
+                        1
+                        for value in rest_days.values()
+                        if value >= AVAILABLE_REST_DAYS_THRESHOLD
+                    )
+                )
+            else:
+                average_rest_days = DEFAULT_AVG_REST_DAYS
+                availability_count = float(DEFAULT_TOP_RELIEVER_COUNT)
+
+            bullpen_xfip = (
+                float(cumulative_xfip_weighted / cumulative_ip)
+                if cumulative_ip > 0
+                else DEFAULT_XFIP
+            )
+            inherited_runner_pct = (
+                float(ir_totals["scored"] / ir_totals["runners"])
+                if ir_totals["runners"] > 0
+                else 0.0
+            )
+            feature_values: list[tuple[str, float, int | None]] = []
+            for window in pitch_count_windows:
+                window_int = int(window)
+                feature_values.append(
+                    (
+                        f"bullpen_pitch_count_{window_int}d",
+                        float(pitch_window_sums[window_int]),
+                        window_int,
+                    )
+                )
+            feature_values.extend(
+                [
+                    ("bullpen_avg_rest_days_top5", average_rest_days, None),
+                    (f"bullpen_ir_pct_{ir_window}g", inherited_runner_pct, ir_window),
+                    ("bullpen_xfip", bullpen_xfip, None),
+                    ("bullpen_high_leverage_available_count", availability_count, None),
+                ]
+            )
+            lookup[(team, target_day)] = feature_values
+
+    return lookup
+
+
+def _schedule_as_of_timestamp(target_day: date, scheduled_start: Any) -> datetime:
+    if scheduled_start is not None and not pd.isna(scheduled_start):
+        scheduled_timestamp = pd.Timestamp(scheduled_start)
+        if scheduled_timestamp.tzinfo is None:
+            scheduled_timestamp = scheduled_timestamp.tz_localize("UTC")
+        else:
+            scheduled_timestamp = scheduled_timestamp.tz_convert("UTC")
+        return (scheduled_timestamp.normalize() - pd.Timedelta(days=1)).to_pydatetime()
+    return datetime.combine(target_day - timedelta(days=1), time.min, tzinfo=timezone.utc)
 
 
 def _build_feature_values(
@@ -317,6 +675,21 @@ def _resolve_season_day(db_path: Path, target_day: date, bullpen_metrics: pd.Dat
 
     season_start = min(season_start_candidates)
     return max((target_day - season_start).days + 1, 1)
+
+
+def _resolve_season_start_date(db_path: Path, season: int) -> date:
+    with sqlite_connection(db_path, builder_optimized=True) as connection:
+        row = connection.execute(
+            """
+            SELECT MIN(substr(date, 1, 10))
+            FROM games
+            WHERE substr(date, 1, 4) = ?
+            """,
+            (str(season),),
+        ).fetchone()
+    if row and row[0]:
+        return date.fromisoformat(str(row[0]))
+    return date(season, 1, 1)
 
 
 def _normalize_bullpen_metrics(dataframe: pd.DataFrame) -> pd.DataFrame:
@@ -856,34 +1229,29 @@ def _persist_features(db_path: Path, features: Sequence[GameFeatures]) -> None:
     if not features:
         return
 
-    rows = [
-        (
-            feature.game_pk,
-            feature.feature_name,
-            feature.feature_value,
-            feature.window_size,
-            feature.as_of_timestamp.isoformat(),
-        )
-        for feature in features
-    ]
+    rows = list(
+        {
+            (
+                feature.game_pk,
+                feature.feature_name,
+                feature.feature_value,
+                feature.window_size,
+                feature.as_of_timestamp.isoformat(),
+            ): None
+            for feature in features
+        }.keys()
+    )
 
     with sqlite_connection(db_path, builder_optimized=True) as connection:
         connection.executemany(
             """
-            DELETE FROM features
-            WHERE game_pk = ?
-              AND feature_name = ?
-              AND as_of_timestamp = ?
-              AND ((window_size IS NULL AND ? IS NULL) OR window_size = ?)
-            """,
-            [
-                (game_pk, feature_name, as_of_timestamp, window_size, window_size)
-                for game_pk, feature_name, _feature_value, window_size, as_of_timestamp in rows
-            ],
-        )
-        connection.executemany(
-            """
-            INSERT INTO features (game_pk, feature_name, feature_value, window_size, as_of_timestamp)
+            INSERT OR REPLACE INTO features (
+                game_pk,
+                feature_name,
+                feature_value,
+                window_size,
+                as_of_timestamp
+            )
             VALUES (?, ?, ?, ?, ?)
             """,
             rows,

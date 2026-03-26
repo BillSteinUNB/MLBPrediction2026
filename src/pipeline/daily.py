@@ -4,6 +4,7 @@ import argparse
 import json
 import logging
 import sqlite3
+import sys
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
@@ -42,6 +43,8 @@ from src.model.data_builder import (
 )
 from src.model.market_recalibration import shrink_probability_toward_market
 from src.model.margin_pricing import margin_to_cover_probability
+from src.model.run_count_trainer import BlendedRunCountRegressor
+from src.model.score_pricing import moneyline_probabilities, spread_cover_probabilities
 from src.model.xgboost_trainer import DEFAULT_MODEL_OUTPUT_DIR
 from src.models.bet import BetDecision
 from src.models.lineup import Lineup
@@ -70,8 +73,7 @@ DEFAULT_PROJECTED_F5_TOTAL_RUNS = 4.6
 DEFAULT_OFFICIAL_MIN_BET_ODDS = -175
 DEFAULT_OFFICIAL_MAX_BET_ODDS = 150
 DEFAULT_OFFICIAL_MAX_TRUSTED_EDGE = 0.15
-DEFAULT_OFFICIAL_ML_MIN_EDGE = 0.08
-DEFAULT_OFFICIAL_RL_MIN_EDGE = 0.06
+DEFAULT_OFFICIAL_VALUE_PLAY_MIN_EDGE = 0.06
 DEFAULT_OFFICIAL_RL_SELECTION_PENALTY = 0.02
 DEFAULT_OFFICIAL_EDGE_SCALE_CAP = 0.05
 DEFAULT_OFFICIAL_MIN_UNITS = 0.25
@@ -86,6 +88,11 @@ DEFAULT_RLV2_BLEND_EVAL_PATHS: tuple[tuple[str, str], ...] = (
     ("rlv2-blend-longhorizon", "rl_v2_blend_eval_2021_2025.json"),
     ("rlv2-blend-tuned", "rl_v2_blend_eval_2025.json"),
 )
+DEFAULT_RUN_COUNT_EXPERIMENT = "2026-run-count-newfeatures-150x5"
+LIVE_ODDS_CACHE_TTL_MINUTES = 15
+FULL_GAME_ODDS_CACHE_TTL_MINUTES = 30
+LIVE_ODDS_CACHE_RETENTION_DAYS = 7
+SCRAPER_ODDS_DB_PATH = Path("OddsScraper") / "data" / "mlb_odds.db"
 
 _SCHEDULE_CIRCUIT = CircuitBreaker(name="schedule")
 _HISTORY_CIRCUIT = CircuitBreaker(name="history")
@@ -165,6 +172,8 @@ class GameProcessingResult:
     game_pk: int
     matchup: str
     status: Literal["pick", "no_pick", "error"]
+    game_status: str | None = None
+    is_completed: bool = False
     prediction: Prediction | None = None
     selected_decision: BetDecision | None = None
     forced_decision: BetDecision | None = None
@@ -180,6 +189,8 @@ class GameProcessingResult:
             "game_pk": self.game_pk,
             "matchup": self.matchup,
             "status": self.status,
+            "game_status": self.game_status,
+            "is_completed": self.is_completed,
             "prediction": self.prediction.model_dump(mode="json") if self.prediction else None,
             "selected_decision": (
                 self.selected_decision.model_dump(mode="json") if self.selected_decision else None
@@ -226,6 +237,12 @@ class DailyPipelineResult:
         }
 
 
+def _slate_response_payload(result: DailyPipelineResult) -> dict[str, Any]:
+    payload = result.to_dict()
+    payload.pop("notification_payload", None)
+    return payload
+
+
 class DiscordNotifier:
     def send_picks(self, **payload: Any) -> dict[str, Any]:
         return send_picks(**payload)
@@ -257,6 +274,22 @@ class ArtifactOrFallbackPredictionEngine:
             model_prefix="f5_margin_v2_model",
         )
         self.rlv2_blend_weight = self._resolve_rlv2_blend_weight()
+        self.run_count_f5_home = self._load_structured_model_bundle(
+            experiment_names=(DEFAULT_RUN_COUNT_EXPERIMENT,),
+            model_prefix="f5_home_runs_model",
+        )
+        self.run_count_f5_away = self._load_structured_model_bundle(
+            experiment_names=(DEFAULT_RUN_COUNT_EXPERIMENT,),
+            model_prefix="f5_away_runs_model",
+        )
+        self.run_count_full_home = self._load_structured_model_bundle(
+            experiment_names=(DEFAULT_RUN_COUNT_EXPERIMENT,),
+            model_prefix="full_game_home_runs_model",
+        )
+        self.run_count_full_away = self._load_structured_model_bundle(
+            experiment_names=(DEFAULT_RUN_COUNT_EXPERIMENT,),
+            model_prefix="full_game_away_runs_model",
+        )
 
     def predict(self, inference_frame: pd.DataFrame) -> Prediction:
         resolved_frame = inference_frame.copy().reset_index(drop=True)
@@ -284,19 +317,73 @@ class ArtifactOrFallbackPredictionEngine:
         projected_home_margin = self._predict_rlv2_margin_value(resolved_frame)
         if projected_home_margin is None:
             projected_home_margin = float((ml_home_probability - 0.5) * 2.0)
-        projected_total_runs = self._estimate_projected_f5_total_runs(resolved_frame.iloc[0])
-        projected_home_runs, projected_away_runs = _margin_total_to_team_runs(
-            home_margin=projected_home_margin,
-            total_runs=projected_total_runs,
-        )
+        run_count_result = self._predict_f5_run_counts(resolved_frame)
+        if run_count_result is not None:
+            projected_home_runs, projected_away_runs = run_count_result
+            projected_home_margin = projected_home_runs - projected_away_runs
+            projected_total_runs = projected_home_runs + projected_away_runs
+        else:
+            projected_total_runs = self._estimate_projected_f5_total_runs(resolved_frame.iloc[0])
+            projected_home_runs, projected_away_runs = _margin_total_to_team_runs(
+                home_margin=projected_home_margin,
+                total_runs=projected_total_runs,
+            )
+
+        if run_count_result is not None:
+            f5_home_runs_std = self._resolve_run_count_std(self.run_count_f5_home)
+            f5_away_runs_std = self._resolve_run_count_std(self.run_count_f5_away)
+            if f5_home_runs_std is not None and f5_away_runs_std is not None:
+                run_count_ml_home, run_count_ml_away = moneyline_probabilities(
+                    home_runs_mean=projected_home_runs,
+                    away_runs_mean=projected_away_runs,
+                    home_runs_std=f5_home_runs_std,
+                    away_runs_std=f5_away_runs_std,
+                )
+                if run_count_ml_home is not None and run_count_ml_away is not None:
+                    ml_home_probability = run_count_ml_home
+                    rl_home_probability = run_count_ml_home
+
+        full_game_ml_home_probability: float | None = None
+        full_game_ml_away_probability: float | None = None
+        projected_full_game_home_runs: float | None = None
+        projected_full_game_away_runs: float | None = None
+        projected_full_game_total_runs: float | None = None
+        projected_full_game_home_margin: float | None = None
+        full_game_run_count_result = self._predict_full_game_run_counts(resolved_frame)
+        if full_game_run_count_result is not None:
+            projected_full_game_home_runs, projected_full_game_away_runs = full_game_run_count_result
+            projected_full_game_home_margin = (
+                projected_full_game_home_runs - projected_full_game_away_runs
+            )
+            projected_full_game_total_runs = (
+                projected_full_game_home_runs + projected_full_game_away_runs
+            )
+            home_runs_std = self._resolve_run_count_std(self.run_count_full_home)
+            away_runs_std = self._resolve_run_count_std(self.run_count_full_away)
+            if home_runs_std is not None and away_runs_std is not None:
+                (
+                    full_game_ml_home_probability,
+                    full_game_ml_away_probability,
+                ) = moneyline_probabilities(
+                    home_runs_mean=projected_full_game_home_runs,
+                    away_runs_mean=projected_full_game_away_runs,
+                    home_runs_std=home_runs_std,
+                    away_runs_std=away_runs_std,
+                )
 
         return Prediction(
             game_pk=game_pk,
             model_version=self.model_version,
+            full_game_ml_home_prob=full_game_ml_home_probability,
+            full_game_ml_away_prob=full_game_ml_away_probability,
             f5_ml_home_prob=ml_home_probability,
             f5_ml_away_prob=1.0 - ml_home_probability,
             f5_rl_home_prob=rl_home_probability,
             f5_rl_away_prob=1.0 - rl_home_probability,
+            projected_full_game_home_runs=projected_full_game_home_runs,
+            projected_full_game_away_runs=projected_full_game_away_runs,
+            projected_full_game_total_runs=projected_full_game_total_runs,
+            projected_full_game_home_margin=projected_full_game_home_margin,
             projected_f5_home_runs=projected_home_runs,
             projected_f5_away_runs=projected_away_runs,
             projected_f5_total_runs=projected_total_runs,
@@ -318,6 +405,16 @@ class ArtifactOrFallbackPredictionEngine:
 
         for snapshot in snapshots:
             if snapshot.market_type == "f5_ml":
+                ml_source_model = "legacy_f5_ml"
+                if (
+                    self.run_count_f5_home is not None
+                    and self.run_count_f5_away is not None
+                    and prediction.projected_f5_home_runs is not None
+                    and prediction.projected_f5_away_runs is not None
+                    and self._resolve_run_count_std(self.run_count_f5_home) is not None
+                    and self._resolve_run_count_std(self.run_count_f5_away) is not None
+                ):
+                    ml_source_model = "run_count_f5_ml"
                 adjusted_home_probability, adjusted_away_probability = _recalibrate_ml_market_pair(
                     home_probability=float(prediction.f5_ml_home_prob),
                     away_probability=float(prediction.f5_ml_away_prob),
@@ -332,17 +429,37 @@ class ArtifactOrFallbackPredictionEngine:
                         away_probability=adjusted_away_probability,
                         snapshot=snapshot,
                         db_path=db_path,
-                        source_model="legacy_f5_ml",
+                        source_model=ml_source_model,
                         source_model_version=self.model_version,
                     )
                 )
                 continue
 
-            legacy_home_probability = float(prediction.f5_rl_home_prob)
-            legacy_source_model = "legacy_f5_rl"
-            if _is_ml_equivalent_f5_runline(snapshot):
-                legacy_home_probability = float(prediction.f5_ml_home_prob)
-                legacy_source_model = "legacy_f5_ml_equiv"
+            if (
+                not _is_ml_equivalent_f5_runline(snapshot)
+                and prediction.projected_f5_home_runs is not None
+                and prediction.projected_f5_away_runs is not None
+                and snapshot.home_point is not None
+            ):
+                rc_rl_home, rc_rl_away = spread_cover_probabilities(
+                    home_runs_mean=prediction.projected_f5_home_runs,
+                    away_runs_mean=prediction.projected_f5_away_runs,
+                    home_runs_std=self._resolve_run_count_std(self.run_count_f5_home) or 2.35,
+                    away_runs_std=self._resolve_run_count_std(self.run_count_f5_away) or 2.29,
+                    home_point=float(snapshot.home_point),
+                )
+                legacy_home_probability = (
+                    float(rc_rl_home)
+                    if rc_rl_home is not None
+                    else float(prediction.f5_rl_home_prob)
+                )
+                legacy_source_model = "run_count_f5_rl"
+            else:
+                legacy_home_probability = float(prediction.f5_rl_home_prob)
+                legacy_source_model = "legacy_f5_rl"
+                if _is_ml_equivalent_f5_runline(snapshot):
+                    legacy_home_probability = float(prediction.f5_ml_home_prob)
+                    legacy_source_model = "legacy_f5_ml_equiv"
 
             candidates.extend(
                 self._build_market_candidates(
@@ -634,7 +751,7 @@ class ArtifactOrFallbackPredictionEngine:
             except RuntimeError:
                 logger.warning("Skipping incompatible artifact %s", model_path, exc_info=True)
                 continue
-            model = joblib.load(model_path)
+            model = self._load_structured_joblib_model(model_path)
             return StructuredModelBundle(
                 model=model,
                 feature_columns=list(metadata_payload.get("feature_columns", [])),
@@ -643,6 +760,17 @@ class ArtifactOrFallbackPredictionEngine:
                 extra_metadata=metadata_payload,
             )
         return None
+
+    def _load_structured_joblib_model(self, model_path: Path) -> Any:
+        try:
+            return joblib.load(model_path)
+        except AttributeError as exc:
+            if "BlendedRunCountRegressor" not in str(exc):
+                raise
+            main_module = sys.modules.get("__main__")
+            if main_module is not None and not hasattr(main_module, "BlendedRunCountRegressor"):
+                setattr(main_module, "BlendedRunCountRegressor", BlendedRunCountRegressor)
+            return joblib.load(model_path)
 
     def _resolve_rlv2_blend_weight(self) -> float:
         for experiment_name, filename in DEFAULT_RLV2_BLEND_EVAL_PATHS:
@@ -722,6 +850,79 @@ class ArtifactOrFallbackPredictionEngine:
         weather_composite = float(inference_row.get("weather_composite", 1.0) or 1.0)
         adjusted_total = DEFAULT_PROJECTED_F5_TOTAL_RUNS * park_runs_factor * weather_composite
         return float(min(max(adjusted_total, 2.5), 7.5))
+
+    def _predict_f5_run_counts(
+        self, inference_frame: pd.DataFrame
+    ) -> tuple[float, float] | None:
+        return self._predict_run_counts(
+            inference_frame=inference_frame,
+            home_bundle=self.run_count_f5_home,
+            away_bundle=self.run_count_f5_away,
+            failure_message="F5 run count prediction failed, falling back to formula",
+        )
+
+    def _predict_full_game_run_counts(
+        self, inference_frame: pd.DataFrame
+    ) -> tuple[float, float] | None:
+        return self._predict_run_counts(
+            inference_frame=inference_frame,
+            home_bundle=self.run_count_full_home,
+            away_bundle=self.run_count_full_away,
+            failure_message="Full-game run count prediction failed; omitting full-game projections",
+        )
+
+    def _predict_run_counts(
+        self,
+        *,
+        inference_frame: pd.DataFrame,
+        home_bundle: StructuredModelBundle | None,
+        away_bundle: StructuredModelBundle | None,
+        failure_message: str,
+    ) -> tuple[float, float] | None:
+        if home_bundle is None or away_bundle is None:
+            return None
+        try:
+            def _fill_frame(bundle: StructuredModelBundle) -> pd.DataFrame:
+                missing = {
+                    col: _default_feature_fill_value(col)
+                    for col in bundle.feature_columns
+                    if col not in inference_frame.columns
+                }
+                frame = inference_frame.copy()
+                if missing:
+                    frame = pd.concat(
+                        [frame, pd.DataFrame([missing], index=frame.index)], axis=1
+                    )
+                return frame[bundle.feature_columns]
+
+            home_pred = float(home_bundle.model.predict(_fill_frame(home_bundle))[0])
+            away_pred = float(away_bundle.model.predict(_fill_frame(away_bundle))[0])
+            return max(0.0, home_pred), max(0.0, away_pred)
+        except Exception:
+            logger.warning(failure_message, exc_info=True)
+            return None
+
+    def _resolve_run_count_std(self, bundle: StructuredModelBundle | None) -> float | None:
+        if bundle is None:
+            return None
+        holdout_metrics = bundle.extra_metadata.get("holdout_metrics", {})
+        holdout_rmse = holdout_metrics.get("rmse")
+        if holdout_rmse is not None:
+            try:
+                resolved_rmse = float(holdout_rmse)
+                if resolved_rmse > 0:
+                    return resolved_rmse
+            except (TypeError, ValueError):
+                pass
+        cv_best_rmse = bundle.extra_metadata.get("cv_best_rmse")
+        if cv_best_rmse is not None:
+            try:
+                resolved_rmse = float(cv_best_rmse)
+                if resolved_rmse > 0:
+                    return resolved_rmse
+            except (TypeError, ValueError):
+                pass
+        return None
 
     def _prepare_rlv2_frame(
         self,
@@ -858,6 +1059,13 @@ def run_daily_pipeline(
             notification_payload=payload,
             games=[],
         )
+        _persist_cached_slate_response(
+            database_path,
+            pipeline_date=pipeline_day.isoformat(),
+            mode=mode,
+            dry_run=dry_run,
+            result=result,
+        )
         return result
 
     historical_games = history_fetcher(pipeline_day.year, pipeline_day)
@@ -913,6 +1121,8 @@ def run_daily_pipeline(
     for game_pk in schedule["game_pk"].astype(int).tolist():
         game = schedule_lookup[game_pk]
         matchup = f"{game['away_team']} @ {game['home_team']}"
+        game_status = _normalize_game_status(game.get("status"))
+        is_completed = game_status == "final"
         row_frame = inference_frame.loc[inference_frame["game_pk"] == game_pk].reset_index(
             drop=True
         )
@@ -959,6 +1169,8 @@ def run_daily_pipeline(
                         game_pk=game_pk,
                         matchup=matchup,
                         status="no_pick",
+                        game_status=game_status,
+                        is_completed=is_completed,
                         prediction=prediction,
                         forced_decision=forced_decision,
                         no_pick_reason="; ".join(validation_reasons),
@@ -979,6 +1191,8 @@ def run_daily_pipeline(
                         game_pk=game_pk,
                         matchup=matchup,
                         status="no_pick",
+                        game_status=game_status,
+                        is_completed=is_completed,
                         prediction=prediction,
                         selected_decision=decision,
                         forced_decision=forced_decision,
@@ -994,6 +1208,8 @@ def run_daily_pipeline(
                         game_pk=game_pk,
                         matchup=matchup,
                         status="no_pick",
+                        game_status=game_status,
+                        is_completed=is_completed,
                         prediction=prediction,
                         forced_decision=forced_decision,
                         no_pick_reason="edge below threshold",
@@ -1008,6 +1224,8 @@ def run_daily_pipeline(
                     game_pk=game_pk,
                     matchup=matchup,
                     status="pick",
+                    game_status=game_status,
+                    is_completed=is_completed,
                     prediction=prediction,
                     selected_decision=decision,
                     forced_decision=forced_decision,
@@ -1022,6 +1240,8 @@ def run_daily_pipeline(
                     game_pk=game_pk,
                     matchup=matchup,
                     status="error",
+                    game_status=game_status,
+                    is_completed=is_completed,
                     error_message=str(exc),
                     input_status=input_status if "input_status" in locals() else None,
                 )
@@ -1119,7 +1339,7 @@ def run_daily_pipeline(
         except sqlite3.Error:
             logger.warning("Failed to update daily pipeline notified flags", exc_info=True)
 
-    return DailyPipelineResult(
+    result = DailyPipelineResult(
         run_id=run_id,
         pipeline_date=pipeline_day.isoformat(),
         mode=mode,
@@ -1132,6 +1352,14 @@ def run_daily_pipeline(
         notification_payload=notification_payload,
         games=results,
     )
+    _persist_cached_slate_response(
+        database_path,
+        pipeline_date=pipeline_day.isoformat(),
+        mode=mode,
+        dry_run=dry_run,
+        result=result,
+    )
+    return result
 
 
 def _fetch_schedule_payload(target_date: date) -> dict[str, Any]:
@@ -1244,6 +1472,21 @@ def _default_lineups_fetcher(target_date: str) -> list[Lineup]:
 
 def _default_odds_fetcher(target_date: date, mode: Mode, db_path: str | Path) -> list[OddsSnapshot]:
     if mode == "prod":
+        _prune_live_odds_cache(db_path, anchor_date=target_date)
+        scraper_snapshots = _load_scraper_f5_odds_for_date(
+            target_date=target_date,
+            scraper_db_path=SCRAPER_ODDS_DB_PATH,
+            repo_db_path=db_path,
+        )
+        if scraper_snapshots:
+            return scraper_snapshots
+        cached_snapshots = _load_fresh_odds_from_db_for_date(
+            db_path,
+            target_date,
+            max_age=timedelta(minutes=LIVE_ODDS_CACHE_TTL_MINUTES),
+        )
+        if cached_snapshots:
+            return cached_snapshots
         start = datetime.combine(target_date, time.min, tzinfo=UTC)
         # MLB official game dates routinely spill past midnight UTC, especially
         # for West Coast starts and overseas openers. Extend the fetch window so
@@ -1271,18 +1514,41 @@ def _default_full_game_odds_context_fetcher(
     if mode != "prod":
         return {}
 
+    _prune_live_odds_cache(db_path, anchor_date=target_date)
+    scraper_context = _load_scraper_full_game_odds_context(
+        target_date=target_date,
+        scraper_db_path=SCRAPER_ODDS_DB_PATH,
+        repo_db_path=db_path,
+    )
+    if scraper_context:
+        return scraper_context
+    cached_context = _load_cached_full_game_odds_context(
+        db_path,
+        target_date,
+        max_age=timedelta(minutes=FULL_GAME_ODDS_CACHE_TTL_MINUTES),
+    )
+    if cached_context:
+        return cached_context
+
     start = datetime.combine(target_date, time.min, tzinfo=UTC)
     end = start + timedelta(days=1, hours=8)
-    return call_with_graceful_degradation(
+    context = call_with_graceful_degradation(
         lambda: fetch_mlb_full_game_odds_context(
             db_path=db_path,
             commence_time_from=start,
             commence_time_to=end,
         ),
         operation_name=f"full-game odds context fetch for {target_date.isoformat()}",
-        fallback=lambda _exc: {},
+        fallback=lambda _exc: _load_cached_full_game_odds_context(
+            db_path,
+            target_date,
+            max_age=None,
+        ),
         logger_=logger,
     )
+    if context:
+        _persist_full_game_odds_context(db_path, target_date, context)
+    return context
 
 
 def _default_feature_frame_builder(
@@ -1385,6 +1651,8 @@ def _ensure_pipeline_tables(db_path: str | Path) -> None:
                 kelly_stake REAL,
                 no_pick_reason TEXT,
                 error_message TEXT,
+                game_status TEXT,
+                is_completed INTEGER NOT NULL DEFAULT 0 CHECK (is_completed IN (0, 1)),
                 notified INTEGER NOT NULL DEFAULT 0 CHECK (notified IN (0, 1)),
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (game_pk) REFERENCES games (game_pk)
@@ -1394,7 +1662,50 @@ def _ensure_pipeline_tables(db_path: str | Path) -> None:
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_daily_pipeline_results_game ON daily_pipeline_results (game_pk)"
         )
+        _ensure_sqlite_column(
+            connection,
+            table_name="daily_pipeline_results",
+            column_name="game_status",
+            column_definition="TEXT",
+        )
+        _ensure_sqlite_column(
+            connection,
+            table_name="daily_pipeline_results",
+            column_name="is_completed",
+            column_definition="INTEGER NOT NULL DEFAULT 0 CHECK (is_completed IN (0, 1))",
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cached_slate_responses (
+                pipeline_date TEXT NOT NULL,
+                mode TEXT NOT NULL CHECK (mode IN ('prod', 'backtest')),
+                dry_run INTEGER NOT NULL CHECK (dry_run IN (0, 1)),
+                run_id TEXT NOT NULL,
+                model_version TEXT,
+                payload_json TEXT NOT NULL,
+                refreshed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (pipeline_date, mode, dry_run)
+            )
+            """
+        )
         connection.commit()
+
+
+def _ensure_sqlite_column(
+    connection: sqlite3.Connection,
+    *,
+    table_name: str,
+    column_name: str,
+    column_definition: str,
+) -> None:
+    existing_columns = {
+        str(row[1]) for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+    if column_name in existing_columns:
+        return
+    connection.execute(
+        f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}"
+    )
 
 
 def _upsert_games(db_path: str | Path, schedule: pd.DataFrame) -> None:
@@ -1530,6 +1841,470 @@ def _load_odds_from_db_for_date(db_path: str | Path, target_date: date) -> list[
     ]
 
 
+def _resolve_scraper_team_code(value: Any) -> str | None:
+    raw_value = str(value or "").strip()
+    if not raw_value:
+        return None
+    alias_map = {
+        "AZ": "ARI",
+        "ARI": "ARI",
+        "ATH": "OAK",
+        "OAK": "OAK",
+        "CHW": "CWS",
+        "CWS": "CWS",
+        "WAS": "WSH",
+        "WSH": "WSH",
+        "SDP": "SD",
+        "SD": "SD",
+        "SFG": "SF",
+        "SF": "SF",
+        "KCR": "KC",
+        "KC": "KC",
+        "TBR": "TB",
+        "TB": "TB",
+        "NYY": "NYY",
+        "NYM": "NYM",
+        "LAD": "LAD",
+        "LAA": "LAA",
+    }
+    if raw_value in alias_map:
+        return alias_map[raw_value]
+    return _normalize_team_code(raw_value)
+
+
+def _load_repo_game_pk_lookup(
+    *,
+    repo_db_path: str | Path,
+    target_date: date,
+) -> dict[tuple[str, str], int]:
+    database_path = Path(repo_db_path)
+    if not database_path.exists():
+        return {}
+
+    with sqlite3.connect(database_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT game_pk, home_team, away_team
+            FROM games
+            WHERE substr(date, 1, 10) = ?
+            """,
+            (target_date.isoformat(),),
+        ).fetchall()
+
+    lookup: dict[tuple[str, str], int] = {}
+    for game_pk, home_team, away_team in rows:
+        resolved_home = _resolve_scraper_team_code(home_team)
+        resolved_away = _resolve_scraper_team_code(away_team)
+        if resolved_home is None or resolved_away is None:
+            continue
+        lookup[(resolved_away, resolved_home)] = int(game_pk)
+    return lookup
+
+
+def _load_scraper_rows_for_date(
+    *,
+    scraper_db_path: str | Path,
+    target_date: date,
+    market_types: Sequence[str],
+) -> list[sqlite3.Row]:
+    database_path = Path(scraper_db_path)
+    if not database_path.exists():
+        return []
+
+    with sqlite3.connect(database_path) as connection:
+        connection.row_factory = sqlite3.Row
+        placeholders = ",".join("?" for _ in market_types)
+        rows = connection.execute(
+            f"""
+            SELECT event_id, game_date, commence_time_utc, away_team, home_team,
+                   fetched_at, bookmaker, market_type, side, point, price, is_opening
+            FROM odds
+            WHERE game_date = ?
+              AND market_type IN ({placeholders})
+            ORDER BY fetched_at DESC, id DESC
+            """,
+            (target_date.isoformat(), *market_types),
+        ).fetchall()
+    return list(rows)
+
+
+def _latest_scraper_market_rows(
+    rows: Sequence[sqlite3.Row],
+    *,
+    game_pk_lookup: Mapping[tuple[str, str], int],
+) -> dict[tuple[int, str, str, float | None, str], sqlite3.Row]:
+    latest: dict[tuple[int, str, str, float | None, str], sqlite3.Row] = {}
+    for row in rows:
+        away_team = _resolve_scraper_team_code(row["away_team"])
+        home_team = _resolve_scraper_team_code(row["home_team"])
+        if away_team is None or home_team is None:
+            continue
+        game_pk = game_pk_lookup.get((away_team, home_team))
+        if game_pk is None:
+            continue
+        point = float(row["point"]) if row["point"] is not None else None
+        key = (
+            int(game_pk),
+            str(row["bookmaker"]),
+            str(row["market_type"]),
+            point,
+            str(row["side"]),
+        )
+        if key not in latest:
+            latest[key] = row
+    return latest
+
+
+def _load_scraper_f5_odds_for_date(
+    *,
+    target_date: date,
+    scraper_db_path: str | Path,
+    repo_db_path: str | Path,
+) -> list[OddsSnapshot]:
+    game_pk_lookup = _load_repo_game_pk_lookup(repo_db_path=repo_db_path, target_date=target_date)
+    if not game_pk_lookup:
+        return []
+
+    rows = _load_scraper_rows_for_date(
+        scraper_db_path=scraper_db_path,
+        target_date=target_date,
+        market_types=("f5_ml", "f5_rl"),
+    )
+    if not rows:
+        return []
+
+    latest_rows = _latest_scraper_market_rows(rows, game_pk_lookup=game_pk_lookup)
+    paired: dict[tuple[int, str, str, float | None], dict[str, sqlite3.Row]] = {}
+    for (game_pk, bookmaker, market_type, point, side), row in latest_rows.items():
+        paired.setdefault((game_pk, bookmaker, market_type, point), {})[side] = row
+
+    snapshots: list[OddsSnapshot] = []
+    for (game_pk, bookmaker, market_type, _point), sides in paired.items():
+        home_row = sides.get("home")
+        away_row = sides.get("away")
+        if home_row is None or away_row is None:
+            continue
+        home_point = float(home_row["point"]) if home_row["point"] is not None else None
+        away_point = float(away_row["point"]) if away_row["point"] is not None else None
+        fetched_at = max(
+            _coerce_timestamp(home_row["fetched_at"]),
+            _coerce_timestamp(away_row["fetched_at"]),
+        )
+        snapshots.append(
+            OddsSnapshot(
+                game_pk=int(game_pk),
+                book_name=f"scraper:{bookmaker}",
+                market_type=str(market_type),
+                home_odds=int(home_row["price"]),
+                away_odds=int(away_row["price"]),
+                home_point=home_point,
+                away_point=away_point,
+                fetched_at=fetched_at,
+                is_frozen=False,
+            )
+        )
+
+    return sorted(snapshots, key=lambda snapshot: (snapshot.game_pk, snapshot.book_name, snapshot.market_type))
+
+
+def _is_better_price(candidate: int, current: int | None) -> bool:
+    if current is None:
+        return True
+    return int(candidate) > int(current)
+
+
+def _load_scraper_full_game_odds_context(
+    *,
+    target_date: date,
+    scraper_db_path: str | Path,
+    repo_db_path: str | Path,
+) -> dict[int, dict[str, Any]]:
+    game_pk_lookup = _load_repo_game_pk_lookup(repo_db_path=repo_db_path, target_date=target_date)
+    if not game_pk_lookup:
+        return {}
+
+    rows = _load_scraper_rows_for_date(
+        scraper_db_path=scraper_db_path,
+        target_date=target_date,
+        market_types=("full_game_ml", "full_game_rl", "full_game_total"),
+    )
+    if not rows:
+        return {}
+
+    latest_rows = _latest_scraper_market_rows(rows, game_pk_lookup=game_pk_lookup)
+    paired: dict[tuple[int, str, str, float | None], dict[str, sqlite3.Row]] = {}
+    for (game_pk, bookmaker, market_type, point, side), row in latest_rows.items():
+        paired.setdefault((game_pk, bookmaker, market_type, point), {})[side] = row
+
+    result: dict[int, dict[str, Any]] = {}
+    for (game_pk, bookmaker, market_type, point), sides in paired.items():
+        game_context = result.setdefault(
+            int(game_pk),
+            {
+                "full_game_odds_available": False,
+                "full_game_odds_books": [],
+                "full_game_home_ml": None,
+                "full_game_home_ml_book": None,
+                "full_game_away_ml": None,
+                "full_game_away_ml_book": None,
+                "bet365_full_game_home_ml": None,
+                "bet365_full_game_away_ml": None,
+                "consensus_full_game_home_ml": None,
+                "consensus_full_game_away_ml": None,
+                "full_game_home_spread": None,
+                "full_game_home_spread_odds": None,
+                "full_game_home_spread_book": None,
+                "full_game_away_spread": None,
+                "full_game_away_spread_odds": None,
+                "full_game_away_spread_book": None,
+                "bet365_full_game_home_spread": None,
+                "bet365_full_game_home_spread_odds": None,
+                "bet365_full_game_away_spread": None,
+                "bet365_full_game_away_spread_odds": None,
+                "consensus_full_game_home_spread": None,
+                "consensus_full_game_home_spread_odds": None,
+                "consensus_full_game_away_spread": None,
+                "consensus_full_game_away_spread_odds": None,
+                "full_game_ml_pairs": [],
+                "full_game_rl_pairs": [],
+            },
+        )
+        if bookmaker not in game_context["full_game_odds_books"]:
+            game_context["full_game_odds_books"].append(bookmaker)
+
+        if market_type == "full_game_ml":
+            home_row = sides.get("home")
+            away_row = sides.get("away")
+            if home_row is None or away_row is None:
+                continue
+            home_price = int(home_row["price"])
+            away_price = int(away_row["price"])
+            game_context["full_game_odds_available"] = True
+            game_context["full_game_ml_pairs"].append(
+                {
+                    "book_name": bookmaker,
+                    "home_odds": home_price,
+                    "away_odds": away_price,
+                }
+            )
+            if _book_name_key(bookmaker) == "bet365":
+                game_context["bet365_full_game_home_ml"] = home_price
+                game_context["bet365_full_game_away_ml"] = away_price
+            if _is_better_price(home_price, game_context["full_game_home_ml"]):
+                game_context["full_game_home_ml"] = home_price
+                game_context["full_game_home_ml_book"] = bookmaker
+            if _is_better_price(away_price, game_context["full_game_away_ml"]):
+                game_context["full_game_away_ml"] = away_price
+                game_context["full_game_away_ml_book"] = bookmaker
+            continue
+
+        if market_type == "full_game_rl":
+            home_row = sides.get("home")
+            away_row = sides.get("away")
+            if home_row is None or away_row is None:
+                continue
+            home_price = int(home_row["price"])
+            away_price = int(away_row["price"])
+            home_point = float(home_row["point"]) if home_row["point"] is not None else None
+            away_point = float(away_row["point"]) if away_row["point"] is not None else None
+            game_context["full_game_odds_available"] = True
+            game_context["full_game_rl_pairs"].append(
+                {
+                    "book_name": bookmaker,
+                    "home_point": home_point,
+                    "home_odds": home_price,
+                    "away_point": away_point,
+                    "away_odds": away_price,
+                }
+            )
+            if _book_name_key(bookmaker) == "bet365":
+                game_context["bet365_full_game_home_spread"] = home_point
+                game_context["bet365_full_game_home_spread_odds"] = home_price
+                game_context["bet365_full_game_away_spread"] = away_point
+                game_context["bet365_full_game_away_spread_odds"] = away_price
+            if _is_better_price(home_price, game_context["full_game_home_spread_odds"]):
+                game_context["full_game_home_spread"] = home_point
+                game_context["full_game_home_spread_odds"] = home_price
+                game_context["full_game_home_spread_book"] = bookmaker
+            if _is_better_price(away_price, game_context["full_game_away_spread_odds"]):
+                game_context["full_game_away_spread"] = away_point
+                game_context["full_game_away_spread_odds"] = away_price
+                game_context["full_game_away_spread_book"] = bookmaker
+            continue
+
+        if market_type == "full_game_total":
+            over_row = sides.get("over")
+            under_row = sides.get("under")
+            if over_row is not None or under_row is not None:
+                game_context["full_game_odds_available"] = True
+
+    for game_context in result.values():
+        game_context["full_game_odds_books"] = sorted(game_context["full_game_odds_books"])
+        ml_pairs = list(game_context.get("full_game_ml_pairs") or [])
+        if ml_pairs:
+            game_context["consensus_full_game_home_ml"] = _average_int(
+                [pair["home_odds"] for pair in ml_pairs if pair.get("home_odds") is not None]
+            )
+            game_context["consensus_full_game_away_ml"] = _average_int(
+                [pair["away_odds"] for pair in ml_pairs if pair.get("away_odds") is not None]
+            )
+        rl_pairs = list(game_context.get("full_game_rl_pairs") or [])
+        if rl_pairs:
+            game_context["consensus_full_game_home_spread"] = _average_float(
+                [pair["home_point"] for pair in rl_pairs if pair.get("home_point") is not None]
+            )
+            game_context["consensus_full_game_home_spread_odds"] = _average_int(
+                [pair["home_odds"] for pair in rl_pairs if pair.get("home_odds") is not None]
+            )
+            game_context["consensus_full_game_away_spread"] = _average_float(
+                [pair["away_point"] for pair in rl_pairs if pair.get("away_point") is not None]
+            )
+            game_context["consensus_full_game_away_spread_odds"] = _average_int(
+                [pair["away_odds"] for pair in rl_pairs if pair.get("away_odds") is not None]
+            )
+    return result
+
+
+def _load_fresh_odds_from_db_for_date(
+    db_path: str | Path,
+    target_date: date,
+    *,
+    max_age: timedelta | None,
+) -> list[OddsSnapshot]:
+    snapshots = _load_odds_from_db_for_date(db_path, target_date)
+    if not snapshots or max_age is None:
+        return snapshots
+
+    newest_fetched_at = max(snapshot.fetched_at for snapshot in snapshots)
+    if datetime.now(UTC) - newest_fetched_at > max_age:
+        return []
+    return snapshots
+
+
+def _ensure_full_game_odds_cache_table(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS full_game_odds_context_cache (
+            game_pk INTEGER NOT NULL,
+            target_date TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            fetched_at TEXT NOT NULL,
+            PRIMARY KEY (game_pk, target_date),
+            FOREIGN KEY (game_pk) REFERENCES games (game_pk)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_full_game_odds_context_cache_target_date
+        ON full_game_odds_context_cache (target_date, fetched_at)
+        """
+    )
+
+
+def _persist_full_game_odds_context(
+    db_path: str | Path,
+    target_date: date,
+    context_by_game: Mapping[int, Mapping[str, Any]],
+) -> None:
+    if not context_by_game:
+        return
+
+    fetched_at = datetime.now(UTC).isoformat()
+    with sqlite3.connect(db_path) as connection:
+        _ensure_full_game_odds_cache_table(connection)
+        connection.executemany(
+            """
+            INSERT INTO full_game_odds_context_cache (
+                game_pk,
+                target_date,
+                payload_json,
+                fetched_at
+            )
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(game_pk, target_date) DO UPDATE SET
+                payload_json = excluded.payload_json,
+                fetched_at = excluded.fetched_at
+            """,
+            [
+                (
+                    int(game_pk),
+                    target_date.isoformat(),
+                    json.dumps(dict(payload)),
+                    fetched_at,
+                )
+                for game_pk, payload in context_by_game.items()
+            ],
+        )
+        connection.commit()
+
+
+def _load_cached_full_game_odds_context(
+    db_path: str | Path,
+    target_date: date,
+    *,
+    max_age: timedelta | None,
+) -> dict[int, dict[str, Any]]:
+    database_path = Path(db_path)
+    if not database_path.exists():
+        return {}
+
+    with sqlite3.connect(database_path) as connection:
+        _ensure_full_game_odds_cache_table(connection)
+        rows = connection.execute(
+            """
+            SELECT game_pk, payload_json, fetched_at
+            FROM full_game_odds_context_cache
+            WHERE target_date = ?
+            """,
+            (target_date.isoformat(),),
+        ).fetchall()
+
+    if not rows:
+        return {}
+
+    newest_fetched_at = max(_coerce_timestamp(row[2]) for row in rows)
+    if max_age is not None and datetime.now(UTC) - newest_fetched_at > max_age:
+        return {}
+
+    result: dict[int, dict[str, Any]] = {}
+    for game_pk, payload_json, _fetched_at in rows:
+        payload = json.loads(str(payload_json))
+        if isinstance(payload, dict):
+            result[int(game_pk)] = payload
+    return result
+
+
+def _prune_live_odds_cache(db_path: str | Path, *, anchor_date: date) -> None:
+    database_path = Path(db_path)
+    if not database_path.exists():
+        return
+
+    min_date = (anchor_date - timedelta(days=LIVE_ODDS_CACHE_RETENTION_DAYS)).isoformat()
+    max_date = (anchor_date + timedelta(days=LIVE_ODDS_CACHE_RETENTION_DAYS)).isoformat()
+    with sqlite3.connect(database_path) as connection:
+        _ensure_full_game_odds_cache_table(connection)
+        connection.execute(
+            """
+            DELETE FROM odds_snapshots
+            WHERE game_pk IN (
+                SELECT game_pk
+                FROM games
+                WHERE substr(date, 1, 10) < ? OR substr(date, 1, 10) > ?
+            )
+            """,
+            (min_date, max_date),
+        )
+        connection.execute(
+            """
+            DELETE FROM full_game_odds_context_cache
+            WHERE target_date < ? OR target_date > ?
+            """,
+            (min_date, max_date),
+        )
+        connection.commit()
+
+
 def _upsert_prediction(db_path: str | Path, prediction: Prediction) -> None:
     with sqlite3.connect(db_path) as connection:
         connection.execute(
@@ -1636,6 +2411,8 @@ def _build_input_status(
     snapshots = odds_by_game.get(game_pk, [])
     full_game_context = full_game_odds_context_by_game.get(game_pk, {})
     odds_sources = sorted({_odds_source_label(snapshot.book_name) for snapshot in snapshots})
+    f5_ml_summary = _summarize_snapshot_market(snapshots, market_type="f5_ml")
+    f5_rl_summary = _summarize_snapshot_market(snapshots, market_type="f5_rl")
 
     return {
         "home_lineup_available": bool(home_lineup and home_lineup.players),
@@ -1645,23 +2422,47 @@ def _build_input_status(
         "away_lineup_confirmed": bool(away_lineup and away_lineup.confirmed),
         "away_lineup_source": away_lineup.source if away_lineup is not None else None,
         "odds_available": bool(snapshots),
-        "odds_books": sorted({snapshot.book_name for snapshot in snapshots}),
+        "odds_books": sorted({_display_odds_book_name(snapshot.book_name) for snapshot in snapshots}),
         "f5_odds_estimated": any(
             snapshot.book_name.startswith("estimate:") for snapshot in snapshots
         ),
         "f5_odds_sources": odds_sources,
+        "bet365_f5_ml_home_odds": f5_ml_summary.get("bet365_home_odds"),
+        "bet365_f5_ml_away_odds": f5_ml_summary.get("bet365_away_odds"),
+        "consensus_f5_ml_home_odds": f5_ml_summary.get("consensus_home_odds"),
+        "consensus_f5_ml_away_odds": f5_ml_summary.get("consensus_away_odds"),
+        "bet365_f5_rl_home_point": f5_rl_summary.get("bet365_home_point"),
+        "bet365_f5_rl_home_odds": f5_rl_summary.get("bet365_home_odds"),
+        "bet365_f5_rl_away_point": f5_rl_summary.get("bet365_away_point"),
+        "bet365_f5_rl_away_odds": f5_rl_summary.get("bet365_away_odds"),
+        "consensus_f5_rl_home_point": f5_rl_summary.get("consensus_home_point"),
+        "consensus_f5_rl_home_odds": f5_rl_summary.get("consensus_home_odds"),
+        "consensus_f5_rl_away_point": f5_rl_summary.get("consensus_away_point"),
+        "consensus_f5_rl_away_odds": f5_rl_summary.get("consensus_away_odds"),
         "full_game_odds_available": bool(full_game_context.get("full_game_odds_available")),
         "full_game_odds_books": list(full_game_context.get("full_game_odds_books") or []),
         "full_game_home_ml": full_game_context.get("full_game_home_ml"),
         "full_game_home_ml_book": full_game_context.get("full_game_home_ml_book"),
         "full_game_away_ml": full_game_context.get("full_game_away_ml"),
         "full_game_away_ml_book": full_game_context.get("full_game_away_ml_book"),
+        "bet365_full_game_home_ml": full_game_context.get("bet365_full_game_home_ml"),
+        "bet365_full_game_away_ml": full_game_context.get("bet365_full_game_away_ml"),
+        "consensus_full_game_home_ml": full_game_context.get("consensus_full_game_home_ml"),
+        "consensus_full_game_away_ml": full_game_context.get("consensus_full_game_away_ml"),
         "full_game_home_spread": full_game_context.get("full_game_home_spread"),
         "full_game_home_spread_odds": full_game_context.get("full_game_home_spread_odds"),
         "full_game_home_spread_book": full_game_context.get("full_game_home_spread_book"),
         "full_game_away_spread": full_game_context.get("full_game_away_spread"),
         "full_game_away_spread_odds": full_game_context.get("full_game_away_spread_odds"),
         "full_game_away_spread_book": full_game_context.get("full_game_away_spread_book"),
+        "bet365_full_game_home_spread": full_game_context.get("bet365_full_game_home_spread"),
+        "bet365_full_game_home_spread_odds": full_game_context.get("bet365_full_game_home_spread_odds"),
+        "bet365_full_game_away_spread": full_game_context.get("bet365_full_game_away_spread"),
+        "bet365_full_game_away_spread_odds": full_game_context.get("bet365_full_game_away_spread_odds"),
+        "consensus_full_game_home_spread": full_game_context.get("consensus_full_game_home_spread"),
+        "consensus_full_game_home_spread_odds": full_game_context.get("consensus_full_game_home_spread_odds"),
+        "consensus_full_game_away_spread": full_game_context.get("consensus_full_game_away_spread"),
+        "consensus_full_game_away_spread_odds": full_game_context.get("consensus_full_game_away_spread_odds"),
         "weather_available": not (
             (not bool(game.get("is_dome", False)))
             and float(inference_row.get("weather_data_missing", 0.0) or 0.0) >= 1.0
@@ -1674,7 +2475,78 @@ def _odds_source_label(book_name: str) -> str:
         return "estimated from full-game market"
     if book_name.startswith("sbr:"):
         return "sportsbookreview fallback"
+    if book_name.startswith("scraper:"):
+        return "local scraper"
     return "odds api"
+
+
+def _display_odds_book_name(book_name: str) -> str:
+    if book_name.startswith("scraper:"):
+        return book_name.split(":", 1)[1]
+    if book_name.startswith("sbr:"):
+        return book_name.split(":", 1)[1]
+    return book_name
+
+
+def _book_name_key(book_name: str | None) -> str:
+    return _display_odds_book_name(str(book_name or "")).strip().casefold()
+
+
+def _average_int(values: Sequence[int]) -> int | None:
+    resolved = [int(value) for value in values]
+    if not resolved:
+        return None
+    return int(round(sum(resolved) / len(resolved)))
+
+
+def _average_float(values: Sequence[float]) -> float | None:
+    resolved = [float(value) for value in values]
+    if not resolved:
+        return None
+    return float(sum(resolved) / len(resolved))
+
+
+def _summarize_snapshot_market(
+    snapshots: Sequence[OddsSnapshot],
+    *,
+    market_type: str,
+) -> dict[str, Any]:
+    relevant = [snapshot for snapshot in snapshots if snapshot.market_type == market_type]
+    if not relevant:
+        return {}
+
+    summary: dict[str, Any] = {}
+    if market_type == "f5_ml":
+        bet365 = next(
+            (snapshot for snapshot in relevant if _book_name_key(snapshot.book_name) == "bet365"),
+            None,
+        )
+        if bet365 is not None:
+            summary["bet365_home_odds"] = int(bet365.home_odds)
+            summary["bet365_away_odds"] = int(bet365.away_odds)
+        summary["consensus_home_odds"] = _average_int([snapshot.home_odds for snapshot in relevant])
+        summary["consensus_away_odds"] = _average_int([snapshot.away_odds for snapshot in relevant])
+        return summary
+
+    if market_type == "f5_rl":
+        bet365 = next(
+            (snapshot for snapshot in relevant if _book_name_key(snapshot.book_name) == "bet365"),
+            None,
+        )
+        if bet365 is not None:
+            summary["bet365_home_point"] = bet365.home_point
+            summary["bet365_home_odds"] = int(bet365.home_odds)
+            summary["bet365_away_point"] = bet365.away_point
+            summary["bet365_away_odds"] = int(bet365.away_odds)
+        home_points = [snapshot.home_point for snapshot in relevant if snapshot.home_point is not None]
+        away_points = [snapshot.away_point for snapshot in relevant if snapshot.away_point is not None]
+        summary["consensus_home_point"] = _average_float(home_points) if home_points else None
+        summary["consensus_home_odds"] = _average_int([snapshot.home_odds for snapshot in relevant])
+        summary["consensus_away_point"] = _average_float(away_points) if away_points else None
+        summary["consensus_away_odds"] = _average_int([snapshot.away_odds for snapshot in relevant])
+        return summary
+
+    return summary
 
 
 def _build_candidate_decisions(
@@ -1826,11 +2698,8 @@ def _is_official_live_candidate(candidate: BetDecision) -> bool:
 
 
 def _official_edge_threshold(candidate: BetDecision) -> float:
-    return (
-        DEFAULT_OFFICIAL_ML_MIN_EDGE
-        if candidate.market_type == "f5_ml"
-        else DEFAULT_OFFICIAL_RL_MIN_EDGE
-    )
+    _ = candidate
+    return DEFAULT_OFFICIAL_VALUE_PLAY_MIN_EDGE
 
 
 def _official_selection_score(candidate: BetDecision) -> float:
@@ -2118,9 +2987,11 @@ def _persist_game_results(
                 kelly_stake,
                 no_pick_reason,
                 error_message,
+                game_status,
+                is_completed,
                 notified
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -2147,12 +3018,84 @@ def _persist_game_results(
                     result.selected_decision.kelly_stake if result.selected_decision else None,
                     result.no_pick_reason,
                     result.error_message,
+                    result.game_status,
+                    int(result.is_completed),
                     int(result.notified),
                 )
                 for result in results
             ],
         )
         connection.commit()
+
+
+def _persist_cached_slate_response(
+    db_path: str | Path,
+    *,
+    pipeline_date: str,
+    mode: Mode,
+    dry_run: bool,
+    result: DailyPipelineResult,
+) -> None:
+    payload_json = json.dumps(result.to_dict())
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO cached_slate_responses (
+                pipeline_date,
+                mode,
+                dry_run,
+                run_id,
+                model_version,
+                payload_json,
+                refreshed_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(pipeline_date, mode, dry_run)
+            DO UPDATE SET
+                run_id = excluded.run_id,
+                model_version = excluded.model_version,
+                payload_json = excluded.payload_json,
+                refreshed_at = excluded.refreshed_at
+            """,
+            (
+                pipeline_date,
+                mode,
+                int(dry_run),
+                result.run_id,
+                result.model_version,
+                payload_json,
+                datetime.now(UTC).isoformat(),
+            ),
+        )
+        connection.commit()
+
+
+def load_cached_slate_response(
+    *,
+    pipeline_date: str | date | datetime,
+    mode: Mode,
+    dry_run: bool,
+    db_path: str | Path = DEFAULT_DB_PATH,
+) -> dict[str, Any] | None:
+    database_path = init_db(db_path)
+    _ensure_pipeline_tables(database_path)
+    resolved_date = _coerce_date(pipeline_date).isoformat()
+    with sqlite3.connect(database_path) as connection:
+        row = connection.execute(
+            """
+            SELECT payload_json
+            FROM cached_slate_responses
+            WHERE pipeline_date = ? AND mode = ? AND dry_run = ?
+            """,
+            (resolved_date, mode, int(dry_run)),
+        ).fetchone()
+    if row is None or not row[0]:
+        return None
+    payload = json.loads(str(row[0]))
+    if "games" not in payload:
+        return None
+    payload.pop("notification_payload", None)
+    return payload
 
 
 def _mark_pick_results_notified(

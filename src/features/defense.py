@@ -289,6 +289,306 @@ def compute_defense_features(
     return features
 
 
+def compute_defense_features_for_schedule(
+    schedule: pd.DataFrame,
+    *,
+    db_path: str | Path = DEFAULT_DB_PATH,
+    windows: Sequence[int] = DEFAULT_WINDOWS,
+    regression_weight: int = DEFAULT_REGRESSION_WEIGHT,
+    abs_retention_factor: float = DEFAULT_ABS_RETENTION_FACTOR,
+    refresh: bool = False,
+    roster_turnover_lookup: dict[tuple[str, str], float] | None = None,
+    fielding_fetcher: _FieldingFetcher = fetch_fielding_stats,
+    framing_fetcher: _FramingFetcher = fetch_catcher_framing,
+    team_logs_fetcher: _TeamLogsFetcher = fetch_team_game_logs,
+) -> list[GameFeatures]:
+    """Compute and persist lagged team defense features for a schedule slice."""
+
+    if schedule.empty:
+        return []
+
+    database_path = Path(db_path)
+    init_db(database_path)
+
+    working_schedule = schedule.copy()
+    working_schedule["game_pk"] = pd.to_numeric(working_schedule["game_pk"], errors="coerce")
+    working_schedule = working_schedule.dropna(subset=["game_pk", "game_date", "home_team", "away_team"]).copy()
+    if working_schedule.empty:
+        return []
+
+    working_schedule["game_pk"] = working_schedule["game_pk"].astype(int)
+    working_schedule["game_date"] = pd.to_datetime(working_schedule["game_date"], errors="coerce").dt.date
+    working_schedule["home_team"] = working_schedule["home_team"].astype(str).str.strip().str.upper()
+    working_schedule["away_team"] = working_schedule["away_team"].astype(str).str.strip().str.upper()
+    if "is_abs_active" in working_schedule.columns:
+        working_schedule["is_abs_active"] = pd.to_numeric(
+            working_schedule["is_abs_active"],
+            errors="coerce",
+        ).fillna(1).astype(int)
+    else:
+        working_schedule["is_abs_active"] = 1
+    working_schedule = working_schedule.dropna(subset=["game_date"]).copy()
+    if working_schedule.empty:
+        return []
+    working_schedule = (
+        working_schedule.sort_values(["game_date", "game_pk"], kind="mergesort")
+        .drop_duplicates(subset=["game_pk"], keep="last")
+        .reset_index(drop=True)
+    )
+
+    season_values = pd.to_datetime(working_schedule["game_date"], errors="coerce").dt.year.dropna().astype(int)
+    if season_values.empty:
+        return []
+
+    unique_seasons = sorted(set(season_values.tolist()))
+    log_seasons = sorted({*unique_seasons, *(season - 1 for season in unique_seasons)})
+    normalized_team_logs_by_season = {
+        season: _load_normalized_team_logs_for_season(
+            season=season,
+            team_logs_fetcher=team_logs_fetcher,
+            refresh=refresh,
+        )
+        for season in log_seasons
+    }
+    defensive_efficiency_histories_by_season = {
+        season: _build_defensive_efficiency_histories_from_preloaded_logs(
+            normalized_team_logs_by_season.get(season, {})
+        )
+        for season in log_seasons
+    }
+
+    fetch_seasons = sorted({*unique_seasons, *(season - 1 for season in unique_seasons)})
+    fielding_frames_by_season = {
+        season: _safe_fetch_fielding_frame(
+            season=season,
+            fielding_fetcher=fielding_fetcher,
+            refresh=refresh,
+        )
+        for season in fetch_seasons
+    }
+    framing_frames_by_season = {
+        season: _safe_fetch_framing_frame(
+            season=season,
+            framing_fetcher=framing_fetcher,
+            refresh=refresh,
+        )
+        for season in fetch_seasons
+    }
+    normalized_roster_turnover_lookup = _normalize_schedule_roster_turnover_lookup(roster_turnover_lookup)
+
+    features: list[GameFeatures] = []
+    for season, season_schedule in working_schedule.groupby(
+        pd.to_datetime(working_schedule["game_date"], errors="coerce").dt.year,
+        sort=True,
+    ):
+        season_int = int(season)
+        prior_season = season_int - 1
+        target_dates = sorted({value for value in season_schedule["game_date"].dropna().tolist()})
+        if not target_dates:
+            continue
+
+        defensive_efficiency_histories = defensive_efficiency_histories_by_season.get(season_int, {})
+        defensive_efficiency_slices_by_day = _build_metric_history_slices_for_dates(
+            season_schedule=season_schedule,
+            target_dates=target_dates,
+            team_histories=defensive_efficiency_histories,
+        )
+
+        prior_defensive_efficiency_histories = defensive_efficiency_histories_by_season.get(prior_season, {})
+        prior_games_played_lookup = {
+            team: len(history)
+            for team, history in prior_defensive_efficiency_histories.items()
+            if not history.empty
+        }
+        defensive_efficiency_defaults = _resolve_metric_defaults(
+            prior_defensive_efficiency_histories,
+            value_columns=("defensive_efficiency",),
+            fallback_defaults={"defensive_efficiency": DEFAULT_DEFENSIVE_EFFICIENCY},
+        )
+        prior_defensive_efficiency_baselines = _build_metric_baselines(
+            prior_defensive_efficiency_histories,
+            value_columns=("defensive_efficiency",),
+            default_values=defensive_efficiency_defaults,
+        )
+        defensive_efficiency_league_average = defensive_efficiency_defaults["defensive_efficiency"]
+
+        normalized_fielding = _normalize_fielding_frame(
+            fielding_frames_by_season.get(season_int, pd.DataFrame())
+        )
+        fielding_histories = _build_full_metric_histories(
+            normalized_fielding,
+            value_columns=FIELDING_VALUE_COLUMNS,
+        )
+        fielding_slices_by_day = _build_metric_history_slices_for_dates(
+            season_schedule=season_schedule,
+            target_dates=target_dates,
+            team_histories=fielding_histories,
+        )
+
+        prior_normalized_fielding = _normalize_fielding_frame(
+            fielding_frames_by_season.get(prior_season, pd.DataFrame())
+        )
+        prior_fielding_histories = _build_metric_histories(
+            prior_normalized_fielding,
+            target_day=date(season_int, 1, 1),
+            value_columns=FIELDING_VALUE_COLUMNS,
+            games_played_lookup=prior_games_played_lookup,
+            allow_snapshot_fallback=True,
+        )
+        fielding_defaults = _resolve_metric_defaults(
+            prior_fielding_histories,
+            value_columns=FIELDING_VALUE_COLUMNS,
+            fallback_defaults=DEFAULT_FIELDING_BASELINES,
+        )
+        prior_fielding_baselines = _build_metric_baselines(
+            prior_fielding_histories,
+            value_columns=FIELDING_VALUE_COLUMNS,
+            default_values=fielding_defaults,
+        )
+        name_team_lookup = _build_name_team_lookup(normalized_fielding)
+        prior_name_team_lookup = _build_name_team_lookup(prior_normalized_fielding)
+
+        normalized_framing = _normalize_framing_frame(
+            framing_frames_by_season.get(season_int, pd.DataFrame()),
+            name_team_lookup,
+        )
+        framing_histories = _build_full_metric_histories(
+            normalized_framing,
+            value_columns=("raw_framing",),
+        )
+        framing_slices_by_day = _build_metric_history_slices_for_dates(
+            season_schedule=season_schedule,
+            target_dates=target_dates,
+            team_histories=framing_histories,
+        )
+
+        prior_normalized_framing = _normalize_framing_frame(
+            framing_frames_by_season.get(prior_season, pd.DataFrame()),
+            prior_name_team_lookup,
+        )
+        prior_framing_histories = _build_metric_histories(
+            prior_normalized_framing,
+            target_day=date(season_int, 1, 1),
+            value_columns=("raw_framing",),
+            games_played_lookup=prior_games_played_lookup,
+            allow_snapshot_fallback=True,
+        )
+        framing_defaults = _resolve_metric_defaults(
+            prior_framing_histories,
+            value_columns=("raw_framing",),
+            fallback_defaults=DEFAULT_FRAMING_BASELINES,
+        )
+        prior_framing_baselines = _build_metric_baselines(
+            prior_framing_histories,
+            value_columns=("raw_framing",),
+            default_values=framing_defaults,
+        )
+
+        for target_day, day_games in season_schedule.groupby("game_date", sort=True):
+            as_of_timestamp = datetime.combine(
+                target_day - timedelta(days=1),
+                time.min,
+                tzinfo=timezone.utc,
+            )
+            day_fielding_histories = fielding_slices_by_day.get(target_day, {})
+            day_framing_histories = framing_slices_by_day.get(target_day, {})
+            day_defensive_efficiency_histories = defensive_efficiency_slices_by_day.get(target_day, {})
+
+            for game in day_games.to_dict(orient="records"):
+                abs_active = bool(game.get("is_abs_active", 1))
+                for side_name, team_key in (("home", "home_team"), ("away", "away_team")):
+                    team = str(game[team_key]).strip().upper()
+                    fielding_history = day_fielding_histories.get(
+                        team,
+                        _empty_metric_history(FIELDING_VALUE_COLUMNS),
+                    )
+                    framing_history = day_framing_histories.get(
+                        team,
+                        _empty_metric_history(("raw_framing",)),
+                    )
+                    defensive_efficiency_history = day_defensive_efficiency_histories.get(
+                        team,
+                        _empty_metric_history(("defensive_efficiency",)),
+                    )
+                    fielding_baseline = prior_fielding_baselines.get(team, fielding_defaults)
+                    framing_baseline = prior_framing_baselines.get(team, framing_defaults)
+                    defensive_efficiency_team_baseline = prior_defensive_efficiency_baselines.get(
+                        team,
+                        {"defensive_efficiency": defensive_efficiency_league_average},
+                    )["defensive_efficiency"]
+                    season_games_played = _resolve_games_played(
+                        len(defensive_efficiency_history),
+                        fielding_history,
+                        framing_history,
+                        defensive_efficiency_history,
+                    )
+                    roster_turnover_pct = (
+                        None
+                        if normalized_roster_turnover_lookup is None
+                        else normalized_roster_turnover_lookup.get((target_day.isoformat(), team))
+                    )
+
+                    season_values = _build_feature_values(
+                        fielding_history=fielding_history,
+                        framing_history=framing_history,
+                        defensive_efficiency_history=defensive_efficiency_history,
+                        fielding_baseline=fielding_baseline,
+                        fielding_defaults=fielding_defaults,
+                        framing_baseline=framing_baseline,
+                        framing_defaults=framing_defaults,
+                        abs_retention_factor=abs_retention_factor,
+                        abs_active=abs_active,
+                        defensive_efficiency_baseline=defensive_efficiency_team_baseline,
+                        defensive_efficiency_league_average=defensive_efficiency_league_average,
+                        games_played=season_games_played,
+                        regression_weight=regression_weight,
+                        roster_turnover_pct=roster_turnover_pct,
+                        window=None,
+                    )
+                    features.extend(
+                        _to_feature_rows(
+                            game_pk=int(game["game_pk"]),
+                            side_name=side_name,
+                            feature_values=season_values,
+                            window_label="season",
+                            window_size=None,
+                            as_of_timestamp=as_of_timestamp,
+                        )
+                    )
+
+                    for window in windows:
+                        window_values = _build_feature_values(
+                            fielding_history=fielding_history,
+                            framing_history=framing_history,
+                            defensive_efficiency_history=defensive_efficiency_history,
+                            fielding_baseline=fielding_baseline,
+                            fielding_defaults=fielding_defaults,
+                            framing_baseline=framing_baseline,
+                            framing_defaults=framing_defaults,
+                            abs_retention_factor=abs_retention_factor,
+                            abs_active=abs_active,
+                            defensive_efficiency_baseline=defensive_efficiency_team_baseline,
+                            defensive_efficiency_league_average=defensive_efficiency_league_average,
+                            games_played=season_games_played,
+                            regression_weight=regression_weight,
+                            roster_turnover_pct=roster_turnover_pct,
+                            window=window,
+                        )
+                        features.extend(
+                            _to_feature_rows(
+                                game_pk=int(game["game_pk"]),
+                                side_name=side_name,
+                                feature_values=window_values,
+                                window_label=f"{int(window)}g",
+                                window_size=int(window),
+                                as_of_timestamp=as_of_timestamp,
+                            )
+                        )
+
+    _persist_features(database_path, features)
+    return features
+
+
 def adjust_framing_runs(
     raw_framing_runs: float,
     *,
@@ -350,6 +650,71 @@ def _safe_fetch_framing_frame(
         return pd.DataFrame()
 
 
+def _load_normalized_team_logs_for_season(
+    *,
+    season: int,
+    team_logs_fetcher: _TeamLogsFetcher,
+    refresh: bool,
+) -> dict[str, pd.DataFrame]:
+    normalized_logs: dict[str, pd.DataFrame] = {}
+    for offense_team in TEAM_CODES:
+        try:
+            raw_logs = team_logs_fetcher(season, offense_team, refresh=refresh)
+        except Exception:
+            raw_logs = pd.DataFrame()
+        normalized_logs[offense_team] = _normalize_offensive_game_logs(raw_logs)
+    return normalized_logs
+
+
+def _normalize_schedule_roster_turnover_lookup(
+    roster_turnover_lookup: Mapping[tuple[str, str], float] | None,
+) -> dict[tuple[str, str], float] | None:
+    if not roster_turnover_lookup:
+        return None
+
+    normalized: dict[tuple[str, str], float] = {}
+    for (game_date, team), value in roster_turnover_lookup.items():
+        normalized[(_coerce_date(game_date).isoformat(), str(team).strip().upper())] = float(value)
+    return normalized
+
+
+def _build_defensive_efficiency_histories_from_preloaded_logs(
+    normalized_team_logs: Mapping[str, pd.DataFrame],
+) -> dict[str, pd.DataFrame]:
+    observations: list[dict[str, Any]] = []
+    for normalized in normalized_team_logs.values():
+        if normalized.empty:
+            continue
+
+        for row in normalized.to_dict(orient="records"):
+            defensive_team = str(row.get("opponent") or "").strip().upper()
+            game_date = row.get("game_date")
+            if not defensive_team or pd.isna(game_date):
+                continue
+            observations.append(
+                {
+                    "team": defensive_team,
+                    "game_date": row["game_date"],
+                    "defensive_efficiency": float(row["defensive_efficiency"]),
+                }
+            )
+
+    if not observations:
+        return {}
+
+    combined = pd.DataFrame(observations)
+    histories: dict[str, pd.DataFrame] = {}
+    for team, group in combined.groupby("team", dropna=True):
+        history = (
+            group.groupby("game_date", as_index=False)["defensive_efficiency"]
+            .mean()
+            .sort_values("game_date")
+            .reset_index(drop=True)
+        )
+        histories[str(team)] = _append_game_day_ordinals(history)
+    return histories
+
+
 def _build_defensive_efficiency_histories(
     *,
     season: int,
@@ -370,7 +735,8 @@ def _build_defensive_efficiency_histories(
         if normalized.empty:
             continue
 
-        prior_rows = normalized.loc[normalized["game_date"] < cutoff].copy()
+        game_dates = _to_tz_naive_datetime_series(normalized["game_date"])
+        prior_rows = normalized.loc[game_dates < cutoff].copy()
         if prior_rows.empty:
             continue
 
@@ -413,9 +779,8 @@ def _normalize_offensive_game_logs(dataframe: pd.DataFrame) -> pd.DataFrame:
     )
 
     result = pd.DataFrame()
-    result["game_date"] = pd.to_datetime(
+    result["game_date"] = _to_tz_naive_datetime_series(
         dataframe[date_column] if date_column is not None else pd.Series(dtype=object),
-        errors="coerce",
     )
     result["opponent"] = (
         dataframe[opponent_column].map(_normalize_team_label)
@@ -489,9 +854,8 @@ def _normalize_fielding_frame(dataframe: pd.DataFrame) -> pd.DataFrame:
         else pd.Series(dtype=str)
     )
     weights = positions.map(POSITION_IMPORTANCE_WEIGHTS).fillna(1.0)
-    result["game_date"] = pd.to_datetime(
+    result["game_date"] = _to_tz_naive_datetime_series(
         dataframe[date_column] if date_column is not None else pd.Series(dtype=object),
-        errors="coerce",
     )
     result["drs"] = _extract_numeric(dataframe, drs_column) * weights
     result["oaa"] = _extract_numeric(dataframe, oaa_column) * weights
@@ -545,9 +909,8 @@ def _normalize_framing_frame(
     else:
         result["team"] = result["player_name_key"].map(name_team_lookup).fillna("")
 
-    result["game_date"] = pd.to_datetime(
+    result["game_date"] = _to_tz_naive_datetime_series(
         dataframe[date_column] if date_column is not None else pd.Series(dtype=object),
-        errors="coerce",
     )
     result["raw_framing"] = _extract_numeric(dataframe, framing_column)
     return result.loc[result["team"].astype(str) != ""].reset_index(drop=True)
@@ -568,9 +931,11 @@ def _build_metric_histories(
     cutoff = pd.Timestamp(target_day)
     for team, group in dataframe.groupby("team", dropna=True):
         team_group = group.copy()
-        has_dated_history = team_group["game_date"].notna().any()
+        game_dates = _to_tz_naive_datetime_series(team_group["game_date"])
+        team_group["game_date"] = game_dates
+        has_dated_history = game_dates.notna().any()
         dated_rows = team_group.loc[
-            team_group["game_date"].notna() & (team_group["game_date"] < cutoff)
+            game_dates.notna() & (game_dates < cutoff)
         ].copy()
 
         if not dated_rows.empty:
@@ -599,6 +964,64 @@ def _build_metric_histories(
         )
 
     return histories
+
+
+def _build_full_metric_histories(
+    dataframe: pd.DataFrame,
+    *,
+    value_columns: Sequence[str],
+) -> dict[str, pd.DataFrame]:
+    if dataframe.empty:
+        return {}
+
+    histories: dict[str, pd.DataFrame] = {}
+    for team, group in dataframe.groupby("team", dropna=True):
+        team_group = group.copy()
+        game_dates = _to_tz_naive_datetime_series(team_group["game_date"])
+        dated_rows = team_group.loc[game_dates.notna()].copy()
+        if dated_rows.empty:
+            continue
+
+        history = (
+            dated_rows.groupby("game_date", as_index=False)[list(value_columns)]
+            .sum()
+            .sort_values("game_date")
+            .reset_index(drop=True)
+        )
+        histories[str(team)] = _append_game_day_ordinals(history)
+
+    return histories
+
+
+def _build_metric_history_slices_for_dates(
+    *,
+    season_schedule: pd.DataFrame,
+    target_dates: Sequence[date],
+    team_histories: Mapping[str, pd.DataFrame],
+) -> dict[date, dict[str, pd.DataFrame]]:
+    if season_schedule.empty or not target_dates:
+        return {}
+
+    team_codes = sorted(
+        {
+            str(team).strip().upper()
+            for column in ("home_team", "away_team")
+            for team in season_schedule[column].dropna().tolist()
+        }
+    )
+    slices_by_day: dict[date, dict[str, pd.DataFrame]] = {}
+    for target_day in target_dates:
+        target_ordinal = target_day.toordinal()
+        day_lookup: dict[str, pd.DataFrame] = {}
+        for team in team_codes:
+            history = team_histories.get(team)
+            if history is None or history.empty:
+                continue
+            cutoff = history["game_day_ordinal"].to_numpy().searchsorted(target_ordinal, side="left")
+            day_lookup[team] = history.iloc[:cutoff].reset_index(drop=True)
+        slices_by_day[target_day] = day_lookup
+
+    return slices_by_day
 
 
 def _resolve_metric_defaults(
@@ -814,6 +1237,24 @@ def _resolve_games_played(base_games_played: int, *histories: pd.DataFrame) -> i
 
 def _empty_metric_history(extra_columns: Sequence[str]) -> pd.DataFrame:
     return pd.DataFrame(columns=["game_date", *extra_columns])
+
+
+def _append_game_day_ordinals(dataframe: pd.DataFrame) -> pd.DataFrame:
+    if dataframe.empty or "game_date" not in dataframe.columns:
+        return dataframe.copy()
+
+    history = dataframe.copy()
+    history["game_day_ordinal"] = history["game_date"].map(
+        lambda value: pd.Timestamp(value).date().toordinal() if pd.notna(value) else None
+    )
+    return history
+
+
+def _to_tz_naive_datetime_series(values: pd.Series) -> pd.Series:
+    parsed = pd.to_datetime(values, errors="coerce", format="mixed")
+    if getattr(parsed.dt, "tz", None) is not None:
+        return parsed.dt.tz_convert(None)
+    return parsed
 
 
 def _first_column(dataframe: pd.DataFrame, candidates: Sequence[str]) -> str | None:

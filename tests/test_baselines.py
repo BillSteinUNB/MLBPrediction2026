@@ -4,6 +4,7 @@ import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from src.db import init_db
@@ -128,6 +129,64 @@ def _pythagorean_win_pct(runs_scored: int, runs_allowed: int) -> float:
     return numerator / denominator
 
 
+def _seed_round_robin_results(
+    db_path: Path,
+    *,
+    start_day: date,
+    total_days: int,
+    start_game_pk: int = 10_000,
+) -> list[dict[str, object]]:
+    matchup_cycles = (
+        (("NYY", "BOS"), ("SEA", "TB")),
+        (("NYY", "SEA"), ("BOS", "TB")),
+        (("NYY", "TB"), ("BOS", "SEA")),
+    )
+    seeded_games: list[dict[str, object]] = []
+    game_pk = start_game_pk
+    for day_index in range(total_days):
+        game_day = start_day + timedelta(days=day_index)
+        pairings = matchup_cycles[day_index % len(matchup_cycles)]
+        for pairing_index, (home_team, away_team) in enumerate(pairings):
+            home_runs = 3 + ((day_index + pairing_index) % 6)
+            away_runs = 2 + ((day_index + (pairing_index * 2)) % 5)
+            home_f5_runs = min(home_runs, 1 + ((day_index + pairing_index) % 4))
+            away_f5_runs = min(away_runs, (day_index + (pairing_index * 3)) % 4)
+            _seed_result(
+                db_path,
+                game_pk=game_pk,
+                game_date=f"{game_day.isoformat()}T19:05:00+00:00",
+                team=home_team,
+                opponent=away_team,
+                team_runs=home_runs,
+                opponent_runs=away_runs,
+                team_f5_runs=home_f5_runs,
+                opponent_f5_runs=away_f5_runs,
+                team_is_home=True,
+            )
+            seeded_games.append(
+                {
+                    "game_pk": game_pk,
+                    "game_date": game_day.isoformat(),
+                    "home_team": home_team,
+                    "away_team": away_team,
+                }
+            )
+            game_pk += 1
+    return seeded_games
+
+
+def _baseline_payload(rows: list[object]) -> dict[tuple[int, str, int | None, str], float]:
+    return {
+        (
+            int(row.game_pk),
+            str(row.feature_name),
+            row.window_size,
+            row.as_of_timestamp.isoformat(),
+        ): float(row.feature_value)
+        for row in rows
+    }
+
+
 def test_calculate_pythagorean_win_percentage_matches_contract_example() -> None:
     from src.features.baselines import calculate_pythagorean_win_percentage
 
@@ -194,6 +253,10 @@ def test_compute_baseline_features_persists_full_and_f5_pythagorean_with_log5(
     expected_home_f5_30 = _pythagorean_win_pct(90, 30)
     expected_home_f5_60 = _pythagorean_win_pct(120, 90)
     expected_away_30 = _pythagorean_win_pct(120, 150)
+    expected_home_runs_scored_7 = 5.0
+    expected_home_runs_allowed_7 = 4.0
+    expected_away_runs_scored_7 = 4.0
+    expected_away_runs_allowed_7 = 5.0
     expected_home_log5_30 = (
         expected_home_30 * (1 - expected_away_30)
     ) / (
@@ -210,6 +273,12 @@ def test_compute_baseline_features_persists_full_and_f5_pythagorean_with_log5(
     )
     assert by_name["home_team_log5_30g"] == pytest.approx(expected_home_log5_30)
     assert by_name["home_team_log5_30g"] + by_name["away_team_log5_30g"] == pytest.approx(1.0)
+    assert by_name["home_team_runs_scored_7g"] == pytest.approx(expected_home_runs_scored_7)
+    assert by_name["home_team_runs_allowed_7g"] == pytest.approx(expected_home_runs_allowed_7)
+    assert by_name["away_team_runs_scored_7g"] == pytest.approx(expected_away_runs_scored_7)
+    assert by_name["away_team_runs_allowed_7g"] == pytest.approx(expected_away_runs_allowed_7)
+    assert by_name["home_team_runs_scored_14g"] == pytest.approx(expected_home_runs_scored_7)
+    assert by_name["home_team_runs_allowed_14g"] == pytest.approx(expected_home_runs_allowed_7)
 
     with sqlite3.connect(db_path) as connection:
         stored_rows = connection.execute(
@@ -221,5 +290,129 @@ def test_compute_baseline_features_persists_full_and_f5_pythagorean_with_log5(
             (9999, "home_team_log5_30g"),
         ).fetchone()[0]
 
-    assert stored_rows == 12
+    assert stored_rows == 20
     assert as_of_timestamp == "2025-04-30T00:00:00+00:00"
+
+
+def test_bulk_baseline_features_match_per_day(tmp_path: Path) -> None:
+    from src.features.baselines import (
+        compute_baseline_features,
+        compute_baseline_features_for_schedule,
+    )
+
+    day_db_path = tmp_path / "baseline_day.db"
+    bulk_db_path = tmp_path / "baseline_bulk.db"
+    init_db(day_db_path)
+    init_db(bulk_db_path)
+    seeded_games = _seed_round_robin_results(day_db_path, start_day=date(2025, 1, 1), total_days=120)
+    _seed_round_robin_results(bulk_db_path, start_day=date(2025, 1, 1), total_days=120)
+
+    schedule = pd.DataFrame(seeded_games[-60:])
+    target_dates = sorted(schedule["game_date"].unique().tolist())
+
+    expected_rows = []
+    for target_day in target_dates:
+        expected_rows.extend(compute_baseline_features(target_day, db_path=day_db_path))
+
+    actual_rows = compute_baseline_features_for_schedule(schedule, db_path=bulk_db_path)
+
+    expected_payload = _baseline_payload(expected_rows)
+    actual_payload = _baseline_payload(actual_rows)
+
+    assert actual_payload.keys() == expected_payload.keys()
+    for key, expected_value in expected_payload.items():
+        assert actual_payload[key] == pytest.approx(expected_value, abs=1e-9)
+
+
+def test_bulk_baselines_no_leakage(tmp_path: Path) -> None:
+    from src.features.baselines import compute_baseline_features_for_schedule
+
+    db_path = tmp_path / "baseline_leakage.db"
+    init_db(db_path)
+    _seed_result(
+        db_path,
+        game_pk=4101,
+        game_date="2024-04-14T19:05:00+00:00",
+        team="NYY",
+        opponent="SEA",
+        team_runs=4,
+        opponent_runs=2,
+        team_f5_runs=2,
+        opponent_f5_runs=1,
+        team_is_home=True,
+    )
+    _seed_result(
+        db_path,
+        game_pk=4102,
+        game_date="2024-04-15T19:05:00+00:00",
+        team="NYY",
+        opponent="BOS",
+        team_runs=10,
+        opponent_runs=0,
+        team_f5_runs=5,
+        opponent_f5_runs=0,
+        team_is_home=True,
+    )
+    _seed_scheduled_game(
+        db_path,
+        game_pk=5101,
+        game_date="2024-04-15T23:05:00+00:00",
+        home_team="NYY",
+        away_team="TB",
+    )
+    _seed_scheduled_game(
+        db_path,
+        game_pk=5102,
+        game_date="2024-04-16T23:05:00+00:00",
+        home_team="NYY",
+        away_team="TB",
+    )
+
+    schedule = pd.DataFrame(
+        [
+            {"game_pk": 5101, "game_date": "2024-04-15", "home_team": "NYY", "away_team": "TB"},
+            {"game_pk": 5102, "game_date": "2024-04-16", "home_team": "NYY", "away_team": "TB"},
+        ]
+    )
+
+    rows = compute_baseline_features_for_schedule(schedule, db_path=db_path)
+    payload = _baseline_payload(rows)
+
+    assert payload[(5101, "home_team_runs_scored_7g", 7, "2024-04-14T00:00:00+00:00")] == pytest.approx(4.0)
+    assert payload[(5102, "home_team_runs_scored_7g", 7, "2024-04-15T00:00:00+00:00")] == pytest.approx(7.0)
+
+
+def test_bulk_baselines_respects_season_boundary(tmp_path: Path) -> None:
+    from src.features.baselines import compute_baseline_features_for_schedule
+
+    db_path = tmp_path / "baseline_season_boundary.db"
+    init_db(db_path)
+    _seed_result(
+        db_path,
+        game_pk=6101,
+        game_date="2024-09-30T19:05:00+00:00",
+        team="NYY",
+        opponent="BOS",
+        team_runs=12,
+        opponent_runs=1,
+        team_f5_runs=6,
+        opponent_f5_runs=0,
+        team_is_home=True,
+    )
+    _seed_scheduled_game(
+        db_path,
+        game_pk=7101,
+        game_date="2025-04-01T19:05:00+00:00",
+        home_team="NYY",
+        away_team="TB",
+    )
+
+    schedule = pd.DataFrame(
+        [{"game_pk": 7101, "game_date": "2025-04-01", "home_team": "NYY", "away_team": "TB"}]
+    )
+
+    rows = compute_baseline_features_for_schedule(schedule, db_path=db_path)
+    payload = _baseline_payload(rows)
+
+    assert payload[(7101, "home_team_pythagorean_wp_30g", 30, "2025-03-31T00:00:00+00:00")] == pytest.approx(0.5)
+    assert payload[(7101, "home_team_runs_scored_7g", 7, "2025-03-31T00:00:00+00:00")] == pytest.approx(4.5)

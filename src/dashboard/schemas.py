@@ -162,10 +162,22 @@ class SlatePrediction(BaseModel):
 
     game_pk: int
     model_version: str
+    full_game_ml_home_prob: Optional[float] = None
+    full_game_ml_away_prob: Optional[float] = None
+    full_game_rl_home_prob: Optional[float] = None
+    full_game_rl_away_prob: Optional[float] = None
+    full_game_total_over_prob: Optional[float] = None
+    full_game_total_under_prob: Optional[float] = None
     f5_ml_home_prob: float
     f5_ml_away_prob: float
     f5_rl_home_prob: float
     f5_rl_away_prob: float
+    f5_total_over_prob: Optional[float] = None
+    f5_total_under_prob: Optional[float] = None
+    projected_full_game_home_runs: Optional[float] = None
+    projected_full_game_away_runs: Optional[float] = None
+    projected_full_game_total_runs: Optional[float] = None
+    projected_full_game_home_margin: Optional[float] = None
     projected_f5_home_runs: Optional[float] = None
     projected_f5_away_runs: Optional[float] = None
     projected_f5_total_runs: Optional[float] = None
@@ -208,18 +220,42 @@ class SlateInputStatus(BaseModel):
     odds_books: List[str] = []
     f5_odds_estimated: bool = False
     f5_odds_sources: List[str] = []
+    bet365_f5_ml_home_odds: Optional[int] = None
+    bet365_f5_ml_away_odds: Optional[int] = None
+    consensus_f5_ml_home_odds: Optional[int] = None
+    consensus_f5_ml_away_odds: Optional[int] = None
+    bet365_f5_rl_home_point: Optional[float] = None
+    bet365_f5_rl_home_odds: Optional[int] = None
+    bet365_f5_rl_away_point: Optional[float] = None
+    bet365_f5_rl_away_odds: Optional[int] = None
+    consensus_f5_rl_home_point: Optional[float] = None
+    consensus_f5_rl_home_odds: Optional[int] = None
+    consensus_f5_rl_away_point: Optional[float] = None
+    consensus_f5_rl_away_odds: Optional[int] = None
     full_game_odds_available: bool = False
     full_game_odds_books: List[str] = []
     full_game_home_ml: Optional[int] = None
     full_game_home_ml_book: Optional[str] = None
     full_game_away_ml: Optional[int] = None
     full_game_away_ml_book: Optional[str] = None
+    bet365_full_game_home_ml: Optional[int] = None
+    bet365_full_game_away_ml: Optional[int] = None
+    consensus_full_game_home_ml: Optional[int] = None
+    consensus_full_game_away_ml: Optional[int] = None
     full_game_home_spread: Optional[float] = None
     full_game_home_spread_odds: Optional[int] = None
     full_game_home_spread_book: Optional[str] = None
     full_game_away_spread: Optional[float] = None
     full_game_away_spread_odds: Optional[int] = None
     full_game_away_spread_book: Optional[str] = None
+    bet365_full_game_home_spread: Optional[float] = None
+    bet365_full_game_home_spread_odds: Optional[int] = None
+    bet365_full_game_away_spread: Optional[float] = None
+    bet365_full_game_away_spread_odds: Optional[int] = None
+    consensus_full_game_home_spread: Optional[float] = None
+    consensus_full_game_home_spread_odds: Optional[int] = None
+    consensus_full_game_away_spread: Optional[float] = None
+    consensus_full_game_away_spread_odds: Optional[int] = None
     weather_available: bool = False
 
 
@@ -229,6 +265,8 @@ class SlateGame(BaseModel):
     game_pk: int
     matchup: str
     status: str
+    game_status: Optional[str] = None
+    is_completed: bool = False
     prediction: Optional[SlatePrediction] = None
     selected_decision: Optional[SlateDecision] = None
     forced_decision: Optional[SlateDecision] = None

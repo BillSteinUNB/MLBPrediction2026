@@ -69,7 +69,16 @@ def _resolve_xgboost_n_jobs() -> int:
     return max(1, detected_cpu_count - 1)
 
 
+def _resolve_xgboost_device() -> str:
+    device = os.getenv("MLB_XGBOOST_DEVICE", "cpu").strip().lower()
+    if device not in {"cpu", "cuda", "gpu"}:
+        logger.warning("Ignoring invalid MLB_XGBOOST_DEVICE value: %s — using cpu", device)
+        return "cpu"
+    return device
+
+
 DEFAULT_XGBOOST_N_JOBS = _resolve_xgboost_n_jobs()
+DEFAULT_XGBOOST_DEVICE = _resolve_xgboost_device()
 
 
 @dataclass(frozen=True, slots=True)
@@ -333,7 +342,9 @@ def _train_single_model(
 
     holdout_metrics = {
         "accuracy": float(accuracy_score(holdout_frame[target_column], holdout_predictions)),
-        "log_loss": float(log_loss(holdout_frame[target_column], holdout_probabilities, labels=[0, 1])),
+        "log_loss": float(
+            log_loss(holdout_frame[target_column], holdout_probabilities, labels=[0, 1])
+        ),
         "roc_auc": _safe_roc_auc(holdout_frame[target_column], holdout_probabilities),
     }
     feature_importance_rankings = _extract_feature_importance_rankings(
@@ -434,7 +445,8 @@ def _build_estimator(*, random_state: int) -> XGBClassifier:
         eval_metric="logloss",
         random_state=random_state,
         tree_method="hist",
-        n_jobs=DEFAULT_XGBOOST_N_JOBS,
+        device=DEFAULT_XGBOOST_DEVICE,
+        n_jobs=1 if DEFAULT_XGBOOST_DEVICE != "cpu" else DEFAULT_XGBOOST_N_JOBS,
         verbosity=0,
     )
 
@@ -550,7 +562,9 @@ def _objective_log_loss(
     target_series = train_frame[target_column]
     fold_losses: list[float] = []
 
-    for fold_index, (train_indices, test_indices) in enumerate(splitter.split(train_frame), start=1):
+    for fold_index, (train_indices, test_indices) in enumerate(
+        splitter.split(train_frame), start=1
+    ):
         estimator = _build_estimator(random_state=random_state)
         estimator.set_params(**params)
         estimator.fit(
@@ -798,7 +812,9 @@ def _prepare_training_frame(
 
 
 def _resolve_holdout_season(dataframe: pd.DataFrame, requested_holdout_season: int | None) -> int:
-    available_seasons = sorted(int(season) for season in dataframe["season"].dropna().unique().tolist())
+    available_seasons = sorted(
+        int(season) for season in dataframe["season"].dropna().unique().tolist()
+    )
     if not available_seasons:
         raise ValueError("Training data does not contain any seasons")
     if requested_holdout_season is None:
@@ -897,7 +913,9 @@ def _run_result_to_json_ready(result: TrainingRunResult) -> dict[str, Any]:
         "holdout_season": result.holdout_season,
         "feature_columns": result.feature_columns,
         "summary_path": str(result.summary_path),
-        "models": {name: _artifact_to_json_ready(artifact) for name, artifact in result.models.items()},
+        "models": {
+            name: _artifact_to_json_ready(artifact) for name, artifact in result.models.items()
+        },
     }
 
 
