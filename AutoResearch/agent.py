@@ -2073,6 +2073,7 @@ def _run_validation_retest(
         bucket_quotas=[int(value) for value in config["bucket_quotas"]],
         exclude_patterns=[str(value) for value in config.get("exclude_patterns", [])],
         force_include_patterns=[str(value) for value in config.get("force_include_patterns", [])],
+        forced_delta_count=int(config.get("forced_delta_count", len(config.get("force_include_patterns", [])))),
         trials=int(config["trials"]),
         folds=int(config["folds"]),
         rationale=f"Validation retest for suspicious issue note {issue.note_id}",
