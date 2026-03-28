@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import deque
 from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
@@ -8,7 +9,7 @@ import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
-from rich.console import Console
+from rich.console import Console, Group
 from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
@@ -117,6 +118,11 @@ def _print_run_result(*, run_number: int, kind: str, payload: dict[str, object])
     )
 
 
+def _render_live_output_panel(lines: list[str]) -> Panel:
+    body = "\n".join(lines) if lines else "Waiting for trainer output..."
+    return Panel(body, title="Trainer Output", border_style="blue")
+
+
 def _render_run_table(rows: list[dict[str, object]], current_status: str) -> Table:
     table = Table(title="AutoResearch Overnight Progress")
     table.add_column("Run")
@@ -129,29 +135,47 @@ def _render_run_table(rows: list[dict[str, object]], current_status: str) -> Tab
     return table
 
 
+def _render_live_view(
+    rows: list[dict[str, object]],
+    current_status: str,
+    live_output_lines: list[str],
+):
+    return Group(
+        _render_run_table(rows, current_status),
+        _render_live_output_panel(live_output_lines),
+    )
+
+
 def _run_with_live_timer(
     *,
     rows: list[dict[str, object]],
     kind: str,
     action,
+    live_output_lines: deque[str] | None = None,
 ):
     run_number = len(rows) + 1
     row = {"run_number": run_number, "kind": kind, "elapsed": "00:00", "status": "running"}
     rows.append(row)
     started = time.monotonic()
-    with Live(_render_run_table(rows, f"{kind} {run_number} running"), console=_CONSOLE, refresh_per_second=2) as live:
+    if live_output_lines is not None:
+        live_output_lines.clear()
+    with Live(
+        _render_live_view(rows, f"{kind} {run_number} running", list(live_output_lines or [])),
+        console=_CONSOLE,
+        refresh_per_second=4,
+    ) as live:
         while True:
             if hasattr(action, "done") and action.done():
                 break
             elapsed_seconds = int(time.monotonic() - started)
             row["elapsed"] = f"{elapsed_seconds // 60:02d}:{elapsed_seconds % 60:02d}"
-            live.update(_render_run_table(rows, f"{kind} {run_number} running"))
+            live.update(_render_live_view(rows, f"{kind} {run_number} running", list(live_output_lines or [])))
             time.sleep(0.5)
         payload = action.result()
         elapsed_seconds = int(time.monotonic() - started)
         row["elapsed"] = f"{elapsed_seconds // 60:02d}:{elapsed_seconds % 60:02d}"
         row["status"] = str(payload.get("status", "completed"))
-        live.update(_render_run_table(rows, f"{kind} {run_number} finished"))
+        live.update(_render_live_view(rows, f"{kind} {run_number} finished", list(live_output_lines or [])))
     return payload
 
 
@@ -399,6 +423,7 @@ def run_launcher(
 
     interrupted = False
     run_rows: list[dict[str, object]] = []
+    live_output_lines: deque[str] = deque(maxlen=10)
     executor = ThreadPoolExecutor(max_workers=1)
     try:
         while True:
@@ -413,11 +438,13 @@ def run_launcher(
                     db_path=db_path,
                     train_path=train_path,
                     session_id=session_id,
+                    live_line_callback=live_output_lines.append,
                 )
                 validation_payload = _run_with_live_timer(
                     rows=run_rows,
                     kind="validation",
                     action=future,
+                    live_output_lines=live_output_lines,
                 )
                 print(
                     json.dumps(
@@ -462,11 +489,13 @@ def run_launcher(
                     prepared_run=prepared_fast_run,
                     db_path=db_path,
                     train_path=train_path,
+                    live_line_callback=live_output_lines.append,
                 )
                 payload = _run_with_live_timer(
                     rows=run_rows,
                     kind="fast",
                     action=future,
+                    live_output_lines=live_output_lines,
                 )
                 autoresearch_agent.append_debug_trace(
                     event_type="fast_experiment_completed",
@@ -521,11 +550,13 @@ def run_launcher(
             program_path=program_path,
             train_path=train_path,
             session_id=session_id,
+            live_line_callback=live_output_lines.append,
         )
         payload = _run_with_live_timer(
             rows=run_rows,
             kind="full",
             action=future,
+            live_output_lines=live_output_lines,
         )
         _print_run_result(
             run_number=len(run_rows),

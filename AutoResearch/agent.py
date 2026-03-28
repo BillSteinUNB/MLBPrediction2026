@@ -12,6 +12,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+import threading
 from typing import Any, Sequence
 
 AUTORESEARCH_ROOT = Path(__file__).resolve().parent
@@ -81,6 +82,13 @@ class SuspectedIssue:
     body: str
     metadata: dict[str, Any]
     created_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class TrainProcessResult:
+    returncode: int
+    stdout: str
+    stderr: str
 
 
 def append_debug_trace(
@@ -2094,8 +2102,9 @@ def _run_train_process(
     mode: str,
     experiment_name: str,
     train_path: str | Path,
-) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    live_line_callback=None,
+) -> TrainProcessResult:
+    process = subprocess.Popen(
         [
             sys.executable,
             str(Path(train_path)),
@@ -2106,11 +2115,57 @@ def _run_train_process(
             "--json-output",
         ],
         cwd=REPO_ROOT,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
-        check=False,
+        bufsize=1,
+    )
+    stdout_chunks: list[str] = []
+    stderr_chunks: list[str] = []
+
+    def _emit_live_line(raw_line: str) -> None:
+        if live_line_callback is None:
+            return
+        normalized = " ".join(str(raw_line).replace("\r", "\n").split()).strip()
+        if not normalized:
+            return
+        live_line_callback(normalized)
+
+    def _read_stream(stream, sink: list[str], *, emit_live_lines: bool) -> None:
+        try:
+            while True:
+                line = stream.readline()
+                if line == "":
+                    break
+                sink.append(line)
+                if emit_live_lines:
+                    _emit_live_line(line)
+        finally:
+            stream.close()
+
+    stdout_thread = threading.Thread(
+        target=_read_stream,
+        args=(process.stdout, stdout_chunks),
+        kwargs={"emit_live_lines": False},
+        daemon=True,
+    )
+    stderr_thread = threading.Thread(
+        target=_read_stream,
+        args=(process.stderr, stderr_chunks),
+        kwargs={"emit_live_lines": True},
+        daemon=True,
+    )
+    stdout_thread.start()
+    stderr_thread.start()
+    returncode = process.wait()
+    stdout_thread.join()
+    stderr_thread.join()
+    return TrainProcessResult(
+        returncode=returncode,
+        stdout="".join(stdout_chunks),
+        stderr="".join(stderr_chunks),
     )
 
 
@@ -2154,6 +2209,7 @@ def _run_validation_retest(
     train_path: str | Path,
     session_id: int,
     reports_dir: str | Path = DEFAULT_REPORTS_DIR,
+    live_line_callback=None,
 ) -> dict[str, Any]:
     config = dict(issue.metadata.get("config") or {})
     if not config:
@@ -2214,6 +2270,7 @@ def _run_validation_retest(
         mode="fast",
         experiment_name=experiment_name,
         train_path=train_path,
+        live_line_callback=live_line_callback,
     )
     stdout_path, stderr_path = _write_process_logs(
         experiment_name=experiment_name,
@@ -2336,6 +2393,7 @@ def execute_prepared_fast_once(
     prepared_run: PreparedExperimentRun,
     db_path: str | Path = DEFAULT_DB_PATH,
     train_path: str | Path = DEFAULT_TRAIN_PATH,
+    live_line_callback=None,
 ) -> dict[str, Any]:
     planner_decision = prepared_run.planner_decision
     proposal = planner_decision.proposal
@@ -2357,6 +2415,7 @@ def execute_prepared_fast_once(
         mode=prepared_run.mode,
         experiment_name=prepared_run.experiment_name,
         train_path=train_path,
+        live_line_callback=live_line_callback,
     )
     stdout_path, stderr_path = _write_process_logs(
         experiment_name=prepared_run.experiment_name,
@@ -2448,6 +2507,7 @@ def run_best_full(
     program_path: str | Path = DEFAULT_PROGRAM_PATH,
     train_path: str | Path = DEFAULT_TRAIN_PATH,
     session_id: int | None = None,
+    live_line_callback=None,
 ) -> dict[str, Any]:
     ensure_experiment_db(db_path)
     best_row = best_fast_experiment(db_path, session_id=session_id)
@@ -2524,6 +2584,7 @@ def run_best_full(
         mode="full",
         experiment_name=experiment_name,
         train_path=train_path,
+        live_line_callback=live_line_callback,
     )
     stdout_path, stderr_path = _write_process_logs(
         experiment_name=experiment_name,
