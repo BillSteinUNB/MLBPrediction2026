@@ -46,8 +46,8 @@ MAX_FEATURES = 80
 SELECTOR_TYPE = "pearson"
 BUCKET_QUOTAS = [80, 0, 0, 0]
 EXCLUDE_PATTERNS: list[str] = []
-FORCE_INCLUDE_PATTERNS: list[str] = ["*_7g", "*_7s", "*_delta_7v30g", "*_delta_7v30s"]
-FORCED_DELTA_COUNT = 8
+FORCE_INCLUDE_PATTERNS: list[str] = ["*_7g"]
+FORCED_DELTA_COUNT = 4
 TRIALS = 120
 FOLDS = 3
 # AGENT_CONFIG_END

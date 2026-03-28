@@ -1046,7 +1046,12 @@ def update_train_config(
         flags=re.DOTALL,
     )
     if updated == source:
-        raise ValueError("Could not locate AGENT_CONFIG block in train.py")
+        if "# AGENT_CONFIG_START" in source and "# AGENT_CONFIG_END" in source:
+            start_index = source.index("# AGENT_CONFIG_START")
+            end_index = source.index("# AGENT_CONFIG_END") + len("# AGENT_CONFIG_END")
+            updated = source[:start_index] + replacement + source[end_index:]
+        else:
+            raise ValueError("Could not locate AGENT_CONFIG block in train.py")
     resolved_train_path.write_text(updated, encoding="utf-8")
 
 
