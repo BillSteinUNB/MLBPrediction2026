@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 AUTORESEARCH_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = AUTORESEARCH_ROOT.parent
@@ -735,6 +737,128 @@ def test_pending_suspected_issues_excludes_already_validated_notes(tmp_path: Pat
 
     pending_after = agent.pending_suspected_issues(db_path=db_path, session_id=session_id)
     assert pending_after == []
+
+
+def test_prepare_fast_once_surfaces_planner_decision_before_execution(monkeypatch, tmp_path: Path) -> None:
+    proposal = agent.ExperimentProposal(
+        max_features=80,
+        selector_type="pearson",
+        bucket_quotas=[80, 0, 0, 0],
+        exclude_patterns=[],
+        force_include_patterns=["*_7g"],
+        forced_delta_count=8,
+        trials=120,
+        folds=3,
+        rationale="Anchor the first overnight run in the repaired manual region.",
+    )
+    decision = agent.PlannerDecision(
+        proposal=proposal,
+        hypothesis="Start from the repaired manual baseline before local refinement.",
+        planner_type="llm",
+        planner_model="droid:test",
+        reasoning="This gives the night a stable anchor before neighboring configs move.",
+    )
+
+    monkeypatch.setattr(agent, "ensure_experiment_db", lambda _db_path: Path(_db_path))
+    monkeypatch.setattr(agent, "load_program_text", lambda _program_path: "baseline")
+    monkeypatch.setattr(agent, "load_history", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(agent, "build_session_context", lambda *_args, **_kwargs: {"best_run": {"holdout_r2": 0.04}})
+    monkeypatch.setattr(agent, "plan_next_experiment", lambda *_args, **_kwargs: decision)
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        agent,
+        "update_train_config",
+        lambda **kwargs: captured.update({"proposal": kwargs["proposal"], "train_path": kwargs["train_path"]}),
+    )
+    monkeypatch.setattr(
+        agent,
+        "_reload_train_module",
+        lambda: SimpleNamespace(
+            resolve_effective_config=lambda mode: {"mode": mode},
+            build_experiment_name=lambda mode, config: f"{mode}-experiment",
+        ),
+    )
+
+    prepared = agent.prepare_fast_once(
+        db_path=tmp_path / "experiments.db",
+        program_path=tmp_path / "program.md",
+        train_path=tmp_path / "train.py",
+        exploration_mode="fast",
+        session_id=7,
+    )
+
+    assert prepared.experiment_name == "fast-experiment"
+    assert prepared.session_id == 7
+    assert prepared.planner_decision.hypothesis.startswith("Start from the repaired")
+    assert prepared.prior_session_best == {"holdout_r2": 0.04}
+    assert captured["proposal"] == proposal
+
+
+def test_run_training_passes_single_model_spec_to_trainer(monkeypatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    @contextmanager
+    def fake_overrides(_config):
+        yield
+
+    artifact = SimpleNamespace(
+        holdout_metrics={
+            "r2": 0.0382,
+            "rmse": 2.25,
+            "mae": 1.78,
+            "poisson_deviance": 2.19,
+            "rmse_improvement_vs_naive_pct": 1.2,
+        },
+        cv_metric_name="poisson_deviance",
+        cv_best_score=2.11,
+        model_name=train.MODEL_NAME,
+        target_column=train.TARGET_COLUMN,
+        model_version="version-1",
+        model_path=tmp_path / "model.joblib",
+        metadata_path=tmp_path / "model.metadata.json",
+        final_n_estimators=321,
+        best_params={"max_depth": 4},
+        feature_columns=["feature_a"],
+        feature_selection_bucket_targets={"flat": 80},
+        feature_selection_bucket_counts={"flat": 80},
+        excluded_candidate_counts={"pattern_excluded": 0},
+        holdout_season=train.HOLDOUT_SEASON,
+    )
+
+    monkeypatch.setattr(
+        train,
+        "inspect_run_count_training_data",
+        lambda _path: SimpleNamespace(
+            parquet_path=str(tmp_path / "input.parquet"),
+            data_version_hash="hash",
+            schema_name="schema",
+            schema_version="1",
+            row_count=10,
+            feature_column_count=5,
+            metadata_path=None,
+            has_temporal_delta_features=True,
+        ),
+    )
+    monkeypatch.setattr(train, "apply_training_overrides", fake_overrides)
+    monkeypatch.setattr(train, "_compute_cv_rmse", lambda **_kwargs: 3.05)
+    monkeypatch.setattr(
+        train.rct,
+        "train_run_count_models",
+        lambda **kwargs: captured.update(kwargs) or SimpleNamespace(
+            summary_path=tmp_path / "summary.json",
+            models={train.MODEL_NAME: artifact},
+        ),
+    )
+
+    payload = train.run_training(
+        mode="fast",
+        experiment_name="test-experiment",
+        training_data=tmp_path / "input.parquet",
+        show_training_data_summary=False,
+    )
+
+    assert captured["model_specs"] == ({"model_name": train.MODEL_NAME, "target_column": train.TARGET_COLUMN},)
+    assert payload["model"]["model_name"] == train.MODEL_NAME
 
 
 def test_collect_session_config_uses_interactive_prompts(monkeypatch) -> None:

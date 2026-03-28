@@ -65,6 +65,15 @@ class AutoresearchSessionConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class PreparedExperimentRun:
+    mode: str
+    session_id: int | None
+    planner_decision: PlannerDecision
+    experiment_name: str
+    prior_session_best: dict[str, Any] | None
+
+
+@dataclass(frozen=True, slots=True)
 class SuspectedIssue:
     note_id: int
     experiment_id: int | None
@@ -2289,14 +2298,14 @@ def run_planner_self_check() -> dict[str, Any]:
     }
 
 
-def run_fast_once(
+def prepare_fast_once(
     *,
     db_path: str | Path = DEFAULT_DB_PATH,
     program_path: str | Path = DEFAULT_PROGRAM_PATH,
     train_path: str | Path = DEFAULT_TRAIN_PATH,
     exploration_mode: str = "fast",
     session_id: int | None = None,
-) -> dict[str, Any]:
+) -> PreparedExperimentRun:
     ensure_experiment_db(db_path)
     program_text = load_program_text(program_path)
     history = load_history(db_path, mode="fast")
@@ -2313,26 +2322,44 @@ def run_fast_once(
     train_api = _reload_train_module()
     effective_config = train_api.resolve_effective_config(exploration_mode)
     experiment_name = train_api.build_experiment_name(exploration_mode, effective_config)
-    planner_prompt_path, planner_response_path = _write_planner_logs(
+    return PreparedExperimentRun(
+        mode=exploration_mode,
+        session_id=session_id,
+        planner_decision=planner_decision,
         experiment_name=experiment_name,
+        prior_session_best=prior_session_best,
+    )
+
+
+def execute_prepared_fast_once(
+    *,
+    prepared_run: PreparedExperimentRun,
+    db_path: str | Path = DEFAULT_DB_PATH,
+    train_path: str | Path = DEFAULT_TRAIN_PATH,
+) -> dict[str, Any]:
+    planner_decision = prepared_run.planner_decision
+    proposal = planner_decision.proposal
+    update_train_config(train_path=train_path, proposal=proposal)
+    planner_prompt_path, planner_response_path = _write_planner_logs(
+        experiment_name=prepared_run.experiment_name,
         planner_decision=planner_decision,
     )
 
     experiment_id = _insert_started_experiment(
         db_path=db_path,
-        mode=exploration_mode,
+        mode=prepared_run.mode,
         planner_decision=planner_decision,
         proposal=proposal,
-        experiment_name=experiment_name,
-        session_id=session_id,
+        experiment_name=prepared_run.experiment_name,
+        session_id=prepared_run.session_id,
     )
     completed = _run_train_process(
-        mode=exploration_mode,
-        experiment_name=experiment_name,
+        mode=prepared_run.mode,
+        experiment_name=prepared_run.experiment_name,
         train_path=train_path,
     )
     stdout_path, stderr_path = _write_process_logs(
-        experiment_name=experiment_name,
+        experiment_name=prepared_run.experiment_name,
         stdout=completed.stdout,
         stderr=completed.stderr,
     )
@@ -2365,24 +2392,24 @@ def run_fast_once(
     note_ids = maybe_record_experiment_notes(
         db_path=db_path,
         experiment_id=experiment_id,
-        session_id=session_id,
+        session_id=prepared_run.session_id,
         proposal=proposal,
-        exploration_mode=exploration_mode,
-        prior_session_best=prior_session_best,
+        exploration_mode=prepared_run.mode,
+        prior_session_best=prepared_run.prior_session_best,
         result_payload=result_payload,
         status=status,
         error_message=error_message,
     )
     return {
         "experiment_id": experiment_id,
-        "session_id": session_id,
-        "experiment_name": experiment_name,
+        "session_id": prepared_run.session_id,
+        "experiment_name": prepared_run.experiment_name,
         "status": status,
         "hypothesis": planner_decision.hypothesis,
         "planner_type": planner_decision.planner_type,
         "planner_model": planner_decision.planner_model,
         "planner_reasoning": planner_decision.reasoning,
-        "exploration_mode": exploration_mode,
+        "exploration_mode": prepared_run.mode,
         "proposal": proposal_to_snapshot(proposal),
         "result": result_payload,
         "note_ids": note_ids,
@@ -2391,6 +2418,28 @@ def run_fast_once(
         "planner_prompt_path": None if planner_prompt_path is None else str(planner_prompt_path),
         "planner_response_path": None if planner_response_path is None else str(planner_response_path),
     }
+
+
+def run_fast_once(
+    *,
+    db_path: str | Path = DEFAULT_DB_PATH,
+    program_path: str | Path = DEFAULT_PROGRAM_PATH,
+    train_path: str | Path = DEFAULT_TRAIN_PATH,
+    exploration_mode: str = "fast",
+    session_id: int | None = None,
+) -> dict[str, Any]:
+    prepared_run = prepare_fast_once(
+        db_path=db_path,
+        program_path=program_path,
+        train_path=train_path,
+        exploration_mode=exploration_mode,
+        session_id=session_id,
+    )
+    return execute_prepared_fast_once(
+        prepared_run=prepared_run,
+        db_path=db_path,
+        train_path=train_path,
+    )
 
 
 def run_best_full(

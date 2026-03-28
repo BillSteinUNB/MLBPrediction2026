@@ -10,6 +10,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from rich.console import Console
 from rich.live import Live
+from rich.panel import Panel
 from rich.table import Table
 
 AUTORESEARCH_ROOT = Path(__file__).resolve().parent
@@ -26,6 +27,94 @@ DEFAULT_TRAIN_PATH = AUTORESEARCH_ROOT / "train.py"
 DEFAULT_MIN_FAST_WINDOW_MINUTES = 30
 DEFAULT_POLL_INTERVAL_SECONDS = 15
 _CONSOLE = Console()
+
+
+def _trim_text(value: str | None, *, max_length: int = 220) -> str:
+    normalized = " ".join(str(value or "").split())
+    if len(normalized) <= max_length:
+        return normalized
+    return normalized[: max_length - 3].rstrip() + "..."
+
+
+def _print_event_panel(*, title: str, lines: list[str], border_style: str) -> None:
+    _CONSOLE.print(Panel("\n".join(lines), title=title, border_style=border_style))
+
+
+def _format_metrics(payload: dict[str, object]) -> list[str]:
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        return []
+    metrics = result.get("metrics")
+    model = result.get("model")
+    if not isinstance(metrics, dict):
+        return []
+    lines = [
+        (
+            "Holdout: "
+            f"R2={float(metrics['holdout_r2']) * 100:.2f}% "
+            f"RMSE={float(metrics['holdout_rmse']):.4f} "
+            f"Poisson={float(metrics['holdout_poisson_deviance']):.4f}"
+        ),
+        (
+            "CV: "
+            f"RMSE={float(metrics['cv_rmse']):.4f} "
+            f"{metrics['cv_metric_name']}={float(metrics['cv_metric_value']):.4f}"
+        ),
+    ]
+    if isinstance(model, dict):
+        lines.append(f"Model: `{model.get('model_name', '<unknown>')}`")
+    return lines
+
+
+def _print_planned_fast_run(*, run_number: int, prepared_run: autoresearch_agent.PreparedExperimentRun) -> None:
+    decision = prepared_run.planner_decision
+    proposal = decision.proposal
+    planner_label = decision.planner_type
+    if decision.planner_model:
+        planner_label = f"{planner_label} via {decision.planner_model}"
+    _print_event_panel(
+        title=f"Fast Run {run_number} Plan",
+        border_style="cyan",
+        lines=[
+            f"Planner: {planner_label}",
+            f"Hypothesis: {_trim_text(decision.hypothesis, max_length=260)}",
+            f"Why: {_trim_text(decision.reasoning, max_length=260)}",
+            (
+                "Config: "
+                f"selector={proposal.selector_type} "
+                f"max_features={proposal.max_features} "
+                f"forced_delta_count={proposal.forced_delta_count} "
+                f"trials={proposal.trials} folds={proposal.folds}"
+            ),
+            f"Buckets: {proposal.bucket_quotas}",
+            f"Force include: {proposal.force_include_patterns or '[]'}",
+        ],
+    )
+
+
+def _print_run_result(*, run_number: int, kind: str, payload: dict[str, object]) -> None:
+    status = str(payload.get("status", "unknown"))
+    lines = [
+        f"Experiment: `{payload.get('experiment_name', '<unknown>')}`",
+        f"Status: `{status}`",
+    ]
+    result_lines = _format_metrics(payload)
+    if result_lines:
+        lines.extend(result_lines)
+    if status != "succeeded":
+        error_message = _trim_text(str(payload.get("error_message") or ""), max_length=260)
+        if error_message:
+            lines.append(f"Error: {error_message}")
+        lines.append(f"stdout: `{payload.get('stdout_path', '<missing>')}`")
+        lines.append(f"stderr: `{payload.get('stderr_path', '<missing>')}`")
+    note_ids = payload.get("note_ids")
+    if note_ids:
+        lines.append(f"Notes recorded: {note_ids}")
+    _print_event_panel(
+        title=f"{kind.title()} Run {run_number} Result",
+        border_style="green" if status == "succeeded" else "red",
+        lines=lines,
+    )
 
 
 def _render_run_table(rows: list[dict[str, object]], current_status: str) -> Table:
@@ -297,16 +386,15 @@ def run_launcher(
                 f"model: `{payload['model']}`",
             ],
         )
-        print(
-            json.dumps(
-                {
-                    "event": "planner_self_check_passed",
-                    "session_id": session_id,
-                    "payload": payload,
-                },
-                indent=2,
-                sort_keys=True,
-            )
+        _print_event_panel(
+            title="Planner Self-Check",
+            border_style="green",
+            lines=[
+                f"Session: `{session_id}`",
+                f"Provider: `{payload['provider']}`",
+                f"Model: `{payload['model']}`",
+                f"Response: `{payload.get('response_text', 'OK')}`",
+            ],
         )
 
     interrupted = False
@@ -346,36 +434,39 @@ def run_launcher(
                     event_type="issue_validation_completed",
                     payload={"session_id": session_id, **validation_payload},
                 )
+                _print_run_result(
+                    run_number=len(run_rows),
+                    kind="validation",
+                    payload=validation_payload,
+                )
             now = datetime.now(UTC)
             if should_start_fast_run(
                 now=now,
                 stop_at=stop_at,
                 min_fast_window_minutes=min_fast_window_minutes,
             ):
+                with _CONSOLE.status("Planning next fast run...", spinner="dots"):
+                    prepared_fast_run = autoresearch_agent.prepare_fast_once(
+                        db_path=db_path,
+                        program_path=program_path,
+                        train_path=train_path,
+                        exploration_mode=session_config.exploration_mode,
+                        session_id=session_id,
+                    )
+                _print_planned_fast_run(
+                    run_number=len(run_rows) + 1,
+                    prepared_run=prepared_fast_run,
+                )
                 future = executor.submit(
-                    autoresearch_agent.run_fast_once,
+                    autoresearch_agent.execute_prepared_fast_once,
+                    prepared_run=prepared_fast_run,
                     db_path=db_path,
-                    program_path=program_path,
                     train_path=train_path,
-                    exploration_mode=session_config.exploration_mode,
-                    session_id=session_id,
                 )
                 payload = _run_with_live_timer(
                     rows=run_rows,
                     kind="fast",
                     action=future,
-                )
-                print(
-                    json.dumps(
-                        {
-                            "event": "fast_experiment_completed",
-                            "session_id": session_id,
-                            "stop_at": None if stop_at is None else stop_at.isoformat(),
-                            "payload": payload,
-                        },
-                        indent=2,
-                        sort_keys=True,
-                    )
                 )
                 autoresearch_agent.append_debug_trace(
                     event_type="fast_experiment_completed",
@@ -391,6 +482,11 @@ def run_launcher(
                         f"experiment_name: `{payload['experiment_name']}`",
                         f"note_ids: `{payload.get('note_ids', [])}`",
                     ],
+                )
+                _print_run_result(
+                    run_number=len(run_rows),
+                    kind="fast",
+                    payload=payload,
                 )
                 if payload["status"] != "succeeded":
                     time.sleep(poll_interval_seconds)
@@ -431,23 +527,16 @@ def run_launcher(
             kind="full",
             action=future,
         )
+        _print_run_result(
+            run_number=len(run_rows),
+            kind="full",
+            payload=payload,
+        )
         summary_payload = _session_summary(
             db_path=db_path,
             session_id=session_id,
             status="completed" if not interrupted else "interrupted_then_full",
             run_full_at_end=session_config.run_full_at_end,
-        )
-        print(
-            json.dumps(
-                {
-                    "event": "full_experiment_completed",
-                    "session_id": session_id,
-                    "payload": payload,
-                    "session_summary": summary_payload,
-                },
-                indent=2,
-                sort_keys=True,
-            )
         )
         autoresearch_agent.append_debug_trace(
             event_type="full_experiment_completed",
@@ -487,15 +576,20 @@ def run_launcher(
         summary_json_path=summary["summary_json_path"],
         summary_md_path=summary["summary_md_path"],
     )
-    print(
-        json.dumps(
-            {
-                "event": "session_completed",
-                "payload": summary,
-            },
-            indent=2,
-            sort_keys=True,
-        )
+    _print_event_panel(
+        title="Session Complete",
+        border_style="green",
+        lines=[
+            f"Session: `{summary['session_id']}`",
+            f"Status: `{summary['status']}`",
+            f"Best experiment: `{summary['best_experiment_name']}`",
+            (
+                "Best metrics: "
+                f"holdout_r2={summary['best_holdout_r2']} "
+                f"cv_rmse={summary['best_cv_rmse']}"
+            ),
+            f"Summary: `{summary['summary_md_path']}`",
+        ],
     )
     autoresearch_agent.append_nightly_log(
         event_type="session_completed",

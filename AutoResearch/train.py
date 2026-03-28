@@ -486,10 +486,10 @@ def run_training(
     started_at = datetime.now(UTC)
     effective_experiment_name = experiment_name or build_experiment_name(mode, config)
     output_dir = MODEL_OUTPUT_ROOT / effective_experiment_name
-
-    rct.DEFAULT_RUN_COUNT_MODEL_SPECS = (
+    model_specs = (
         {"model_name": MODEL_NAME, "target_column": TARGET_COLUMN},
     )
+
     with apply_training_overrides(config):
         result = rct.train_run_count_models(
             training_data=training_path,
@@ -503,6 +503,7 @@ def run_training(
             cv_aggregation_mode=config.cv_aggregation_mode,
             lightgbm_param_mode=config.lightgbm_param_mode,
             blend_mode=config.blend_mode,
+            model_specs=model_specs,
         )
 
     artifact = result.models[MODEL_NAME]
