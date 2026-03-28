@@ -38,6 +38,7 @@ class ExperimentProposal:
     bucket_quotas: list[int]
     exclude_patterns: list[str]
     force_include_patterns: list[str]
+    forced_delta_count: int
     trials: int
     folds: int
     rationale: str
@@ -530,6 +531,7 @@ def proposal_to_snapshot(proposal: ExperimentProposal) -> dict[str, Any]:
         "bucket_quotas": list(proposal.bucket_quotas),
         "exclude_patterns": list(proposal.exclude_patterns),
         "force_include_patterns": list(proposal.force_include_patterns),
+        "forced_delta_count": proposal.forced_delta_count,
         "trials": proposal.trials,
         "folds": proposal.folds,
     }
@@ -562,6 +564,7 @@ def _proposal_for_exploration_mode(
         bucket_quotas=list(proposal.bucket_quotas),
         exclude_patterns=list(proposal.exclude_patterns),
         force_include_patterns=list(proposal.force_include_patterns),
+        forced_delta_count=proposal.forced_delta_count,
         trials=trials,
         folds=folds,
         rationale=proposal.rationale,
@@ -890,6 +893,7 @@ def _proposal_from_payload(payload: dict[str, Any]) -> ExperimentProposal:
         bucket_quotas=bucket_quotas,
         exclude_patterns=exclude_patterns,
         force_include_patterns=force_include_patterns,
+        forced_delta_count=int(config.get("forced_delta_count", len(force_include_patterns))),
         trials=trials,
         folds=folds,
         rationale=rationale,
@@ -957,80 +961,50 @@ def build_proposal_catalog(program_text: str) -> list[ExperimentProposal]:
     proposals.append(
         ExperimentProposal(
             max_features=80,
-            selector_type="bucketed",
-            bucket_quotas=[24, 28, 12, 16],
-            exclude_patterns=[],
-            force_include_patterns=[],
-            trials=50,
-            folds=3,
-            rationale="Establish the overnight baseline with the current bucketed selector at 80 features.",
-        )
-    )
-    proposals.append(
-        ExperimentProposal(
-            max_features=80,
             selector_type="pearson",
-            bucket_quotas=[24, 28, 12, 16],
+            bucket_quotas=[80, 0, 0, 0],
             exclude_patterns=[],
-            force_include_patterns=[],
-            trials=50,
+            force_include_patterns=_FORCE_7G_PATTERNS,
+            forced_delta_count=8,
+            trials=120,
             folds=3,
-            rationale="Replicate the flat Pearson-style selector close to the Run 3 setup.",
+            rationale="Baseline tonight's best known manual region: flat, 80 features, forced_delta_count=8.",
         )
     )
-
-    bucket_layouts = [
-        ([24, 28, 12, 16], "Keep the balanced bucket layout."),
-        ([24, 36, 20], "Shift more slots toward medium/context features."),
-        ([28, 24, 12, 16], "Favor short-form recent features."),
-        ([20, 28, 12, 20], "Leave more room for context-heavy features."),
-    ]
-    ablations = [
-        ([], [], "Keep all candidate families enabled."),
-        (["weather_*"], [], "Test whether weather features are adding noise."),
-        ([], _FORCE_7G_PATTERNS, "Force recent 7-game features into the ranking."),
-        (
-            ["weather_*"],
-            _FORCE_7G_PATTERNS,
-            "Drop weather while forcing recent 7-game signals into the model.",
-        ),
-    ]
-
-    for max_features in (60, 80, 100, 120):
+    for forced_delta_count in (4, 6, 8, 10, 12, 14, 16):
+        force_patterns = _FORCE_7G_PATTERNS[: min(len(_FORCE_7G_PATTERNS), max(1, forced_delta_count // 4))]
         proposals.append(
             ExperimentProposal(
-                max_features=max_features,
+                max_features=80,
                 selector_type="pearson",
-                bucket_quotas=[24, 28, 12, 16],
-                exclude_patterns=["weather_*"] if max_features >= 100 else [],
-                force_include_patterns=[],
-                trials=50,
+                bucket_quotas=[80, 0, 0, 0],
+                exclude_patterns=[],
+                force_include_patterns=force_patterns,
+                forced_delta_count=forced_delta_count,
+                trials=120,
                 folds=3,
-                rationale=(
-                    f"Test flat Pearson ranking at {max_features} features to see whether "
-                    "broader top-N selection restores Run 3 behavior."
-                ),
+                rationale=f"Map the forced-delta region at max_features=80 with forced_delta_count={forced_delta_count}.",
             )
         )
-        for bucket_quotas, quota_rationale in bucket_layouts:
-            for exclude_patterns, force_include_patterns, ablation_rationale in ablations:
-                proposals.append(
-                    ExperimentProposal(
-                        max_features=max_features,
-                        selector_type="ablation"
-                        if exclude_patterns or force_include_patterns
-                        else "bucketed",
-                        bucket_quotas=list(bucket_quotas),
-                        exclude_patterns=list(exclude_patterns),
-                        force_include_patterns=list(force_include_patterns),
-                        trials=50,
-                        folds=3,
-                        rationale=(
-                            f"Evaluate bucketed selection at {max_features} features. "
-                            f"{quota_rationale} {ablation_rationale}"
-                        ),
-                    )
+    for forced_delta_count in (8, 10, 12, 14):
+        force_patterns = _FORCE_7G_PATTERNS[: min(len(_FORCE_7G_PATTERNS), max(1, forced_delta_count // 4))]
+        for max_features in (72, 80, 88):
+            proposals.append(
+                ExperimentProposal(
+                    max_features=max_features,
+                    selector_type="pearson",
+                    bucket_quotas=[max_features, 0, 0, 0],
+                    exclude_patterns=[],
+                    force_include_patterns=force_patterns,
+                    forced_delta_count=forced_delta_count,
+                    trials=120,
+                    folds=3,
+                    rationale=(
+                        f"Local refinement around the forced-delta region with forced_delta_count={forced_delta_count} "
+                        f"and max_features={max_features}."
+                    ),
                 )
+            )
 
     deduped: list[ExperimentProposal] = []
     seen: set[str] = set()
@@ -1058,6 +1032,7 @@ def update_train_config(
             f"BUCKET_QUOTAS = {json.dumps(proposal.bucket_quotas)}",
             f"EXCLUDE_PATTERNS: list[str] = {json.dumps(proposal.exclude_patterns)}",
             f"FORCE_INCLUDE_PATTERNS: list[str] = {json.dumps(proposal.force_include_patterns)}",
+            f"FORCED_DELTA_COUNT = {proposal.forced_delta_count}",
             f"TRIALS = {proposal.trials}",
             f"FOLDS = {proposal.folds}",
             "# AGENT_CONFIG_END",

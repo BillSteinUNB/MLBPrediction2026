@@ -48,7 +48,7 @@ def prepare_git_checkpoint(*, reports_dir: str | Path = autoresearch_agent.DEFAU
     if branch_before.returncode != 0:
         raise RuntimeError(branch_before.stderr.strip() or "git rev-parse failed")
 
-    commit_message = f"AutoResearch checkpoint {datetime.now(UTC).date().isoformat()}"
+    commit_message = f"Start of auto research {datetime.now(UTC).date().isoformat()}"
     add_result = _run_git_command("add", "-A")
     if add_result.returncode != 0:
         raise RuntimeError(add_result.stderr.strip() or "git add failed")

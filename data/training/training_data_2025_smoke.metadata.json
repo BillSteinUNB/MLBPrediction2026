@@ -1,0 +1,15 @@
+{
+  "requested_years": [
+    2025
+  ],
+  "effective_years": [
+    2025
+  ],
+  "shortened_seasons_skipped": [],
+  "scheduled_start_before": null,
+  "row_count": 2430,
+  "feature_column_count": 344,
+  "feature_build_workers": 10,
+  "data_version_hash": "d197fa9cfc8f98f176c1d31486cc51ebb0a86e6949f65cf2acdd079fa1198d37",
+  "build_timestamp": "2026-03-27T14:45:21.746226+00:00"
+}

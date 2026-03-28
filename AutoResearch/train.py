@@ -32,25 +32,33 @@ optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 MODEL_NAME = "full_game_away_runs_model"
 TARGET_COLUMN = "final_away_score"
-TRAINING_DATA_PATH = REPO_ROOT / "data" / "training" / "training_data_2018_2025.parquet"
+TRAINING_DATA_PATH = REPO_ROOT / "data" / "training" / "ParquetDefault.parquet"
 MODEL_OUTPUT_ROOT = REPO_ROOT / "data" / "models"
 HOLDOUT_SEASON = 2025
 OPTUNA_WORKERS = max(1, int(os.getenv("MLB_OPTUNA_N_JOBS", "2")))
-BLEND_MODE = "learned"
+BLEND_MODE = "xgb_only"
+CV_AGGREGATION_MODE = "mean"
+LIGHTGBM_PARAM_MODE = "derived"
 EXPERIMENT_PREFIX = "autoresearch-away-runs"
 
 # AGENT_CONFIG_START
 MAX_FEATURES = 80
-SELECTOR_TYPE = "bucketed"
-BUCKET_QUOTAS = [24, 28, 12, 16]
+SELECTOR_TYPE = "pearson"
+BUCKET_QUOTAS = [80, 0, 0, 0]
 EXCLUDE_PATTERNS: list[str] = []
-FORCE_INCLUDE_PATTERNS: list[str] = []
-TRIALS = 50
+FORCE_INCLUDE_PATTERNS: list[str] = [
+    "*_delta_7v30g",
+    "*_delta_7v30s",
+    "*_7g",
+    "*_7s",
+]
+FORCED_DELTA_COUNT = 8
+TRIALS = 120
 FOLDS = 3
 # AGENT_CONFIG_END
 
-FULL_TRIALS = 500
-FULL_FOLDS = 5
+FULL_TRIALS = 300
+FULL_FOLDS = 3
 FAST_EARLY_STOPPING_ROUNDS = 30
 FULL_EARLY_STOPPING_ROUNDS = 40
 SUPPORTED_SELECTOR_TYPES = {"pearson", "bucketed", "ablation"}
@@ -66,10 +74,13 @@ class EffectiveTrainingConfig:
     bucket_targets: dict[str, int]
     exclude_patterns: list[str]
     force_include_patterns: list[str]
+    forced_delta_count: int
     search_iterations: int
     time_series_splits: int
     early_stopping_rounds: int
     blend_mode: str
+    cv_aggregation_mode: str
+    lightgbm_param_mode: str
 
 
 def resolve_effective_config(mode: str) -> EffectiveTrainingConfig:
@@ -87,6 +98,7 @@ def resolve_effective_config(mode: str) -> EffectiveTrainingConfig:
         raise ValueError("MAX_FEATURES must be positive")
 
     bucket_targets = resolve_bucket_targets(max_features=MAX_FEATURES, bucket_quotas=BUCKET_QUOTAS)
+    forced_delta_count = int(FORCED_DELTA_COUNT)
     return EffectiveTrainingConfig(
         mode=normalized_mode,
         max_features=int(MAX_FEATURES),
@@ -95,12 +107,15 @@ def resolve_effective_config(mode: str) -> EffectiveTrainingConfig:
         bucket_targets=bucket_targets,
         exclude_patterns=[pattern for pattern in EXCLUDE_PATTERNS if str(pattern).strip()],
         force_include_patterns=[pattern for pattern in FORCE_INCLUDE_PATTERNS if str(pattern).strip()],
+        forced_delta_count=forced_delta_count,
         search_iterations=int(TRIALS if normalized_mode == "fast" else FULL_TRIALS),
         time_series_splits=int(FOLDS if normalized_mode == "fast" else FULL_FOLDS),
         early_stopping_rounds=int(
             FAST_EARLY_STOPPING_ROUNDS if normalized_mode == "fast" else FULL_EARLY_STOPPING_ROUNDS
         ),
         blend_mode=BLEND_MODE,
+        cv_aggregation_mode=CV_AGGREGATION_MODE,
+        lightgbm_param_mode=LIGHTGBM_PARAM_MODE,
     )
 
 
@@ -475,6 +490,8 @@ def run_training(
             optuna_workers=OPTUNA_WORKERS,
             early_stopping_rounds=config.early_stopping_rounds,
             feature_selection_mode=config.feature_selection_mode,
+            cv_aggregation_mode=config.cv_aggregation_mode,
+            lightgbm_param_mode=config.lightgbm_param_mode,
             blend_mode=config.blend_mode,
         )
 
@@ -502,6 +519,7 @@ def run_training(
             "cv_rmse": cv_rmse,
             "cv_metric_name": artifact.cv_metric_name,
             "cv_metric_value": float(artifact.cv_best_score),
+            "holdout_poisson_deviance": float(artifact.holdout_metrics["poisson_deviance"]),
             "rmse_improvement_vs_naive_pct": float(
                 artifact.holdout_metrics["rmse_improvement_vs_naive_pct"]
             ),

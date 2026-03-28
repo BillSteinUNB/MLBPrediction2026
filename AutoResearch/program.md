@@ -2,61 +2,77 @@
 
 ## Objective
 
-Run fast overnight experiments on `full_game_away_runs_model`, compare them consistently, stop launching new fast runs at the cutoff, then promote the best fast configuration into one full training run before morning. The planner is an LLM research agent, not a fixed heuristic search script.
+Tonight's job is narrow: map the forced-delta region around the current best repaired-parquet manual setup and do not waste the night on stale search axes. The planner is an LLM research agent, not a fixed heuristic search script.
+
+## Tonight's frozen baseline
+
+Hold these fixed all night:
+
+- parquet: `data/training/ParquetDefault.parquet`
+- target: `final_away_score`
+- model: `full_game_away_runs_model`
+- selector family: `flat` (`SELECTOR_TYPE = "pearson"`)
+- blend_mode: `xgb_only`
+- cv_aggregation_mode: `mean`
+- holdout season: `2025`
+- folds: `3`
+- no data/build code changes
+- no 500x5 promotion
+
+Current best known manual region:
+
+- forced-delta count: `8`
+- holdout R²: about `3.82%`
 
 ## Fast Experiment Loop
 
 1. Read `experiments.db` and sort prior fast runs by:
    - highest `holdout_r2`
-   - lowest `cv_rmse`
+   - lowest `holdout_poisson_deviance`
+   - lowest `holdout_rmse`
    - earliest successful run as the final tie-breaker
 2. Form the next hypothesis with the LLM from the current leader plus recent failures:
-   - infer whether Pearson top-N or bucketed selection is currently more promising
-   - vary feature counts (`60`, `80`, `100`, `120`) around the best observed region
-   - vary bucket quotas if bucketed selection is leading
-   - use ablations such as weather exclusion or forced `7g` metrics when recent results suggest they may help
+   - primarily vary forced-delta retention around the current best manual region
+   - keep `max_features = 80` during the first discovery block
+   - only after the delta-count curve starts to stabilize, vary `max_features` locally
    - avoid repeating any already-tried fast config
 3. Edit only the config block at the top of `train.py`.
 4. Run `python train.py --mode fast`.
 5. Log the full config snapshot, metrics, hypothesis, planner type, planner model, planner prompt/response logs, stdout, stderr, and artifact paths into `experiments.db`.
 6. Never rerun the same fast config fingerprint unless every other proposal has already been exhausted.
 
-## Metrics
+## Metrics and ranking
 
-- Optimize `cv_rmse` as the fast proxy metric.
-- Treat `holdout_r2` as the ground-truth score for promotion decisions.
-- Use `holdout_rmse` as a secondary sanity check.
-- If available in emitted artifacts, also inspect Poisson deviance as an extra count-model sanity check.
+- Rank runs by:
+  1. `holdout_r2`
+  2. `holdout_poisson_deviance`
+  3. `holdout_rmse`
+- Use CV only as a weak sanity check, not the main ranker.
 
 ## Research Bias
 
-- Do not assume more Optuna trials or more folds automatically improve holdout performance.
-- Bias hypotheses toward feature representation and feature-selection bottlenecks before assuming search budget is the main issue.
-- Treat discovery and confirmation as different jobs:
-  - `fast` runs are for discovery
-  - `full` runs are for confirmation / stability
-- Keep comparisons apples-to-apples whenever possible:
-  - same target
-  - similar training parquet/version
-  - similar folds and trial counts
-  - similar selector family
-  - similar objective / CV metric
+- Do not reopen stale axes tonight.
+- Do not test grouped vs flat vs bucketed.
+- Do not test learned blend vs xgb_only.
+- Do not test 3 folds vs 5 folds.
+- Do not rebuild data or switch parquet versions.
+- Keep comparisons apples-to-apples by freezing all nonessential modeling choices.
 
 ## Search Space
 
-- Feature counts: `60`, `80`, `100`, `120`
-- Selector types:
-  - `pearson` = flat top-N
-  - `bucketed` = bucket quotas
-  - `ablation` = bucketed plus exclude / force-include patterns
-- Bucket quota families:
-  - `short_form`
-  - `medium_form`
-  - `delta`
-  - `context`
-- Primary ablations:
-  - exclude `weather_*`
-  - force include `*_7g`, `*_7s`, `*_delta_7v30g`, `*_delta_7v30s`
+- Stage 1 discovery:
+  - forced_delta_count in `{4, 6, 8, 10, 12, 14, 16}`
+  - `max_features = 80`
+  - `Iterations = 120`
+  - `Folds = 3`
+- Stage 2 local refinement:
+  - take top 2 forced-delta counts from Stage 1
+  - test `max_features` in `{72, 80, 88}`
+  - still `120x3`
+- Stage 3 confirmation:
+  - best 1 config at `300x3`
+  - optional second-best config at `300x3`
+- If a clean delta-family composition ablation is easy to express, do at most one small test late in the night. Otherwise skip it.
 
 ## Repo-Specific Note
 
@@ -82,16 +98,15 @@ The underlying trainer already strips most `60g` and `60s` candidate windows bef
 - Cutoff time defaults to `04:00` local time.
 - Do not start another fast run unless at least 30 minutes remain before cutoff.
 - Once the remaining time is below that threshold, stop the fast loop.
-- Promote the best successful fast run into `python train.py --mode full`.
-- Full mode uses the same feature config but upgrades search depth to `500` trials and `5` folds.
+- Promotion tonight means `300x3`, not `500x5`.
 - Exit cleanly once the full run finishes.
 
 ## Hypothesis Rules
 
 - Change one major lever at a time around the current leader.
+- Prefer forced-delta-count changes first.
+- Only after the forced-delta region is mapped should `max_features` move locally.
 - Keep the winner as the anchor and test neighbors, not random jumps.
-- Prefer small deltas in feature count or quota mix after a promising run.
-- If several runs regress together, fall back to the best known config and switch selector family.
 - If the LLM output is invalid, fall back to a safe heuristic rather than skipping the night.
 
 ## Example Flow
@@ -108,6 +123,7 @@ The underlying trainer already strips most `60g` and `60s` candidate windows bef
    - hypothesis text
    - config snapshot
    - `holdout_r2`
+   - `holdout_poisson_deviance`
    - `holdout_rmse`
    - `cv_rmse`
    - duration

@@ -1,0 +1,880 @@
+{
+  "model_name": "full_game_away_runs_model",
+  "target_column": "final_away_score",
+  "model_version": "20260327T194937Z_syntheti",
+  "data_version_hash": "synthetic-data-hash",
+  "holdout_season": 2025,
+  "train_row_count": 12,
+  "holdout_row_count": 6,
+  "feature_columns": [
+    "away_lineup_barrel_pct_delta_7v30g",
+    "away_lineup_bb_pct_delta_7v30g",
+    "away_lineup_iso_delta_7v30g",
+    "away_lineup_k_pct_delta_7v30g",
+    "away_lineup_woba_delta_7v30g",
+    "away_lineup_wrc_plus_delta_7v30g",
+    "away_lineup_xwoba_delta_7v30g",
+    "away_starter_avg_fastball_velocity_delta_7v30s",
+    "away_starter_bb_pct_delta_7v30s",
+    "away_starter_csw_pct_delta_7v30s",
+    "away_starter_k_pct_delta_7v30s",
+    "away_starter_siera_delta_7v30s",
+    "away_starter_xera_delta_7v30s",
+    "away_starter_xfip_delta_7v30s",
+    "away_team_log5",
+    "away_team_pythagorean_wp_30g",
+    "bullpen_pitch_count_3d",
+    "bullpen_pitch_count_7d",
+    "defense_metric",
+    "home_lineup_barrel_pct_delta_7v30g",
+    "home_lineup_bb_pct_delta_7v30g",
+    "home_lineup_iso_delta_7v30g",
+    "home_lineup_k_pct_delta_7v30g",
+    "home_lineup_woba_30g",
+    "home_lineup_wrc_plus_delta_7v30g",
+    "home_lineup_xwoba_delta_7v30g",
+    "home_starter_avg_fastball_velocity_delta_7v30s",
+    "home_starter_bb_pct_delta_7v30s",
+    "home_starter_csw_pct_delta_7v30s",
+    "home_starter_k_pct_delta_7v30s",
+    "home_starter_siera_delta_7v30s",
+    "home_starter_xera_delta_7v30s",
+    "home_starter_xfip_delta_7v30s",
+    "home_team_log5",
+    "home_team_pythagorean_wp_30g",
+    "offense_metric",
+    "park_runs_factor",
+    "weather_composite"
+  ],
+  "best_params": {
+    "n_estimators": 20,
+    "max_depth": 2,
+    "learning_rate": 0.1
+  },
+  "runtime_versions": {
+    "python": "3.11.14",
+    "xgboost": "3.2.0",
+    "sklearn": "1.8.0",
+    "pandas": "3.0.1",
+    "numpy": "2.4.3"
+  },
+  "model_family": "xgboost_lightgbm_blend",
+  "feature_selection_mode": "grouped",
+  "blend_weights": {
+    "xgboost": 0.6,
+    "lightgbm": 0.4
+  },
+  "search_backend": "optuna",
+  "optuna_parallel_workers": 1,
+  "cv_metric_name": "poisson_deviance",
+  "cv_best_score": 0.19829230489506885,
+  "cv_best_rmse": null,
+  "optuna_best_trial_number": 0,
+  "optuna_trial_count": 2,
+  "optuna_study_name": "full_game_away_runs_model_final_away_score_synthetic-da_2025",
+  "optuna_storage_path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\.pytest_tmp_5d5bef8b8a6e4c8883ca156a91abce92\\test_train_run_count_models_tr0\\models\\optuna_studies.db",
+  "holdout_metrics": {
+    "mae": 0.5998772449022127,
+    "rmse": 0.6567567647502319,
+    "poisson_deviance": 0.13011555699642452,
+    "r2": 0.5294587839507001,
+    "actual_mean": 3.5,
+    "predicted_mean": 3.4998808328318947,
+    "naive_mean_prediction": 3.5,
+    "naive_mae": 0.8333333333333334,
+    "naive_rmse": 0.9574271077563381,
+    "naive_poisson_deviance": 0.26916340195181565,
+    "mae_improvement_vs_naive_pct": 28.01473061173448,
+    "rmse_improvement_vs_naive_pct": 31.40399311553917,
+    "poisson_deviance_improvement_vs_naive_pct": 51.6592686624918
+  },
+  "requested_n_estimators": 20,
+  "final_n_estimators": 20,
+  "best_iteration": 19,
+  "early_stopping_rounds": 5,
+  "validation_fraction": 0.25,
+  "early_stopping_train_row_count": 9,
+  "early_stopping_validation_row_count": 3,
+  "feature_importance_rankings": [
+    {
+      "feature": "away_team_log5",
+      "importance": 0.4
+    },
+    {
+      "feature": "away_starter_xfip_delta_7v30s",
+      "importance": 0.22637110948562622
+    },
+    {
+      "feature": "home_team_log5",
+      "importance": 0.22522895336151122
+    },
+    {
+      "feature": "weather_composite",
+      "importance": 0.148399955034256
+    },
+    {
+      "feature": "away_lineup_barrel_pct_delta_7v30g",
+      "importance": 0.0
+    },
+    {
+      "feature": "away_lineup_bb_pct_delta_7v30g",
+      "importance": 0.0
+    },
+    {
+      "feature": "away_lineup_iso_delta_7v30g",
+      "importance": 0.0
+    },
+    {
+      "feature": "away_lineup_k_pct_delta_7v30g",
+      "importance": 0.0
+    },
+    {
+      "feature": "away_lineup_woba_delta_7v30g",
+      "importance": 0.0
+    },
+    {
+      "feature": "away_lineup_wrc_plus_delta_7v30g",
+      "importance": 0.0
+    },
+    {
+      "feature": "away_lineup_xwoba_delta_7v30g",
+      "importance": 0.0
+    },
+    {
+      "feature": "away_starter_avg_fastball_velocity_delta_7v30s",
+      "importance": 0.0
+    },
+    {
+      "feature": "away_starter_bb_pct_delta_7v30s",
+      "importance": 0.0
+    },
+    {
+      "feature": "away_starter_csw_pct_delta_7v30s",
+      "importance": 0.0
+    },
+    {
+      "feature": "away_starter_k_pct_delta_7v30s",
+      "importance": 0.0
+    },
+    {
+      "feature": "away_starter_siera_delta_7v30s",
+      "importance": 0.0
+    },
+    {
+      "feature": "away_starter_xera_delta_7v30s",
+      "importance": 0.0
+    },
+    {
+      "feature": "away_team_pythagorean_wp_30g",
+      "importance": 0.0
+    },
+    {
+      "feature": "bullpen_pitch_count_3d",
+      "importance": 0.0
+    },
+    {
+      "feature": "bullpen_pitch_count_7d",
+      "importance": 0.0
+    },
+    {
+      "feature": "defense_metric",
+      "importance": 0.0
+    },
+    {
+      "feature": "home_lineup_barrel_pct_delta_7v30g",
+      "importance": 0.0
+    },
+    {
+      "feature": "home_lineup_bb_pct_delta_7v30g",
+      "importance": 0.0
+    },
+    {
+      "feature": "home_lineup_iso_delta_7v30g",
+      "importance": 0.0
+    },
+    {
+      "feature": "home_lineup_k_pct_delta_7v30g",
+      "importance": 0.0
+    }
+  ],
+  "feature_selection_bucket_counts": {
+    "short_form": 0,
+    "medium_form": 3,
+    "delta": 27,
+    "context": 8
+  },
+  "feature_selection_bucket_targets": {
+    "short_form": 24,
+    "medium_form": 28,
+    "delta": 12,
+    "context": 16
+  },
+  "selected_features_by_bucket": {
+    "short_form": [],
+    "medium_form": [
+      "away_team_pythagorean_wp_30g",
+      "home_lineup_woba_30g",
+      "home_team_pythagorean_wp_30g"
+    ],
+    "delta": [
+      "away_lineup_barrel_pct_delta_7v30g",
+      "away_lineup_bb_pct_delta_7v30g",
+      "away_lineup_iso_delta_7v30g",
+      "away_lineup_k_pct_delta_7v30g",
+      "away_lineup_woba_delta_7v30g",
+      "away_lineup_wrc_plus_delta_7v30g",
+      "away_lineup_xwoba_delta_7v30g",
+      "away_starter_avg_fastball_velocity_delta_7v30s",
+      "away_starter_bb_pct_delta_7v30s",
+      "away_starter_csw_pct_delta_7v30s",
+      "away_starter_k_pct_delta_7v30s",
+      "away_starter_siera_delta_7v30s",
+      "away_starter_xera_delta_7v30s",
+      "away_starter_xfip_delta_7v30s",
+      "home_lineup_barrel_pct_delta_7v30g",
+      "home_lineup_bb_pct_delta_7v30g",
+      "home_lineup_iso_delta_7v30g",
+      "home_lineup_k_pct_delta_7v30g",
+      "home_lineup_wrc_plus_delta_7v30g",
+      "home_lineup_xwoba_delta_7v30g",
+      "home_starter_avg_fastball_velocity_delta_7v30s",
+      "home_starter_bb_pct_delta_7v30s",
+      "home_starter_csw_pct_delta_7v30s",
+      "home_starter_k_pct_delta_7v30s",
+      "home_starter_siera_delta_7v30s",
+      "home_starter_xera_delta_7v30s",
+      "home_starter_xfip_delta_7v30s"
+    ],
+    "context": [
+      "away_team_log5",
+      "bullpen_pitch_count_3d",
+      "bullpen_pitch_count_7d",
+      "defense_metric",
+      "home_team_log5",
+      "offense_metric",
+      "park_runs_factor",
+      "weather_composite"
+    ]
+  },
+  "omitted_top_features_by_bucket": {
+    "short_form": [],
+    "medium_form": [],
+    "delta": [],
+    "context": []
+  },
+  "feature_selection_family_decisions": [
+    {
+      "family": "away_lineup_barrel_pct",
+      "winner": "away_lineup_barrel_pct_delta_7v30g",
+      "winner_bucket": "delta",
+      "winner_score": 0.1764955169807547,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "away_lineup_barrel_pct_delta_7v30g",
+          "score": 0.1764955169807547,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "away_lineup_bb_pct",
+      "winner": "away_lineup_bb_pct_delta_7v30g",
+      "winner_bucket": "delta",
+      "winner_score": 0.17649551698075466,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "away_lineup_bb_pct_delta_7v30g",
+          "score": 0.17649551698075466,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "away_lineup_iso",
+      "winner": "away_lineup_iso_delta_7v30g",
+      "winner_bucket": "delta",
+      "winner_score": 0.1764955169807548,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "away_lineup_iso_delta_7v30g",
+          "score": 0.1764955169807548,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "away_lineup_k_pct",
+      "winner": "away_lineup_k_pct_delta_7v30g",
+      "winner_bucket": "delta",
+      "winner_score": 0.1764955169807547,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "away_lineup_k_pct_delta_7v30g",
+          "score": 0.1764955169807547,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "away_lineup_woba",
+      "winner": "away_lineup_woba_delta_7v30g",
+      "winner_bucket": "delta",
+      "winner_score": 0.17649551698075464,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "away_lineup_woba_delta_7v30g",
+          "score": 0.17649551698075464,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "away_lineup_wrc_plus",
+      "winner": "away_lineup_wrc_plus_delta_7v30g",
+      "winner_bucket": "delta",
+      "winner_score": 0.1764955169807548,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "away_lineup_wrc_plus_delta_7v30g",
+          "score": 0.1764955169807548,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "away_lineup_xwoba",
+      "winner": "away_lineup_xwoba_delta_7v30g",
+      "winner_bucket": "delta",
+      "winner_score": 0.17649551698075472,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "away_lineup_xwoba_delta_7v30g",
+          "score": 0.17649551698075472,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "away_starter_avg_fastball_velocity",
+      "winner": "away_starter_avg_fastball_velocity_delta_7v30s",
+      "winner_bucket": "delta",
+      "winner_score": 0.17649551698075458,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "away_starter_avg_fastball_velocity_delta_7v30s",
+          "score": 0.17649551698075458,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "away_starter_bb_pct",
+      "winner": "away_starter_bb_pct_delta_7v30s",
+      "winner_bucket": "delta",
+      "winner_score": 0.1764955169807548,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "away_starter_bb_pct_delta_7v30s",
+          "score": 0.1764955169807548,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "away_starter_csw_pct",
+      "winner": "away_starter_csw_pct_delta_7v30s",
+      "winner_bucket": "delta",
+      "winner_score": 0.17649551698075472,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "away_starter_csw_pct_delta_7v30s",
+          "score": 0.17649551698075472,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "away_starter_k_pct",
+      "winner": "away_starter_k_pct_delta_7v30s",
+      "winner_bucket": "delta",
+      "winner_score": 0.17649551698075458,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "away_starter_k_pct_delta_7v30s",
+          "score": 0.17649551698075458,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "away_starter_siera",
+      "winner": "away_starter_siera_delta_7v30s",
+      "winner_bucket": "delta",
+      "winner_score": 0.1764955169807548,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "away_starter_siera_delta_7v30s",
+          "score": 0.1764955169807548,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "away_starter_xera",
+      "winner": "away_starter_xera_delta_7v30s",
+      "winner_bucket": "delta",
+      "winner_score": 0.17649551698075483,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "away_starter_xera_delta_7v30s",
+          "score": 0.17649551698075483,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "away_starter_xfip",
+      "winner": "away_starter_xfip_delta_7v30s",
+      "winner_bucket": "delta",
+      "winner_score": 0.6456079348093945,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "away_starter_xfip_delta_7v30s",
+          "score": 0.6456079348093945,
+          "bucket": "delta",
+          "selected": true
+        },
+        {
+          "feature": "away_starter_xfip_7s",
+          "score": 0.6456079348093938,
+          "bucket": "short_form",
+          "selected": false
+        },
+        {
+          "feature": "away_starter_xfip_30s",
+          "score": 0.6456079348093937,
+          "bucket": "medium_form",
+          "selected": false
+        }
+      ]
+    },
+    {
+      "family": "away_team_log5",
+      "winner": "away_team_log5",
+      "winner_bucket": "context",
+      "winner_score": 0.2966674737877778,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "away_team_log5",
+          "score": 0.2966674737877778,
+          "bucket": "context",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "away_team_pythagorean_wp_30g",
+      "winner": "away_team_pythagorean_wp_30g",
+      "winner_bucket": "medium_form",
+      "winner_score": 0.03296305264308656,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "away_team_pythagorean_wp_30g",
+          "score": 0.03296305264308656,
+          "bucket": "medium_form",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "bullpen_pitch_count_3d",
+      "winner": "bullpen_pitch_count_3d",
+      "winner_bucket": "context",
+      "winner_score": 0.17649551698075472,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "bullpen_pitch_count_3d",
+          "score": 0.17649551698075472,
+          "bucket": "context",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "bullpen_pitch_count_7d",
+      "winner": "bullpen_pitch_count_7d",
+      "winner_bucket": "context",
+      "winner_score": 0.17649551698075472,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "bullpen_pitch_count_7d",
+          "score": 0.17649551698075472,
+          "bucket": "context",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "defense_metric",
+      "winner": "defense_metric",
+      "winner_bucket": "context",
+      "winner_score": 0.2335496832484569,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "defense_metric",
+          "score": 0.2335496832484569,
+          "bucket": "context",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "home_lineup_barrel_pct",
+      "winner": "home_lineup_barrel_pct_delta_7v30g",
+      "winner_bucket": "delta",
+      "winner_score": 0.1764955169807548,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "home_lineup_barrel_pct_delta_7v30g",
+          "score": 0.1764955169807548,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "home_lineup_bb_pct",
+      "winner": "home_lineup_bb_pct_delta_7v30g",
+      "winner_bucket": "delta",
+      "winner_score": 0.17649551698075483,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "home_lineup_bb_pct_delta_7v30g",
+          "score": 0.17649551698075483,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "home_lineup_iso",
+      "winner": "home_lineup_iso_delta_7v30g",
+      "winner_bucket": "delta",
+      "winner_score": 0.17649551698075458,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "home_lineup_iso_delta_7v30g",
+          "score": 0.17649551698075458,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "home_lineup_k_pct",
+      "winner": "home_lineup_k_pct_delta_7v30g",
+      "winner_bucket": "delta",
+      "winner_score": 0.17649551698075475,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "home_lineup_k_pct_delta_7v30g",
+          "score": 0.17649551698075475,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "home_lineup_woba",
+      "winner": "home_lineup_woba_30g",
+      "winner_bucket": "medium_form",
+      "winner_score": 0.645607934809394,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "home_lineup_woba_30g",
+          "score": 0.645607934809394,
+          "bucket": "medium_form",
+          "selected": true
+        },
+        {
+          "feature": "home_lineup_woba_7g",
+          "score": 0.6456079348093939,
+          "bucket": "short_form",
+          "selected": false
+        },
+        {
+          "feature": "home_lineup_woba_delta_7v30g",
+          "score": 0.1764955169807547,
+          "bucket": "delta",
+          "selected": false
+        }
+      ]
+    },
+    {
+      "family": "home_lineup_wrc_plus",
+      "winner": "home_lineup_wrc_plus_delta_7v30g",
+      "winner_bucket": "delta",
+      "winner_score": 0.1764955169807546,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "home_lineup_wrc_plus_delta_7v30g",
+          "score": 0.1764955169807546,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "home_lineup_xwoba",
+      "winner": "home_lineup_xwoba_delta_7v30g",
+      "winner_bucket": "delta",
+      "winner_score": 0.17649551698075483,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "home_lineup_xwoba_delta_7v30g",
+          "score": 0.17649551698075483,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "home_starter_avg_fastball_velocity",
+      "winner": "home_starter_avg_fastball_velocity_delta_7v30s",
+      "winner_bucket": "delta",
+      "winner_score": 0.17649551698075466,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "home_starter_avg_fastball_velocity_delta_7v30s",
+          "score": 0.17649551698075466,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "home_starter_bb_pct",
+      "winner": "home_starter_bb_pct_delta_7v30s",
+      "winner_bucket": "delta",
+      "winner_score": 0.17649551698075475,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "home_starter_bb_pct_delta_7v30s",
+          "score": 0.17649551698075475,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "home_starter_csw_pct",
+      "winner": "home_starter_csw_pct_delta_7v30s",
+      "winner_bucket": "delta",
+      "winner_score": 0.17649551698075477,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "home_starter_csw_pct_delta_7v30s",
+          "score": 0.17649551698075477,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "home_starter_k_pct",
+      "winner": "home_starter_k_pct_delta_7v30s",
+      "winner_bucket": "delta",
+      "winner_score": 0.17649551698075466,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "home_starter_k_pct_delta_7v30s",
+          "score": 0.17649551698075466,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "home_starter_siera",
+      "winner": "home_starter_siera_delta_7v30s",
+      "winner_bucket": "delta",
+      "winner_score": 0.17649551698075466,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "home_starter_siera_delta_7v30s",
+          "score": 0.17649551698075466,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "home_starter_xera",
+      "winner": "home_starter_xera_delta_7v30s",
+      "winner_bucket": "delta",
+      "winner_score": 0.1764955169807548,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "home_starter_xera_delta_7v30s",
+          "score": 0.1764955169807548,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "home_starter_xfip",
+      "winner": "home_starter_xfip_delta_7v30s",
+      "winner_bucket": "delta",
+      "winner_score": 0.17649551698075466,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "home_starter_xfip_delta_7v30s",
+          "score": 0.17649551698075466,
+          "bucket": "delta",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "home_team_log5",
+      "winner": "home_team_log5",
+      "winner_bucket": "context",
+      "winner_score": 0.3567530340063378,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "home_team_log5",
+          "score": 0.3567530340063378,
+          "bucket": "context",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "home_team_pythagorean_wp_30g",
+      "winner": "home_team_pythagorean_wp_30g",
+      "winner_bucket": "medium_form",
+      "winner_score": 0.030613838746131373,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "home_team_pythagorean_wp_30g",
+          "score": 0.030613838746131373,
+          "bucket": "medium_form",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "offense_metric",
+      "winner": "offense_metric",
+      "winner_bucket": "context",
+      "winner_score": 0.2335496832484569,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "offense_metric",
+          "score": 0.2335496832484569,
+          "bucket": "context",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "park_runs_factor",
+      "winner": "park_runs_factor",
+      "winner_bucket": "context",
+      "winner_score": 0.2335496832484569,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "park_runs_factor",
+          "score": 0.2335496832484569,
+          "bucket": "context",
+          "selected": true
+        }
+      ]
+    },
+    {
+      "family": "weather_composite",
+      "winner": "weather_composite",
+      "winner_bucket": "context",
+      "winner_score": 0.4264014327112209,
+      "selected": true,
+      "candidates": [
+        {
+          "feature": "weather_composite",
+          "score": 0.4264014327112209,
+          "bucket": "context",
+          "selected": true
+        }
+      ]
+    }
+  ],
+  "excluded_candidate_counts": {
+    "14_window": 0,
+    "60_window": 0,
+    "redundant_team_offense": 0
+  },
+  "search_space": {
+    "max_depth": [
+      2
+    ],
+    "n_estimators": [
+      10,
+      20
+    ],
+    "learning_rate": [
+      0.1
+    ]
+  },
+  "time_series_splits": 3,
+  "trained_at": "2026-03-27T19:49:41.850044+00:00"
+}

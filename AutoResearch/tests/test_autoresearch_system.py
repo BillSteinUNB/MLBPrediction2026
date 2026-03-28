@@ -41,6 +41,7 @@ def test_update_train_config_rewrites_agent_block(tmp_path: Path) -> None:
                 "BUCKET_QUOTAS = [24, 28, 12, 16]",
                 "EXCLUDE_PATTERNS: list[str] = []",
                 "FORCE_INCLUDE_PATTERNS: list[str] = []",
+                "FORCED_DELTA_COUNT = 8",
                 "TRIALS = 50",
                 "FOLDS = 3",
                 "# AGENT_CONFIG_END",
@@ -55,6 +56,7 @@ def test_update_train_config_rewrites_agent_block(tmp_path: Path) -> None:
         bucket_quotas=[24, 36, 20],
         exclude_patterns=["weather_*"],
         force_include_patterns=["*_7g"],
+        forced_delta_count=8,
         trials=50,
         folds=3,
         rationale="test",
@@ -68,6 +70,7 @@ def test_update_train_config_rewrites_agent_block(tmp_path: Path) -> None:
     assert 'BUCKET_QUOTAS = [24, 36, 20]' in updated
     assert 'EXCLUDE_PATTERNS: list[str] = ["weather_*"]' in updated
     assert 'FORCE_INCLUDE_PATTERNS: list[str] = ["*_7g"]' in updated
+    assert "FORCED_DELTA_COUNT = 8" in updated
 
 
 def test_plan_next_experiment_returns_baseline_without_history(monkeypatch) -> None:
@@ -76,7 +79,7 @@ def test_plan_next_experiment_returns_baseline_without_history(monkeypatch) -> N
     decision = agent.plan_next_experiment([], program_text="baseline")
 
     assert decision.proposal.max_features == 80
-    assert decision.proposal.selector_type == "bucketed"
+    assert decision.proposal.selector_type == "pearson"
     assert "baseline" in decision.hypothesis.lower()
     assert decision.planner_type == "heuristic"
 
@@ -592,6 +595,7 @@ def test_maybe_record_experiment_notes_adds_diagnostic_summary(tmp_path: Path) -
         bucket_quotas=[24, 28, 12, 16],
         exclude_patterns=[],
         force_include_patterns=[],
+        forced_delta_count=8,
         trials=50,
         folds=3,
         rationale="test",

@@ -1,0 +1,804 @@
+# Worker 2
+
+- Process: `SpawnProcess-2`
+- PID: `74456`
+
+## Events
+- `2026-03-26T17:49:36.444639+00:00` | `+0.0s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `prepare` | status `starting` | game_date `n/a`
+- `2026-03-26T17:49:36.797067+00:00` | `+0.4s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `bullpen` | status `running` | game_date `n/a`
+- `2026-03-26T17:53:59.162616+00:00` | `+262.7s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `baselines` | status `running` | game_date `n/a`
+- `2026-03-26T17:54:02.883755+00:00` | `+266.4s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `defense` | status `running` | game_date `n/a`
+- `2026-03-26T17:54:02.885333+00:00` | `+266.4s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `defense` | status `running` | game_date `2018-04-19`
+- `2026-03-26T17:54:02.916057+00:00` | `+266.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `defense` | status `running` | game_date `2018-04-20`
+- `2026-03-26T17:54:02.920831+00:00` | `+266.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `defense` | status `running` | game_date `2018-04-21`
+- `2026-03-26T17:54:02.923784+00:00` | `+266.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `defense` | status `running` | game_date `2018-04-22`
+- `2026-03-26T17:54:02.928309+00:00` | `+266.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `defense` | status `running` | game_date `2018-04-23`
+- `2026-03-26T17:54:02.933534+00:00` | `+266.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `defense` | status `running` | game_date `2018-04-24`
+- `2026-03-26T17:54:02.937733+00:00` | `+266.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `defense` | status `running` | game_date `2018-04-25`
+- `2026-03-26T17:54:02.942422+00:00` | `+266.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `defense` | status `running` | game_date `2018-04-26`
+- `2026-03-26T17:54:02.945527+00:00` | `+266.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `defense` | status `running` | game_date `2018-04-27`
+- `2026-03-26T17:54:02.950156+00:00` | `+266.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `defense` | status `running` | game_date `2018-04-28`
+- `2026-03-26T17:54:02.954297+00:00` | `+266.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `defense` | status `running` | game_date `2018-04-29`
+- `2026-03-26T17:54:02.959191+00:00` | `+266.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `defense` | status `running` | game_date `2018-04-30`
+- `2026-03-26T17:54:02.962123+00:00` | `+266.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `defense` | status `running` | game_date `2018-05-01`
+- `2026-03-26T17:54:02.967646+00:00` | `+266.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `defense` | status `running` | game_date `2018-05-02`
+- `2026-03-26T17:54:02.972189+00:00` | `+266.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `defense` | status `running` | game_date `2018-05-03`
+- `2026-03-26T17:54:02.975325+00:00` | `+266.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `defense` | status `running` | game_date `2018-05-04`
+- `2026-03-26T17:54:02.979659+00:00` | `+266.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `defense` | status `running` | game_date `2018-05-05`
+- `2026-03-26T17:54:02.983609+00:00` | `+266.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `defense` | status `running` | game_date `2018-05-06`
+- `2026-03-26T17:54:02.989321+00:00` | `+266.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `defense` | status `running` | game_date `2018-05-07`
+- `2026-03-26T17:54:02.992951+00:00` | `+266.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `defense` | status `running` | game_date `2018-05-08`
+- `2026-03-26T17:54:02.997140+00:00` | `+266.6s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `defense` | status `running` | game_date `2018-05-09`
+- `2026-03-26T17:54:04.774651+00:00` | `+268.3s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `prepare` | status `running` | game_date `2018-04-19` | day `1/21`
+- `2026-03-26T17:54:04.778836+00:00` | `+268.3s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `offense` | status `running` | game_date `2018-04-19` | day `1/21`
+- `2026-03-26T17:54:07.099160+00:00` | `+270.7s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `pitching` | status `running` | game_date `2018-04-19` | day `1/21`
+- `2026-03-26T17:54:08.403438+00:00` | `+272.0s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `umpires` | status `running` | game_date `2018-04-19` | day `1/21`
+- `2026-03-26T17:54:08.522003+00:00` | `+272.1s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `complete` | status `running` | game_date `2018-04-19` | day `1/21`
+- `2026-03-26T17:54:08.523895+00:00` | `+272.1s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `prepare` | status `running` | game_date `2018-04-20` | day `2/21`
+- `2026-03-26T17:54:08.528534+00:00` | `+272.1s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `offense` | status `running` | game_date `2018-04-20` | day `2/21`
+- `2026-03-26T17:54:11.452441+00:00` | `+275.0s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `pitching` | status `running` | game_date `2018-04-20` | day `2/21`
+- `2026-03-26T17:54:11.788830+00:00` | `+275.3s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `umpires` | status `running` | game_date `2018-04-20` | day `2/21`
+- `2026-03-26T17:54:11.829795+00:00` | `+275.4s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `complete` | status `running` | game_date `2018-04-20` | day `2/21`
+- `2026-03-26T17:54:11.829795+00:00` | `+275.4s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `prepare` | status `running` | game_date `2018-04-21` | day `3/21`
+- `2026-03-26T17:54:11.834625+00:00` | `+275.4s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `offense` | status `running` | game_date `2018-04-21` | day `3/21`
+- `2026-03-26T17:54:15.714010+00:00` | `+279.3s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `pitching` | status `running` | game_date `2018-04-21` | day `3/21`
+- `2026-03-26T17:54:16.182097+00:00` | `+279.7s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `umpires` | status `running` | game_date `2018-04-21` | day `3/21`
+- `2026-03-26T17:54:16.237155+00:00` | `+279.8s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `complete` | status `running` | game_date `2018-04-21` | day `3/21`
+- `2026-03-26T17:54:16.238672+00:00` | `+279.8s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `prepare` | status `running` | game_date `2018-04-22` | day `4/21`
+- `2026-03-26T17:54:16.243174+00:00` | `+279.8s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `offense` | status `running` | game_date `2018-04-22` | day `4/21`
+- `2026-03-26T17:54:19.858679+00:00` | `+283.4s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `pitching` | status `running` | game_date `2018-04-22` | day `4/21`
+- `2026-03-26T17:54:20.361945+00:00` | `+283.9s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `umpires` | status `running` | game_date `2018-04-22` | day `4/21`
+- `2026-03-26T17:54:20.412085+00:00` | `+284.0s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `complete` | status `running` | game_date `2018-04-22` | day `4/21`
+- `2026-03-26T17:54:20.413669+00:00` | `+284.0s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `prepare` | status `running` | game_date `2018-04-23` | day `5/21`
+- `2026-03-26T17:54:20.417793+00:00` | `+284.0s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `offense` | status `running` | game_date `2018-04-23` | day `5/21`
+- `2026-03-26T17:54:21.914008+00:00` | `+285.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `pitching` | status `running` | game_date `2018-04-23` | day `5/21`
+- `2026-03-26T17:54:22.191555+00:00` | `+285.7s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `umpires` | status `running` | game_date `2018-04-23` | day `5/21`
+- `2026-03-26T17:54:22.233245+00:00` | `+285.8s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `complete` | status `running` | game_date `2018-04-23` | day `5/21`
+- `2026-03-26T17:54:22.234251+00:00` | `+285.8s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `prepare` | status `running` | game_date `2018-04-24` | day `6/21`
+- `2026-03-26T17:54:22.237361+00:00` | `+285.8s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `offense` | status `running` | game_date `2018-04-24` | day `6/21`
+- `2026-03-26T17:54:25.286010+00:00` | `+288.8s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `pitching` | status `running` | game_date `2018-04-24` | day `6/21`
+- `2026-03-26T17:54:25.653551+00:00` | `+289.2s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `umpires` | status `running` | game_date `2018-04-24` | day `6/21`
+- `2026-03-26T17:54:25.693441+00:00` | `+289.2s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `complete` | status `running` | game_date `2018-04-24` | day `6/21`
+- `2026-03-26T17:54:25.693441+00:00` | `+289.2s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `prepare` | status `running` | game_date `2018-04-25` | day `7/21`
+- `2026-03-26T17:54:25.698614+00:00` | `+289.3s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `offense` | status `running` | game_date `2018-04-25` | day `7/21`
+- `2026-03-26T17:54:29.979945+00:00` | `+293.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `pitching` | status `running` | game_date `2018-04-25` | day `7/21`
+- `2026-03-26T17:54:30.510162+00:00` | `+294.1s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `umpires` | status `running` | game_date `2018-04-25` | day `7/21`
+- `2026-03-26T17:54:30.564576+00:00` | `+294.1s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `complete` | status `running` | game_date `2018-04-25` | day `7/21`
+- `2026-03-26T17:54:30.564576+00:00` | `+294.1s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `prepare` | status `running` | game_date `2018-04-26` | day `8/21`
+- `2026-03-26T17:54:30.568192+00:00` | `+294.1s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `offense` | status `running` | game_date `2018-04-26` | day `8/21`
+- `2026-03-26T17:54:33.336109+00:00` | `+296.9s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `pitching` | status `running` | game_date `2018-04-26` | day `8/21`
+- `2026-03-26T17:54:33.701129+00:00` | `+297.3s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `umpires` | status `running` | game_date `2018-04-26` | day `8/21`
+- `2026-03-26T17:54:33.743906+00:00` | `+297.3s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `complete` | status `running` | game_date `2018-04-26` | day `8/21`
+- `2026-03-26T17:54:33.746063+00:00` | `+297.3s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `prepare` | status `running` | game_date `2018-04-27` | day `9/21`
+- `2026-03-26T17:54:33.750592+00:00` | `+297.3s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `offense` | status `running` | game_date `2018-04-27` | day `9/21`
+- `2026-03-26T17:54:37.073329+00:00` | `+300.6s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `pitching` | status `running` | game_date `2018-04-27` | day `9/21`
+- `2026-03-26T17:54:37.436046+00:00` | `+301.0s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `umpires` | status `running` | game_date `2018-04-27` | day `9/21`
+- `2026-03-26T17:54:37.475429+00:00` | `+301.0s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `complete` | status `running` | game_date `2018-04-27` | day `9/21`
+- `2026-03-26T17:54:37.475429+00:00` | `+301.0s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `prepare` | status `running` | game_date `2018-04-28` | day `10/21`
+- `2026-03-26T17:54:37.480109+00:00` | `+301.0s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `offense` | status `running` | game_date `2018-04-28` | day `10/21`
+- `2026-03-26T17:54:41.972534+00:00` | `+305.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `pitching` | status `running` | game_date `2018-04-28` | day `10/21`
+- `2026-03-26T17:54:42.485135+00:00` | `+306.0s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `umpires` | status `running` | game_date `2018-04-28` | day `10/21`
+- `2026-03-26T17:54:42.534428+00:00` | `+306.1s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `complete` | status `running` | game_date `2018-04-28` | day `10/21`
+- `2026-03-26T17:54:42.535432+00:00` | `+306.1s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `prepare` | status `running` | game_date `2018-04-29` | day `11/21`
+- `2026-03-26T17:54:42.538572+00:00` | `+306.1s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `offense` | status `running` | game_date `2018-04-29` | day `11/21`
+- `2026-03-26T17:54:47.010732+00:00` | `+310.6s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `pitching` | status `running` | game_date `2018-04-29` | day `11/21`
+- `2026-03-26T17:54:47.478742+00:00` | `+311.0s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `umpires` | status `running` | game_date `2018-04-29` | day `11/21`
+- `2026-03-26T17:54:47.519031+00:00` | `+311.1s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `complete` | status `running` | game_date `2018-04-29` | day `11/21`
+- `2026-03-26T17:54:47.519555+00:00` | `+311.1s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `prepare` | status `running` | game_date `2018-04-30` | day `12/21`
+- `2026-03-26T17:54:47.524253+00:00` | `+311.1s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `offense` | status `running` | game_date `2018-04-30` | day `12/21`
+- `2026-03-26T17:54:50.364592+00:00` | `+313.9s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `pitching` | status `running` | game_date `2018-04-30` | day `12/21`
+- `2026-03-26T17:54:50.658609+00:00` | `+314.2s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `umpires` | status `running` | game_date `2018-04-30` | day `12/21`
+- `2026-03-26T17:54:50.699620+00:00` | `+314.3s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `complete` | status `running` | game_date `2018-04-30` | day `12/21`
+- `2026-03-26T17:54:50.699620+00:00` | `+314.3s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `prepare` | status `running` | game_date `2018-05-01` | day `13/21`
+- `2026-03-26T17:54:50.704751+00:00` | `+314.3s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `offense` | status `running` | game_date `2018-05-01` | day `13/21`
+- `2026-03-26T17:54:54.400500+00:00` | `+318.0s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `pitching` | status `running` | game_date `2018-05-01` | day `13/21`
+- `2026-03-26T17:54:54.750602+00:00` | `+318.3s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `umpires` | status `running` | game_date `2018-05-01` | day `13/21`
+- `2026-03-26T17:54:54.789703+00:00` | `+318.3s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `complete` | status `running` | game_date `2018-05-01` | day `13/21`
+- `2026-03-26T17:54:54.789703+00:00` | `+318.3s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `prepare` | status `running` | game_date `2018-05-02` | day `14/21`
+- `2026-03-26T17:54:54.794291+00:00` | `+318.3s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `offense` | status `running` | game_date `2018-05-02` | day `14/21`
+- `2026-03-26T17:54:59.380232+00:00` | `+322.9s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `pitching` | status `running` | game_date `2018-05-02` | day `14/21`
+- `2026-03-26T17:54:59.895604+00:00` | `+323.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `umpires` | status `running` | game_date `2018-05-02` | day `14/21`
+- `2026-03-26T17:54:59.937408+00:00` | `+323.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `complete` | status `running` | game_date `2018-05-02` | day `14/21`
+- `2026-03-26T17:54:59.937913+00:00` | `+323.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `prepare` | status `running` | game_date `2018-05-03` | day `15/21`
+- `2026-03-26T17:54:59.942022+00:00` | `+323.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `offense` | status `running` | game_date `2018-05-03` | day `15/21`
+- `2026-03-26T17:55:02.697062+00:00` | `+326.3s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `pitching` | status `running` | game_date `2018-05-03` | day `15/21`
+- `2026-03-26T17:55:03.053781+00:00` | `+326.6s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `umpires` | status `running` | game_date `2018-05-03` | day `15/21`
+- `2026-03-26T17:55:03.106106+00:00` | `+326.7s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `complete` | status `running` | game_date `2018-05-03` | day `15/21`
+- `2026-03-26T17:55:03.106625+00:00` | `+326.7s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `prepare` | status `running` | game_date `2018-05-04` | day `16/21`
+- `2026-03-26T17:55:03.111332+00:00` | `+326.7s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `offense` | status `running` | game_date `2018-05-04` | day `16/21`
+- `2026-03-26T17:55:06.694583+00:00` | `+330.3s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `pitching` | status `running` | game_date `2018-05-04` | day `16/21`
+- `2026-03-26T17:55:07.103219+00:00` | `+330.7s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `umpires` | status `running` | game_date `2018-05-04` | day `16/21`
+- `2026-03-26T17:55:07.149637+00:00` | `+330.7s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `complete` | status `running` | game_date `2018-05-04` | day `16/21`
+- `2026-03-26T17:55:07.149637+00:00` | `+330.7s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `prepare` | status `running` | game_date `2018-05-05` | day `17/21`
+- `2026-03-26T17:55:07.154768+00:00` | `+330.7s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `offense` | status `running` | game_date `2018-05-05` | day `17/21`
+- `2026-03-26T17:55:12.045111+00:00` | `+335.6s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `pitching` | status `running` | game_date `2018-05-05` | day `17/21`
+- `2026-03-26T17:55:12.636867+00:00` | `+336.2s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `umpires` | status `running` | game_date `2018-05-05` | day `17/21`
+- `2026-03-26T17:55:12.676588+00:00` | `+336.2s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `complete` | status `running` | game_date `2018-05-05` | day `17/21`
+- `2026-03-26T17:55:12.677594+00:00` | `+336.2s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `prepare` | status `running` | game_date `2018-05-06` | day `18/21`
+- `2026-03-26T17:55:12.680727+00:00` | `+336.2s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `offense` | status `running` | game_date `2018-05-06` | day `18/21`
+- `2026-03-26T17:55:17.217455+00:00` | `+340.8s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `pitching` | status `running` | game_date `2018-05-06` | day `18/21`
+- `2026-03-26T17:55:17.731405+00:00` | `+341.3s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `umpires` | status `running` | game_date `2018-05-06` | day `18/21`
+- `2026-03-26T17:55:17.773784+00:00` | `+341.3s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `complete` | status `running` | game_date `2018-05-06` | day `18/21`
+- `2026-03-26T17:55:17.773784+00:00` | `+341.3s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `prepare` | status `running` | game_date `2018-05-07` | day `19/21`
+- `2026-03-26T17:55:17.778889+00:00` | `+341.3s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `offense` | status `running` | game_date `2018-05-07` | day `19/21`
+- `2026-03-26T17:55:19.261116+00:00` | `+342.8s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `pitching` | status `running` | game_date `2018-05-07` | day `19/21`
+- `2026-03-26T17:55:19.457674+00:00` | `+343.0s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `umpires` | status `running` | game_date `2018-05-07` | day `19/21`
+- `2026-03-26T17:55:19.499235+00:00` | `+343.1s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `complete` | status `running` | game_date `2018-05-07` | day `19/21`
+- `2026-03-26T17:55:19.500235+00:00` | `+343.1s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `prepare` | status `running` | game_date `2018-05-08` | day `20/21`
+- `2026-03-26T17:55:19.504802+00:00` | `+343.1s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `offense` | status `running` | game_date `2018-05-08` | day `20/21`
+- `2026-03-26T17:55:23.749855+00:00` | `+347.3s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `pitching` | status `running` | game_date `2018-05-08` | day `20/21`
+- `2026-03-26T17:55:24.221147+00:00` | `+347.8s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `umpires` | status `running` | game_date `2018-05-08` | day `20/21`
+- `2026-03-26T17:55:24.271080+00:00` | `+347.8s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `complete` | status `running` | game_date `2018-05-08` | day `20/21`
+- `2026-03-26T17:55:24.271080+00:00` | `+347.8s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `prepare` | status `running` | game_date `2018-05-09` | day `21/21`
+- `2026-03-26T17:55:24.275667+00:00` | `+347.8s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `offense` | status `running` | game_date `2018-05-09` | day `21/21`
+- `2026-03-26T17:55:28.925208+00:00` | `+352.5s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `pitching` | status `running` | game_date `2018-05-09` | day `21/21`
+- `2026-03-26T17:55:29.501951+00:00` | `+353.1s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `umpires` | status `running` | game_date `2018-05-09` | day `21/21`
+- `2026-03-26T17:55:29.562858+00:00` | `+353.1s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `complete` | status `running` | game_date `2018-05-09` | day `21/21`
+- `2026-03-26T17:55:29.563863+00:00` | `+353.1s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `complete` | status `complete` | game_date `n/a`
+- `2026-03-26T17:55:29.568550+00:00` | `+353.1s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `finalize` | status `loading_rows` | game_date `n/a`
+- `2026-03-26T17:55:29.814187+00:00` | `+353.4s` | chunk `2/61` | dates `2018-04-19..2018-05-09` | stage `complete` | status `complete` | game_date `n/a`
+- `2026-03-26T17:55:29.863734+00:00` | `+0.0s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `prepare` | status `starting` | game_date `n/a`
+- `2026-03-26T17:55:30.377225+00:00` | `+0.5s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `bullpen` | status `running` | game_date `n/a`
+- `2026-03-26T17:59:55.104559+00:00` | `+265.2s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `baselines` | status `running` | game_date `n/a`
+- `2026-03-26T17:59:58.675995+00:00` | `+268.8s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `defense` | status `running` | game_date `n/a`
+- `2026-03-26T17:59:58.677055+00:00` | `+268.8s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `defense` | status `running` | game_date `2019-05-12`
+- `2026-03-26T17:59:59.600782+00:00` | `+269.7s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `defense` | status `running` | game_date `2019-05-13`
+- `2026-03-26T17:59:59.615005+00:00` | `+269.8s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `defense` | status `running` | game_date `2019-05-14`
+- `2026-03-26T17:59:59.629466+00:00` | `+269.8s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `defense` | status `running` | game_date `2019-05-15`
+- `2026-03-26T17:59:59.646893+00:00` | `+269.8s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `defense` | status `running` | game_date `2019-05-16`
+- `2026-03-26T17:59:59.663508+00:00` | `+269.8s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `defense` | status `running` | game_date `2019-05-17`
+- `2026-03-26T17:59:59.679517+00:00` | `+269.8s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `defense` | status `running` | game_date `2019-05-18`
+- `2026-03-26T17:59:59.696604+00:00` | `+269.8s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `defense` | status `running` | game_date `2019-05-19`
+- `2026-03-26T17:59:59.711144+00:00` | `+269.8s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `defense` | status `running` | game_date `2019-05-20`
+- `2026-03-26T17:59:59.726053+00:00` | `+269.9s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `defense` | status `running` | game_date `2019-05-21`
+- `2026-03-26T17:59:59.743480+00:00` | `+269.9s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `defense` | status `running` | game_date `2019-05-22`
+- `2026-03-26T17:59:59.760389+00:00` | `+269.9s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `defense` | status `running` | game_date `2019-05-23`
+- `2026-03-26T17:59:59.774104+00:00` | `+269.9s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `defense` | status `running` | game_date `2019-05-24`
+- `2026-03-26T17:59:59.789207+00:00` | `+269.9s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `defense` | status `running` | game_date `2019-05-25`
+- `2026-03-26T17:59:59.805716+00:00` | `+269.9s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `defense` | status `running` | game_date `2019-05-26`
+- `2026-03-26T17:59:59.819664+00:00` | `+270.0s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `defense` | status `running` | game_date `2019-05-27`
+- `2026-03-26T17:59:59.835232+00:00` | `+270.0s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `defense` | status `running` | game_date `2019-05-28`
+- `2026-03-26T17:59:59.852634+00:00` | `+270.0s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `defense` | status `running` | game_date `2019-05-29`
+- `2026-03-26T17:59:59.867030+00:00` | `+270.0s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `defense` | status `running` | game_date `2019-05-30`
+- `2026-03-26T17:59:59.884199+00:00` | `+270.0s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `defense` | status `running` | game_date `2019-05-31`
+- `2026-03-26T17:59:59.901194+00:00` | `+270.0s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `defense` | status `running` | game_date `2019-06-01`
+- `2026-03-26T18:00:01.571179+00:00` | `+271.7s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `prepare` | status `running` | game_date `2019-05-12` | day `1/21`
+- `2026-03-26T18:00:01.588151+00:00` | `+271.7s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `offense` | status `running` | game_date `2019-05-12` | day `1/21`
+- `2026-03-26T18:00:19.187557+00:00` | `+289.3s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `pitching` | status `running` | game_date `2019-05-12` | day `1/21`
+- `2026-03-26T18:00:21.039083+00:00` | `+291.2s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `umpires` | status `running` | game_date `2019-05-12` | day `1/21`
+- `2026-03-26T18:00:21.165973+00:00` | `+291.3s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `complete` | status `running` | game_date `2019-05-12` | day `1/21`
+- `2026-03-26T18:00:21.165973+00:00` | `+291.3s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `prepare` | status `running` | game_date `2019-05-13` | day `2/21`
+- `2026-03-26T18:00:21.182657+00:00` | `+291.3s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `offense` | status `running` | game_date `2019-05-13` | day `2/21`
+- `2026-03-26T18:00:25.708418+00:00` | `+295.8s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `pitching` | status `running` | game_date `2019-05-13` | day `2/21`
+- `2026-03-26T18:00:26.327676+00:00` | `+296.5s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `umpires` | status `running` | game_date `2019-05-13` | day `2/21`
+- `2026-03-26T18:00:26.381605+00:00` | `+296.5s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `complete` | status `running` | game_date `2019-05-13` | day `2/21`
+- `2026-03-26T18:00:26.381605+00:00` | `+296.5s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `prepare` | status `running` | game_date `2019-05-14` | day `3/21`
+- `2026-03-26T18:00:26.399089+00:00` | `+296.5s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `offense` | status `running` | game_date `2019-05-14` | day `3/21`
+- `2026-03-26T18:00:40.477778+00:00` | `+310.6s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `pitching` | status `running` | game_date `2019-05-14` | day `3/21`
+- `2026-03-26T18:00:41.388104+00:00` | `+311.5s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `umpires` | status `running` | game_date `2019-05-14` | day `3/21`
+- `2026-03-26T18:00:41.450842+00:00` | `+311.6s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `complete` | status `running` | game_date `2019-05-14` | day `3/21`
+- `2026-03-26T18:00:41.450842+00:00` | `+311.6s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `prepare` | status `running` | game_date `2019-05-15` | day `4/21`
+- `2026-03-26T18:00:41.467432+00:00` | `+311.6s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `offense` | status `running` | game_date `2019-05-15` | day `4/21`
+- `2026-03-26T18:00:59.546521+00:00` | `+329.7s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `pitching` | status `running` | game_date `2019-05-15` | day `4/21`
+- `2026-03-26T18:01:00.398997+00:00` | `+330.5s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `umpires` | status `running` | game_date `2019-05-15` | day `4/21`
+- `2026-03-26T18:01:00.456779+00:00` | `+330.6s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `complete` | status `running` | game_date `2019-05-15` | day `4/21`
+- `2026-03-26T18:01:00.456779+00:00` | `+330.6s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `prepare` | status `running` | game_date `2019-05-16` | day `5/21`
+- `2026-03-26T18:01:00.473168+00:00` | `+330.6s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `offense` | status `running` | game_date `2019-05-16` | day `5/21`
+- `2026-03-26T18:01:11.185116+00:00` | `+341.3s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `pitching` | status `running` | game_date `2019-05-16` | day `5/21`
+- `2026-03-26T18:01:11.903640+00:00` | `+342.0s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `umpires` | status `running` | game_date `2019-05-16` | day `5/21`
+- `2026-03-26T18:01:11.956368+00:00` | `+342.1s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `complete` | status `running` | game_date `2019-05-16` | day `5/21`
+- `2026-03-26T18:01:11.957926+00:00` | `+342.1s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `prepare` | status `running` | game_date `2019-05-17` | day `6/21`
+- `2026-03-26T18:01:11.972486+00:00` | `+342.1s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `offense` | status `running` | game_date `2019-05-17` | day `6/21`
+- `2026-03-26T18:01:28.066668+00:00` | `+358.2s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `pitching` | status `running` | game_date `2019-05-17` | day `6/21`
+- `2026-03-26T18:01:28.955487+00:00` | `+359.1s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `umpires` | status `running` | game_date `2019-05-17` | day `6/21`
+- `2026-03-26T18:01:29.005618+00:00` | `+359.1s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `complete` | status `running` | game_date `2019-05-17` | day `6/21`
+- `2026-03-26T18:01:29.005618+00:00` | `+359.1s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `prepare` | status `running` | game_date `2019-05-18` | day `7/21`
+- `2026-03-26T18:01:29.021556+00:00` | `+359.2s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `offense` | status `running` | game_date `2019-05-18` | day `7/21`
+- `2026-03-26T18:01:50.345289+00:00` | `+380.5s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `pitching` | status `running` | game_date `2019-05-18` | day `7/21`
+- `2026-03-26T18:01:51.291001+00:00` | `+381.4s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `umpires` | status `running` | game_date `2019-05-18` | day `7/21`
+- `2026-03-26T18:01:51.362117+00:00` | `+381.5s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `complete` | status `running` | game_date `2019-05-18` | day `7/21`
+- `2026-03-26T18:01:51.364096+00:00` | `+381.5s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `prepare` | status `running` | game_date `2019-05-19` | day `8/21`
+- `2026-03-26T18:01:51.386176+00:00` | `+381.5s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `offense` | status `running` | game_date `2019-05-19` | day `8/21`
+- `2026-03-26T18:02:10.673079+00:00` | `+400.8s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `pitching` | status `running` | game_date `2019-05-19` | day `8/21`
+- `2026-03-26T18:02:11.703972+00:00` | `+401.8s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `umpires` | status `running` | game_date `2019-05-19` | day `8/21`
+- `2026-03-26T18:02:11.769252+00:00` | `+401.9s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `complete` | status `running` | game_date `2019-05-19` | day `8/21`
+- `2026-03-26T18:02:11.770802+00:00` | `+401.9s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `prepare` | status `running` | game_date `2019-05-20` | day `9/21`
+- `2026-03-26T18:02:11.786499+00:00` | `+401.9s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `offense` | status `running` | game_date `2019-05-20` | day `9/21`
+- `2026-03-26T18:02:17.446615+00:00` | `+407.6s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `pitching` | status `running` | game_date `2019-05-20` | day `9/21`
+- `2026-03-26T18:02:18.090791+00:00` | `+408.2s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `umpires` | status `running` | game_date `2019-05-20` | day `9/21`
+- `2026-03-26T18:02:18.144613+00:00` | `+408.3s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `complete` | status `running` | game_date `2019-05-20` | day `9/21`
+- `2026-03-26T18:02:18.144613+00:00` | `+408.3s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `prepare` | status `running` | game_date `2019-05-21` | day `10/21`
+- `2026-03-26T18:02:18.159790+00:00` | `+408.3s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `offense` | status `running` | game_date `2019-05-21` | day `10/21`
+- `2026-03-26T18:02:36.109758+00:00` | `+426.2s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `pitching` | status `running` | game_date `2019-05-21` | day `10/21`
+- `2026-03-26T18:02:36.946084+00:00` | `+427.1s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `umpires` | status `running` | game_date `2019-05-21` | day `10/21`
+- `2026-03-26T18:02:36.999126+00:00` | `+427.1s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `complete` | status `running` | game_date `2019-05-21` | day `10/21`
+- `2026-03-26T18:02:37.000724+00:00` | `+427.1s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `prepare` | status `running` | game_date `2019-05-22` | day `11/21`
+- `2026-03-26T18:02:37.017101+00:00` | `+427.2s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `offense` | status `running` | game_date `2019-05-22` | day `11/21`
+- `2026-03-26T18:02:55.112442+00:00` | `+445.3s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `pitching` | status `running` | game_date `2019-05-22` | day `11/21`
+- `2026-03-26T18:02:56.050813+00:00` | `+446.2s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `umpires` | status `running` | game_date `2019-05-22` | day `11/21`
+- `2026-03-26T18:02:56.117023+00:00` | `+446.3s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `complete` | status `running` | game_date `2019-05-22` | day `11/21`
+- `2026-03-26T18:02:56.118030+00:00` | `+446.3s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `prepare` | status `running` | game_date `2019-05-23` | day `12/21`
+- `2026-03-26T18:02:56.133918+00:00` | `+446.3s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `offense` | status `running` | game_date `2019-05-23` | day `12/21`
+- `2026-03-26T18:03:09.687460+00:00` | `+459.8s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `pitching` | status `running` | game_date `2019-05-23` | day `12/21`
+- `2026-03-26T18:03:10.517521+00:00` | `+460.7s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `umpires` | status `running` | game_date `2019-05-23` | day `12/21`
+- `2026-03-26T18:03:10.571232+00:00` | `+460.7s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `complete` | status `running` | game_date `2019-05-23` | day `12/21`
+- `2026-03-26T18:03:10.572911+00:00` | `+460.7s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `prepare` | status `running` | game_date `2019-05-24` | day `13/21`
+- `2026-03-26T18:03:10.587558+00:00` | `+460.7s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `offense` | status `running` | game_date `2019-05-24` | day `13/21`
+- `2026-03-26T18:03:20.935130+00:00` | `+471.1s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `pitching` | status `running` | game_date `2019-05-24` | day `13/21`
+- `2026-03-26T18:03:21.799440+00:00` | `+471.9s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `umpires` | status `running` | game_date `2019-05-24` | day `13/21`
+- `2026-03-26T18:03:21.864187+00:00` | `+472.0s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `complete` | status `running` | game_date `2019-05-24` | day `13/21`
+- `2026-03-26T18:03:21.864187+00:00` | `+472.0s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `prepare` | status `running` | game_date `2019-05-25` | day `14/21`
+- `2026-03-26T18:03:21.880675+00:00` | `+472.0s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `offense` | status `running` | game_date `2019-05-25` | day `14/21`
+- `2026-03-26T18:03:41.895404+00:00` | `+492.0s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `pitching` | status `running` | game_date `2019-05-25` | day `14/21`
+- `2026-03-26T18:03:42.894551+00:00` | `+493.0s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `umpires` | status `running` | game_date `2019-05-25` | day `14/21`
+- `2026-03-26T18:03:43.025594+00:00` | `+493.2s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `complete` | status `running` | game_date `2019-05-25` | day `14/21`
+- `2026-03-26T18:03:43.025594+00:00` | `+493.2s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `prepare` | status `running` | game_date `2019-05-26` | day `15/21`
+- `2026-03-26T18:03:43.042548+00:00` | `+493.2s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `offense` | status `running` | game_date `2019-05-26` | day `15/21`
+- `2026-03-26T18:04:02.575888+00:00` | `+512.7s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `pitching` | status `running` | game_date `2019-05-26` | day `15/21`
+- `2026-03-26T18:04:03.501095+00:00` | `+513.6s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `umpires` | status `running` | game_date `2019-05-26` | day `15/21`
+- `2026-03-26T18:04:03.563684+00:00` | `+513.7s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `complete` | status `running` | game_date `2019-05-26` | day `15/21`
+- `2026-03-26T18:04:03.563684+00:00` | `+513.7s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `prepare` | status `running` | game_date `2019-05-27` | day `16/21`
+- `2026-03-26T18:04:03.581873+00:00` | `+513.7s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `offense` | status `running` | game_date `2019-05-27` | day `16/21`
+- `2026-03-26T18:04:16.684287+00:00` | `+526.8s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `pitching` | status `running` | game_date `2019-05-27` | day `16/21`
+- `2026-03-26T18:04:17.493453+00:00` | `+527.6s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `umpires` | status `running` | game_date `2019-05-27` | day `16/21`
+- `2026-03-26T18:04:17.550544+00:00` | `+527.7s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `complete` | status `running` | game_date `2019-05-27` | day `16/21`
+- `2026-03-26T18:04:17.550544+00:00` | `+527.7s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `prepare` | status `running` | game_date `2019-05-28` | day `17/21`
+- `2026-03-26T18:04:17.567574+00:00` | `+527.7s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `offense` | status `running` | game_date `2019-05-28` | day `17/21`
+- `2026-03-26T18:04:33.281573+00:00` | `+543.4s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `pitching` | status `running` | game_date `2019-05-28` | day `17/21`
+- `2026-03-26T18:04:34.041339+00:00` | `+544.2s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `umpires` | status `running` | game_date `2019-05-28` | day `17/21`
+- `2026-03-26T18:04:34.103870+00:00` | `+544.2s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `complete` | status `running` | game_date `2019-05-28` | day `17/21`
+- `2026-03-26T18:04:34.103870+00:00` | `+544.2s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `prepare` | status `running` | game_date `2019-05-29` | day `18/21`
+- `2026-03-26T18:04:34.121131+00:00` | `+544.3s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `offense` | status `running` | game_date `2019-05-29` | day `18/21`
+- `2026-03-26T18:04:52.756581+00:00` | `+562.9s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `pitching` | status `running` | game_date `2019-05-29` | day `18/21`
+- `2026-03-26T18:04:53.654844+00:00` | `+563.8s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `umpires` | status `running` | game_date `2019-05-29` | day `18/21`
+- `2026-03-26T18:04:53.722620+00:00` | `+563.9s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `complete` | status `running` | game_date `2019-05-29` | day `18/21`
+- `2026-03-26T18:04:53.722620+00:00` | `+563.9s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `prepare` | status `running` | game_date `2019-05-30` | day `19/21`
+- `2026-03-26T18:04:53.739998+00:00` | `+563.9s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `offense` | status `running` | game_date `2019-05-30` | day `19/21`
+- `2026-03-26T18:05:04.409198+00:00` | `+574.5s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `pitching` | status `running` | game_date `2019-05-30` | day `19/21`
+- `2026-03-26T18:05:05.143440+00:00` | `+575.3s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `umpires` | status `running` | game_date `2019-05-30` | day `19/21`
+- `2026-03-26T18:05:05.203535+00:00` | `+575.3s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `complete` | status `running` | game_date `2019-05-30` | day `19/21`
+- `2026-03-26T18:05:05.203535+00:00` | `+575.3s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `prepare` | status `running` | game_date `2019-05-31` | day `20/21`
+- `2026-03-26T18:05:05.220386+00:00` | `+575.4s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `offense` | status `running` | game_date `2019-05-31` | day `20/21`
+- `2026-03-26T18:05:19.982702+00:00` | `+590.1s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `pitching` | status `running` | game_date `2019-05-31` | day `20/21`
+- `2026-03-26T18:05:20.773069+00:00` | `+590.9s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `umpires` | status `running` | game_date `2019-05-31` | day `20/21`
+- `2026-03-26T18:05:20.834415+00:00` | `+591.0s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `complete` | status `running` | game_date `2019-05-31` | day `20/21`
+- `2026-03-26T18:05:20.834415+00:00` | `+591.0s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `prepare` | status `running` | game_date `2019-06-01` | day `21/21`
+- `2026-03-26T18:05:20.851826+00:00` | `+591.0s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `offense` | status `running` | game_date `2019-06-01` | day `21/21`
+- `2026-03-26T18:05:41.219719+00:00` | `+611.4s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `pitching` | status `running` | game_date `2019-06-01` | day `21/21`
+- `2026-03-26T18:05:42.018079+00:00` | `+612.2s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `umpires` | status `running` | game_date `2019-06-01` | day `21/21`
+- `2026-03-26T18:05:42.068639+00:00` | `+612.2s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `complete` | status `running` | game_date `2019-06-01` | day `21/21`
+- `2026-03-26T18:05:42.068639+00:00` | `+612.2s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `complete` | status `complete` | game_date `n/a`
+- `2026-03-26T18:05:42.075458+00:00` | `+612.2s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `finalize` | status `loading_rows` | game_date `n/a`
+- `2026-03-26T18:05:42.258231+00:00` | `+612.4s` | chunk `12/61` | dates `2019-05-12..2019-06-01` | stage `complete` | status `complete` | game_date `n/a`
+- `2026-03-26T18:05:42.373946+00:00` | `+0.0s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `prepare` | status `starting` | game_date `n/a`
+- `2026-03-26T18:05:42.718416+00:00` | `+0.3s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `bullpen` | status `running` | game_date `n/a`
+- `2026-03-26T18:10:07.383052+00:00` | `+265.0s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `baselines` | status `running` | game_date `n/a`
+- `2026-03-26T18:10:11.032986+00:00` | `+268.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `defense` | status `running` | game_date `n/a`
+- `2026-03-26T18:10:11.032986+00:00` | `+268.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `defense` | status `running` | game_date `2021-07-03`
+- `2026-03-26T18:10:11.062261+00:00` | `+268.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `defense` | status `running` | game_date `2021-07-04`
+- `2026-03-26T18:10:11.065794+00:00` | `+268.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `defense` | status `running` | game_date `2021-07-05`
+- `2026-03-26T18:10:11.069919+00:00` | `+268.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `defense` | status `running` | game_date `2021-07-06`
+- `2026-03-26T18:10:11.073176+00:00` | `+268.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `defense` | status `running` | game_date `2021-07-07`
+- `2026-03-26T18:10:11.077709+00:00` | `+268.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `defense` | status `running` | game_date `2021-07-08`
+- `2026-03-26T18:10:11.080796+00:00` | `+268.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `defense` | status `running` | game_date `2021-07-09`
+- `2026-03-26T18:10:11.085435+00:00` | `+268.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `defense` | status `running` | game_date `2021-07-10`
+- `2026-03-26T18:10:11.090126+00:00` | `+268.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `defense` | status `running` | game_date `2021-07-11`
+- `2026-03-26T18:10:11.094135+00:00` | `+268.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `defense` | status `running` | game_date `2021-07-16`
+- `2026-03-26T18:10:11.098343+00:00` | `+268.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `defense` | status `running` | game_date `2021-07-17`
+- `2026-03-26T18:10:11.101264+00:00` | `+268.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `defense` | status `running` | game_date `2021-07-18`
+- `2026-03-26T18:10:11.106891+00:00` | `+268.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `defense` | status `running` | game_date `2021-07-19`
+- `2026-03-26T18:10:11.109819+00:00` | `+268.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `defense` | status `running` | game_date `2021-07-20`
+- `2026-03-26T18:10:11.114463+00:00` | `+268.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `defense` | status `running` | game_date `2021-07-21`
+- `2026-03-26T18:10:11.118116+00:00` | `+268.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `defense` | status `running` | game_date `2021-07-22`
+- `2026-03-26T18:10:11.122264+00:00` | `+268.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `defense` | status `running` | game_date `2021-07-23`
+- `2026-03-26T18:10:11.125224+00:00` | `+268.8s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `defense` | status `running` | game_date `2021-07-24`
+- `2026-03-26T18:10:11.129714+00:00` | `+268.8s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `defense` | status `running` | game_date `2021-07-25`
+- `2026-03-26T18:10:11.134332+00:00` | `+268.8s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `defense` | status `running` | game_date `2021-07-26`
+- `2026-03-26T18:10:11.138337+00:00` | `+268.8s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `defense` | status `running` | game_date `2021-07-27`
+- `2026-03-26T18:10:12.801113+00:00` | `+270.4s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `prepare` | status `running` | game_date `2021-07-03` | day `1/21`
+- `2026-03-26T18:10:12.805669+00:00` | `+270.4s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `offense` | status `running` | game_date `2021-07-03` | day `1/21`
+- `2026-03-26T18:10:21.499705+00:00` | `+279.1s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `pitching` | status `running` | game_date `2021-07-03` | day `1/21`
+- `2026-03-26T18:10:23.044297+00:00` | `+280.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `umpires` | status `running` | game_date `2021-07-03` | day `1/21`
+- `2026-03-26T18:10:23.173091+00:00` | `+280.8s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `complete` | status `running` | game_date `2021-07-03` | day `1/21`
+- `2026-03-26T18:10:23.174666+00:00` | `+280.8s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `prepare` | status `running` | game_date `2021-07-04` | day `2/21`
+- `2026-03-26T18:10:23.177776+00:00` | `+280.8s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `offense` | status `running` | game_date `2021-07-04` | day `2/21`
+- `2026-03-26T18:10:31.367160+00:00` | `+289.0s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `pitching` | status `running` | game_date `2021-07-04` | day `2/21`
+- `2026-03-26T18:10:31.909887+00:00` | `+289.5s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `umpires` | status `running` | game_date `2021-07-04` | day `2/21`
+- `2026-03-26T18:10:31.971899+00:00` | `+289.6s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `complete` | status `running` | game_date `2021-07-04` | day `2/21`
+- `2026-03-26T18:10:31.973454+00:00` | `+289.6s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `prepare` | status `running` | game_date `2021-07-05` | day `3/21`
+- `2026-03-26T18:10:31.977112+00:00` | `+289.6s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `offense` | status `running` | game_date `2021-07-05` | day `3/21`
+- `2026-03-26T18:10:36.239962+00:00` | `+293.9s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `pitching` | status `running` | game_date `2021-07-05` | day `3/21`
+- `2026-03-26T18:10:36.573781+00:00` | `+294.2s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `umpires` | status `running` | game_date `2021-07-05` | day `3/21`
+- `2026-03-26T18:10:36.629679+00:00` | `+294.3s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `complete` | status `running` | game_date `2021-07-05` | day `3/21`
+- `2026-03-26T18:10:36.630200+00:00` | `+294.3s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `prepare` | status `running` | game_date `2021-07-06` | day `4/21`
+- `2026-03-26T18:10:36.634276+00:00` | `+294.3s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `offense` | status `running` | game_date `2021-07-06` | day `4/21`
+- `2026-03-26T18:10:42.063532+00:00` | `+299.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `pitching` | status `running` | game_date `2021-07-06` | day `4/21`
+- `2026-03-26T18:10:42.485970+00:00` | `+300.1s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `umpires` | status `running` | game_date `2021-07-06` | day `4/21`
+- `2026-03-26T18:10:42.544713+00:00` | `+300.2s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `complete` | status `running` | game_date `2021-07-06` | day `4/21`
+- `2026-03-26T18:10:42.545132+00:00` | `+300.2s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `prepare` | status `running` | game_date `2021-07-07` | day `5/21`
+- `2026-03-26T18:10:42.549795+00:00` | `+300.2s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `offense` | status `running` | game_date `2021-07-07` | day `5/21`
+- `2026-03-26T18:10:51.607494+00:00` | `+309.2s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `pitching` | status `running` | game_date `2021-07-07` | day `5/21`
+- `2026-03-26T18:10:52.212781+00:00` | `+309.8s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `umpires` | status `running` | game_date `2021-07-07` | day `5/21`
+- `2026-03-26T18:10:52.291312+00:00` | `+309.9s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `complete` | status `running` | game_date `2021-07-07` | day `5/21`
+- `2026-03-26T18:10:52.291312+00:00` | `+309.9s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `prepare` | status `running` | game_date `2021-07-08` | day `6/21`
+- `2026-03-26T18:10:52.295422+00:00` | `+309.9s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `offense` | status `running` | game_date `2021-07-08` | day `6/21`
+- `2026-03-26T18:10:57.041727+00:00` | `+314.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `pitching` | status `running` | game_date `2021-07-08` | day `6/21`
+- `2026-03-26T18:10:57.457775+00:00` | `+315.1s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `umpires` | status `running` | game_date `2021-07-08` | day `6/21`
+- `2026-03-26T18:10:57.518781+00:00` | `+315.1s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `complete` | status `running` | game_date `2021-07-08` | day `6/21`
+- `2026-03-26T18:10:57.518781+00:00` | `+315.1s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `prepare` | status `running` | game_date `2021-07-09` | day `7/21`
+- `2026-03-26T18:10:57.523460+00:00` | `+315.1s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `offense` | status `running` | game_date `2021-07-09` | day `7/21`
+- `2026-03-26T18:11:04.528053+00:00` | `+322.2s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `pitching` | status `running` | game_date `2021-07-09` | day `7/21`
+- `2026-03-26T18:11:04.958066+00:00` | `+322.6s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `umpires` | status `running` | game_date `2021-07-09` | day `7/21`
+- `2026-03-26T18:11:05.005024+00:00` | `+322.6s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `complete` | status `running` | game_date `2021-07-09` | day `7/21`
+- `2026-03-26T18:11:05.005024+00:00` | `+322.6s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `prepare` | status `running` | game_date `2021-07-10` | day `8/21`
+- `2026-03-26T18:11:05.008354+00:00` | `+322.6s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `offense` | status `running` | game_date `2021-07-10` | day `8/21`
+- `2026-03-26T18:11:14.290175+00:00` | `+331.9s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `pitching` | status `running` | game_date `2021-07-10` | day `8/21`
+- `2026-03-26T18:11:14.910298+00:00` | `+332.5s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `umpires` | status `running` | game_date `2021-07-10` | day `8/21`
+- `2026-03-26T18:11:14.966191+00:00` | `+332.6s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `complete` | status `running` | game_date `2021-07-10` | day `8/21`
+- `2026-03-26T18:11:14.966191+00:00` | `+332.6s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `prepare` | status `running` | game_date `2021-07-11` | day `9/21`
+- `2026-03-26T18:11:14.970749+00:00` | `+332.6s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `offense` | status `running` | game_date `2021-07-11` | day `9/21`
+- `2026-03-26T18:11:23.135122+00:00` | `+340.8s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `pitching` | status `running` | game_date `2021-07-11` | day `9/21`
+- `2026-03-26T18:11:23.625859+00:00` | `+341.3s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `umpires` | status `running` | game_date `2021-07-11` | day `9/21`
+- `2026-03-26T18:11:23.691166+00:00` | `+341.3s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `complete` | status `running` | game_date `2021-07-11` | day `9/21`
+- `2026-03-26T18:11:23.691166+00:00` | `+341.3s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `prepare` | status `running` | game_date `2021-07-16` | day `10/21`
+- `2026-03-26T18:11:23.697006+00:00` | `+341.3s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `offense` | status `running` | game_date `2021-07-16` | day `10/21`
+- `2026-03-26T18:11:29.153547+00:00` | `+346.8s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `pitching` | status `running` | game_date `2021-07-16` | day `10/21`
+- `2026-03-26T18:11:29.511896+00:00` | `+347.1s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `umpires` | status `running` | game_date `2021-07-16` | day `10/21`
+- `2026-03-26T18:11:29.567974+00:00` | `+347.2s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `complete` | status `running` | game_date `2021-07-16` | day `10/21`
+- `2026-03-26T18:11:29.567974+00:00` | `+347.2s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `prepare` | status `running` | game_date `2021-07-17` | day `11/21`
+- `2026-03-26T18:11:29.573061+00:00` | `+347.2s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `offense` | status `running` | game_date `2021-07-17` | day `11/21`
+- `2026-03-26T18:11:37.264453+00:00` | `+354.9s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `pitching` | status `running` | game_date `2021-07-17` | day `11/21`
+- `2026-03-26T18:11:37.911324+00:00` | `+355.5s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `umpires` | status `running` | game_date `2021-07-17` | day `11/21`
+- `2026-03-26T18:11:37.971131+00:00` | `+355.6s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `complete` | status `running` | game_date `2021-07-17` | day `11/21`
+- `2026-03-26T18:11:37.972137+00:00` | `+355.6s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `prepare` | status `running` | game_date `2021-07-18` | day `12/21`
+- `2026-03-26T18:11:37.975441+00:00` | `+355.6s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `offense` | status `running` | game_date `2021-07-18` | day `12/21`
+- `2026-03-26T18:11:47.656151+00:00` | `+365.3s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `pitching` | status `running` | game_date `2021-07-18` | day `12/21`
+- `2026-03-26T18:11:48.277678+00:00` | `+365.9s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `umpires` | status `running` | game_date `2021-07-18` | day `12/21`
+- `2026-03-26T18:11:48.351586+00:00` | `+366.0s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `complete` | status `running` | game_date `2021-07-18` | day `12/21`
+- `2026-03-26T18:11:48.351586+00:00` | `+366.0s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `prepare` | status `running` | game_date `2021-07-19` | day `13/21`
+- `2026-03-26T18:11:48.356800+00:00` | `+366.0s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `offense` | status `running` | game_date `2021-07-19` | day `13/21`
+- `2026-03-26T18:11:53.061481+00:00` | `+370.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `pitching` | status `running` | game_date `2021-07-19` | day `13/21`
+- `2026-03-26T18:11:53.471210+00:00` | `+371.1s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `umpires` | status `running` | game_date `2021-07-19` | day `13/21`
+- `2026-03-26T18:11:53.527757+00:00` | `+371.2s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `complete` | status `running` | game_date `2021-07-19` | day `13/21`
+- `2026-03-26T18:11:53.528326+00:00` | `+371.2s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `prepare` | status `running` | game_date `2021-07-20` | day `14/21`
+- `2026-03-26T18:11:53.532400+00:00` | `+371.2s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `offense` | status `running` | game_date `2021-07-20` | day `14/21`
+- `2026-03-26T18:12:01.323547+00:00` | `+378.9s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `pitching` | status `running` | game_date `2021-07-20` | day `14/21`
+- `2026-03-26T18:12:01.849209+00:00` | `+379.5s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `umpires` | status `running` | game_date `2021-07-20` | day `14/21`
+- `2026-03-26T18:12:01.906558+00:00` | `+379.5s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `complete` | status `running` | game_date `2021-07-20` | day `14/21`
+- `2026-03-26T18:12:01.908112+00:00` | `+379.5s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `prepare` | status `running` | game_date `2021-07-21` | day `15/21`
+- `2026-03-26T18:12:01.911314+00:00` | `+379.5s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `offense` | status `running` | game_date `2021-07-21` | day `15/21`
+- `2026-03-26T18:12:11.408478+00:00` | `+389.0s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `pitching` | status `running` | game_date `2021-07-21` | day `15/21`
+- `2026-03-26T18:12:12.012264+00:00` | `+389.6s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `umpires` | status `running` | game_date `2021-07-21` | day `15/21`
+- `2026-03-26T18:12:12.078181+00:00` | `+389.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `complete` | status `running` | game_date `2021-07-21` | day `15/21`
+- `2026-03-26T18:12:12.078181+00:00` | `+389.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `prepare` | status `running` | game_date `2021-07-22` | day `16/21`
+- `2026-03-26T18:12:12.083279+00:00` | `+389.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `offense` | status `running` | game_date `2021-07-22` | day `16/21`
+- `2026-03-26T18:12:18.176771+00:00` | `+395.8s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `pitching` | status `running` | game_date `2021-07-22` | day `16/21`
+- `2026-03-26T18:12:18.590874+00:00` | `+396.2s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `umpires` | status `running` | game_date `2021-07-22` | day `16/21`
+- `2026-03-26T18:12:18.648574+00:00` | `+396.3s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `complete` | status `running` | game_date `2021-07-22` | day `16/21`
+- `2026-03-26T18:12:18.648574+00:00` | `+396.3s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `prepare` | status `running` | game_date `2021-07-23` | day `17/21`
+- `2026-03-26T18:12:18.652749+00:00` | `+396.3s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `offense` | status `running` | game_date `2021-07-23` | day `17/21`
+- `2026-03-26T18:12:25.754676+00:00` | `+403.4s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `pitching` | status `running` | game_date `2021-07-23` | day `17/21`
+- `2026-03-26T18:12:26.288601+00:00` | `+403.9s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `umpires` | status `running` | game_date `2021-07-23` | day `17/21`
+- `2026-03-26T18:12:26.357704+00:00` | `+404.0s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `complete` | status `running` | game_date `2021-07-23` | day `17/21`
+- `2026-03-26T18:12:26.357704+00:00` | `+404.0s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `prepare` | status `running` | game_date `2021-07-24` | day `18/21`
+- `2026-03-26T18:12:26.362044+00:00` | `+404.0s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `offense` | status `running` | game_date `2021-07-24` | day `18/21`
+- `2026-03-26T18:12:36.388178+00:00` | `+414.0s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `pitching` | status `running` | game_date `2021-07-24` | day `18/21`
+- `2026-03-26T18:12:36.976772+00:00` | `+414.6s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `umpires` | status `running` | game_date `2021-07-24` | day `18/21`
+- `2026-03-26T18:12:37.039570+00:00` | `+414.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `complete` | status `running` | game_date `2021-07-24` | day `18/21`
+- `2026-03-26T18:12:37.039570+00:00` | `+414.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `prepare` | status `running` | game_date `2021-07-25` | day `19/21`
+- `2026-03-26T18:12:37.044121+00:00` | `+414.7s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `offense` | status `running` | game_date `2021-07-25` | day `19/21`
+- `2026-03-26T18:12:46.861550+00:00` | `+424.5s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `pitching` | status `running` | game_date `2021-07-25` | day `19/21`
+- `2026-03-26T18:12:47.327200+00:00` | `+425.0s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `umpires` | status `running` | game_date `2021-07-25` | day `19/21`
+- `2026-03-26T18:12:47.379892+00:00` | `+425.0s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `complete` | status `running` | game_date `2021-07-25` | day `19/21`
+- `2026-03-26T18:12:47.380899+00:00` | `+425.0s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `prepare` | status `running` | game_date `2021-07-26` | day `20/21`
+- `2026-03-26T18:12:47.384024+00:00` | `+425.0s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `offense` | status `running` | game_date `2021-07-26` | day `20/21`
+- `2026-03-26T18:12:49.906907+00:00` | `+427.5s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `pitching` | status `running` | game_date `2021-07-26` | day `20/21`
+- `2026-03-26T18:12:50.191807+00:00` | `+427.8s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `umpires` | status `running` | game_date `2021-07-26` | day `20/21`
+- `2026-03-26T18:12:50.254450+00:00` | `+427.9s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `complete` | status `running` | game_date `2021-07-26` | day `20/21`
+- `2026-03-26T18:12:50.254973+00:00` | `+427.9s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `prepare` | status `running` | game_date `2021-07-27` | day `21/21`
+- `2026-03-26T18:12:50.258123+00:00` | `+427.9s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `offense` | status `running` | game_date `2021-07-27` | day `21/21`
+- `2026-03-26T18:12:58.355356+00:00` | `+436.0s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `pitching` | status `running` | game_date `2021-07-27` | day `21/21`
+- `2026-03-26T18:12:58.895667+00:00` | `+436.5s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `umpires` | status `running` | game_date `2021-07-27` | day `21/21`
+- `2026-03-26T18:12:58.955663+00:00` | `+436.6s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `complete` | status `running` | game_date `2021-07-27` | day `21/21`
+- `2026-03-26T18:12:58.955663+00:00` | `+436.6s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `complete` | status `complete` | game_date `n/a`
+- `2026-03-26T18:12:58.964764+00:00` | `+436.6s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `finalize` | status `loading_rows` | game_date `n/a`
+- `2026-03-26T18:12:59.214968+00:00` | `+436.8s` | chunk `23/61` | dates `2021-07-03..2021-07-27` | stage `complete` | status `complete` | game_date `n/a`
+- `2026-03-26T18:12:59.273257+00:00` | `+0.0s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `prepare` | status `starting` | game_date `n/a`
+- `2026-03-26T18:12:59.803162+00:00` | `+0.5s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `bullpen` | status `running` | game_date `n/a`
+- `2026-03-26T18:17:22.195977+00:00` | `+262.9s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `baselines` | status `running` | game_date `n/a`
+- `2026-03-26T18:17:25.792293+00:00` | `+266.5s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `defense` | status `running` | game_date `n/a`
+- `2026-03-26T18:17:25.792293+00:00` | `+266.5s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `defense` | status `running` | game_date `2022-08-09`
+- `2026-03-26T18:17:26.821631+00:00` | `+267.5s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `defense` | status `running` | game_date `2022-08-10`
+- `2026-03-26T18:17:26.838275+00:00` | `+267.6s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `defense` | status `running` | game_date `2022-08-11`
+- `2026-03-26T18:17:26.855050+00:00` | `+267.6s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `defense` | status `running` | game_date `2022-08-12`
+- `2026-03-26T18:17:26.869338+00:00` | `+267.6s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `defense` | status `running` | game_date `2022-08-13`
+- `2026-03-26T18:17:26.884540+00:00` | `+267.6s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `defense` | status `running` | game_date `2022-08-14`
+- `2026-03-26T18:17:26.901262+00:00` | `+267.6s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `defense` | status `running` | game_date `2022-08-15`
+- `2026-03-26T18:17:26.917592+00:00` | `+267.6s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `defense` | status `running` | game_date `2022-08-16`
+- `2026-03-26T18:17:26.933805+00:00` | `+267.7s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `defense` | status `running` | game_date `2022-08-17`
+- `2026-03-26T18:17:26.950185+00:00` | `+267.7s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `defense` | status `running` | game_date `2022-08-18`
+- `2026-03-26T18:17:26.966764+00:00` | `+267.7s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `defense` | status `running` | game_date `2022-08-19`
+- `2026-03-26T18:17:26.982678+00:00` | `+267.7s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `defense` | status `running` | game_date `2022-08-20`
+- `2026-03-26T18:17:26.998570+00:00` | `+267.7s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `defense` | status `running` | game_date `2022-08-21`
+- `2026-03-26T18:17:27.015010+00:00` | `+267.7s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `defense` | status `running` | game_date `2022-08-22`
+- `2026-03-26T18:17:27.032947+00:00` | `+267.8s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `defense` | status `running` | game_date `2022-08-23`
+- `2026-03-26T18:17:27.049397+00:00` | `+267.8s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `defense` | status `running` | game_date `2022-08-24`
+- `2026-03-26T18:17:27.065778+00:00` | `+267.8s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `defense` | status `running` | game_date `2022-08-25`
+- `2026-03-26T18:17:27.082267+00:00` | `+267.8s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `defense` | status `running` | game_date `2022-08-26`
+- `2026-03-26T18:17:27.099751+00:00` | `+267.8s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `defense` | status `running` | game_date `2022-08-27`
+- `2026-03-26T18:17:27.114693+00:00` | `+267.8s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `defense` | status `running` | game_date `2022-08-28`
+- `2026-03-26T18:17:27.131883+00:00` | `+267.9s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `defense` | status `running` | game_date `2022-08-29`
+- `2026-03-26T18:17:28.752144+00:00` | `+269.5s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `prepare` | status `running` | game_date `2022-08-09` | day `1/21`
+- `2026-03-26T18:17:28.765588+00:00` | `+269.5s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `offense` | status `running` | game_date `2022-08-09` | day `1/21`
+- `2026-03-26T18:17:46.674878+00:00` | `+287.4s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `pitching` | status `running` | game_date `2022-08-09` | day `1/21`
+- `2026-03-26T18:17:48.503980+00:00` | `+289.2s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `umpires` | status `running` | game_date `2022-08-09` | day `1/21`
+- `2026-03-26T18:17:48.651239+00:00` | `+289.4s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `complete` | status `running` | game_date `2022-08-09` | day `1/21`
+- `2026-03-26T18:17:48.651239+00:00` | `+289.4s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `prepare` | status `running` | game_date `2022-08-10` | day `2/21`
+- `2026-03-26T18:17:48.668200+00:00` | `+289.4s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `offense` | status `running` | game_date `2022-08-10` | day `2/21`
+- `2026-03-26T18:18:09.473930+00:00` | `+310.2s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `pitching` | status `running` | game_date `2022-08-10` | day `2/21`
+- `2026-03-26T18:18:10.558515+00:00` | `+311.3s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `umpires` | status `running` | game_date `2022-08-10` | day `2/21`
+- `2026-03-26T18:18:10.638010+00:00` | `+311.4s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `complete` | status `running` | game_date `2022-08-10` | day `2/21`
+- `2026-03-26T18:18:10.638010+00:00` | `+311.4s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `prepare` | status `running` | game_date `2022-08-11` | day `3/21`
+- `2026-03-26T18:18:10.656529+00:00` | `+311.4s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `offense` | status `running` | game_date `2022-08-11` | day `3/21`
+- `2026-03-26T18:18:25.124236+00:00` | `+325.9s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `pitching` | status `running` | game_date `2022-08-11` | day `3/21`
+- `2026-03-26T18:18:26.035457+00:00` | `+326.8s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `umpires` | status `running` | game_date `2022-08-11` | day `3/21`
+- `2026-03-26T18:18:26.117444+00:00` | `+326.8s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `complete` | status `running` | game_date `2022-08-11` | day `3/21`
+- `2026-03-26T18:18:26.117444+00:00` | `+326.8s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `prepare` | status `running` | game_date `2022-08-12` | day `4/21`
+- `2026-03-26T18:18:26.136862+00:00` | `+326.9s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `offense` | status `running` | game_date `2022-08-12` | day `4/21`
+- `2026-03-26T18:18:39.014270+00:00` | `+339.7s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `pitching` | status `running` | game_date `2022-08-12` | day `4/21`
+- `2026-03-26T18:18:39.805596+00:00` | `+340.5s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `umpires` | status `running` | game_date `2022-08-12` | day `4/21`
+- `2026-03-26T18:18:39.875556+00:00` | `+340.6s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `complete` | status `running` | game_date `2022-08-12` | day `4/21`
+- `2026-03-26T18:18:39.876436+00:00` | `+340.6s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `prepare` | status `running` | game_date `2022-08-13` | day `5/21`
+- `2026-03-26T18:18:39.892322+00:00` | `+340.6s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `offense` | status `running` | game_date `2022-08-13` | day `5/21`
+- `2026-03-26T18:19:03.716597+00:00` | `+364.4s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `pitching` | status `running` | game_date `2022-08-13` | day `5/21`
+- `2026-03-26T18:19:04.795991+00:00` | `+365.5s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `umpires` | status `running` | game_date `2022-08-13` | day `5/21`
+- `2026-03-26T18:19:04.877283+00:00` | `+365.6s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `complete` | status `running` | game_date `2022-08-13` | day `5/21`
+- `2026-03-26T18:19:04.878844+00:00` | `+365.6s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `prepare` | status `running` | game_date `2022-08-14` | day `6/21`
+- `2026-03-26T18:19:04.893789+00:00` | `+365.6s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `offense` | status `running` | game_date `2022-08-14` | day `6/21`
+- `2026-03-26T18:19:28.478460+00:00` | `+389.2s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `pitching` | status `running` | game_date `2022-08-14` | day `6/21`
+- `2026-03-26T18:19:29.574067+00:00` | `+390.3s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `umpires` | status `running` | game_date `2022-08-14` | day `6/21`
+- `2026-03-26T18:19:29.662851+00:00` | `+390.4s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `complete` | status `running` | game_date `2022-08-14` | day `6/21`
+- `2026-03-26T18:19:29.662851+00:00` | `+390.4s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `prepare` | status `running` | game_date `2022-08-15` | day `7/21`
+- `2026-03-26T18:19:29.679855+00:00` | `+390.4s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `offense` | status `running` | game_date `2022-08-15` | day `7/21`
+- `2026-03-26T18:19:43.834406+00:00` | `+404.6s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `pitching` | status `running` | game_date `2022-08-15` | day `7/21`
+- `2026-03-26T18:19:44.682721+00:00` | `+405.4s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `umpires` | status `running` | game_date `2022-08-15` | day `7/21`
+- `2026-03-26T18:19:44.762877+00:00` | `+405.5s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `complete` | status `running` | game_date `2022-08-15` | day `7/21`
+- `2026-03-26T18:19:44.764785+00:00` | `+405.5s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `prepare` | status `running` | game_date `2022-08-16` | day `8/21`
+- `2026-03-26T18:19:44.779859+00:00` | `+405.5s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `offense` | status `running` | game_date `2022-08-16` | day `8/21`
+- `2026-03-26T18:20:09.265309+00:00` | `+430.0s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `pitching` | status `running` | game_date `2022-08-16` | day `8/21`
+- `2026-03-26T18:20:10.311802+00:00` | `+431.0s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `umpires` | status `running` | game_date `2022-08-16` | day `8/21`
+- `2026-03-26T18:20:10.387367+00:00` | `+431.1s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `complete` | status `running` | game_date `2022-08-16` | day `8/21`
+- `2026-03-26T18:20:10.388372+00:00` | `+431.1s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `prepare` | status `running` | game_date `2022-08-17` | day `9/21`
+- `2026-03-26T18:20:10.404016+00:00` | `+431.1s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `offense` | status `running` | game_date `2022-08-17` | day `9/21`
+- `2026-03-26T18:20:34.581240+00:00` | `+455.3s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `pitching` | status `running` | game_date `2022-08-17` | day `9/21`
+- `2026-03-26T18:20:35.605081+00:00` | `+456.3s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `umpires` | status `running` | game_date `2022-08-17` | day `9/21`
+- `2026-03-26T18:20:35.689620+00:00` | `+456.4s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `complete` | status `running` | game_date `2022-08-17` | day `9/21`
+- `2026-03-26T18:20:35.689620+00:00` | `+456.4s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `prepare` | status `running` | game_date `2022-08-18` | day `10/21`
+- `2026-03-26T18:20:35.703239+00:00` | `+456.4s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `offense` | status `running` | game_date `2022-08-18` | day `10/21`
+- `2026-03-26T18:20:52.274891+00:00` | `+473.0s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `pitching` | status `running` | game_date `2022-08-18` | day `10/21`
+- `2026-03-26T18:20:53.243593+00:00` | `+474.0s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `umpires` | status `running` | game_date `2022-08-18` | day `10/21`
+- `2026-03-26T18:20:53.325334+00:00` | `+474.1s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `complete` | status `running` | game_date `2022-08-18` | day `10/21`
+- `2026-03-26T18:20:53.326886+00:00` | `+474.1s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `prepare` | status `running` | game_date `2022-08-19` | day `11/21`
+- `2026-03-26T18:20:53.342965+00:00` | `+474.1s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `offense` | status `running` | game_date `2022-08-19` | day `11/21`
+- `2026-03-26T18:21:12.278849+00:00` | `+493.0s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `pitching` | status `running` | game_date `2022-08-19` | day `11/21`
+- `2026-03-26T18:21:13.158804+00:00` | `+493.9s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `umpires` | status `running` | game_date `2022-08-19` | day `11/21`
+- `2026-03-26T18:21:13.235794+00:00` | `+494.0s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `complete` | status `running` | game_date `2022-08-19` | day `11/21`
+- `2026-03-26T18:21:13.237376+00:00` | `+494.0s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `prepare` | status `running` | game_date `2022-08-20` | day `12/21`
+- `2026-03-26T18:21:13.252460+00:00` | `+494.0s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `offense` | status `running` | game_date `2022-08-20` | day `12/21`
+- `2026-03-26T18:21:38.404027+00:00` | `+519.1s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `pitching` | status `running` | game_date `2022-08-20` | day `12/21`
+- `2026-03-26T18:21:39.563629+00:00` | `+520.3s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `umpires` | status `running` | game_date `2022-08-20` | day `12/21`
+- `2026-03-26T18:21:39.645467+00:00` | `+520.4s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `complete` | status `running` | game_date `2022-08-20` | day `12/21`
+- `2026-03-26T18:21:39.645467+00:00` | `+520.4s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `prepare` | status `running` | game_date `2022-08-21` | day `13/21`
+- `2026-03-26T18:21:39.662621+00:00` | `+520.4s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `offense` | status `running` | game_date `2022-08-21` | day `13/21`
+- `2026-03-26T18:22:02.747929+00:00` | `+543.5s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `pitching` | status `running` | game_date `2022-08-21` | day `13/21`
+- `2026-03-26T18:22:03.764093+00:00` | `+544.5s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `umpires` | status `running` | game_date `2022-08-21` | day `13/21`
+- `2026-03-26T18:22:03.913997+00:00` | `+544.6s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `complete` | status `running` | game_date `2022-08-21` | day `13/21`
+- `2026-03-26T18:22:03.915569+00:00` | `+544.6s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `prepare` | status `running` | game_date `2022-08-22` | day `14/21`
+- `2026-03-26T18:22:03.931890+00:00` | `+544.7s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `offense` | status `running` | game_date `2022-08-22` | day `14/21`
+- `2026-03-26T18:22:14.935463+00:00` | `+555.7s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `pitching` | status `running` | game_date `2022-08-22` | day `14/21`
+- `2026-03-26T18:22:15.805366+00:00` | `+556.5s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `umpires` | status `running` | game_date `2022-08-22` | day `14/21`
+- `2026-03-26T18:22:15.883286+00:00` | `+556.6s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `complete` | status `running` | game_date `2022-08-22` | day `14/21`
+- `2026-03-26T18:22:15.884866+00:00` | `+556.6s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `prepare` | status `running` | game_date `2022-08-23` | day `15/21`
+- `2026-03-26T18:22:15.901932+00:00` | `+556.6s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `offense` | status `running` | game_date `2022-08-23` | day `15/21`
+- `2026-03-26T18:22:33.652986+00:00` | `+574.4s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `pitching` | status `running` | game_date `2022-08-23` | day `15/21`
+- `2026-03-26T18:22:34.528823+00:00` | `+575.3s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `umpires` | status `running` | game_date `2022-08-23` | day `15/21`
+- `2026-03-26T18:22:34.686479+00:00` | `+575.4s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `complete` | status `running` | game_date `2022-08-23` | day `15/21`
+- `2026-03-26T18:22:34.688066+00:00` | `+575.4s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `prepare` | status `running` | game_date `2022-08-24` | day `16/21`
+- `2026-03-26T18:22:34.703341+00:00` | `+575.4s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `offense` | status `running` | game_date `2022-08-24` | day `16/21`
+- `2026-03-26T18:22:57.362647+00:00` | `+598.1s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `pitching` | status `running` | game_date `2022-08-24` | day `16/21`
+- `2026-03-26T18:22:58.427836+00:00` | `+599.2s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `umpires` | status `running` | game_date `2022-08-24` | day `16/21`
+- `2026-03-26T18:22:58.513809+00:00` | `+599.2s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `complete` | status `running` | game_date `2022-08-24` | day `16/21`
+- `2026-03-26T18:22:58.514817+00:00` | `+599.2s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `prepare` | status `running` | game_date `2022-08-25` | day `17/21`
+- `2026-03-26T18:22:58.531970+00:00` | `+599.3s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `offense` | status `running` | game_date `2022-08-25` | day `17/21`
+- `2026-03-26T18:23:15.291392+00:00` | `+616.0s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `pitching` | status `running` | game_date `2022-08-25` | day `17/21`
+- `2026-03-26T18:23:16.216072+00:00` | `+616.9s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `umpires` | status `running` | game_date `2022-08-25` | day `17/21`
+- `2026-03-26T18:23:16.293148+00:00` | `+617.0s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `complete` | status `running` | game_date `2022-08-25` | day `17/21`
+- `2026-03-26T18:23:16.294737+00:00` | `+617.0s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `prepare` | status `running` | game_date `2022-08-26` | day `18/21`
+- `2026-03-26T18:23:16.312225+00:00` | `+617.0s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `offense` | status `running` | game_date `2022-08-26` | day `18/21`
+- `2026-03-26T18:23:30.132360+00:00` | `+630.9s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `pitching` | status `running` | game_date `2022-08-26` | day `18/21`
+- `2026-03-26T18:23:30.930833+00:00` | `+631.7s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `umpires` | status `running` | game_date `2022-08-26` | day `18/21`
+- `2026-03-26T18:23:31.000827+00:00` | `+631.7s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `complete` | status `running` | game_date `2022-08-26` | day `18/21`
+- `2026-03-26T18:23:31.000827+00:00` | `+631.7s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `prepare` | status `running` | game_date `2022-08-27` | day `19/21`
+- `2026-03-26T18:23:31.013791+00:00` | `+631.7s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `offense` | status `running` | game_date `2022-08-27` | day `19/21`
+- `2026-03-26T18:23:56.854350+00:00` | `+657.6s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `pitching` | status `running` | game_date `2022-08-27` | day `19/21`
+- `2026-03-26T18:23:57.944581+00:00` | `+658.7s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `umpires` | status `running` | game_date `2022-08-27` | day `19/21`
+- `2026-03-26T18:23:58.110028+00:00` | `+658.8s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `complete` | status `running` | game_date `2022-08-27` | day `19/21`
+- `2026-03-26T18:23:58.110028+00:00` | `+658.8s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `prepare` | status `running` | game_date `2022-08-28` | day `20/21`
+- `2026-03-26T18:23:58.125396+00:00` | `+658.9s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `offense` | status `running` | game_date `2022-08-28` | day `20/21`
+- `2026-03-26T18:24:23.474063+00:00` | `+684.2s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `pitching` | status `running` | game_date `2022-08-28` | day `20/21`
+- `2026-03-26T18:24:24.503270+00:00` | `+685.2s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `umpires` | status `running` | game_date `2022-08-28` | day `20/21`
+- `2026-03-26T18:24:24.588168+00:00` | `+685.3s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `complete` | status `running` | game_date `2022-08-28` | day `20/21`
+- `2026-03-26T18:24:24.588168+00:00` | `+685.3s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `prepare` | status `running` | game_date `2022-08-29` | day `21/21`
+- `2026-03-26T18:24:24.603457+00:00` | `+685.3s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `offense` | status `running` | game_date `2022-08-29` | day `21/21`
+- `2026-03-26T18:24:32.703511+00:00` | `+693.4s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `pitching` | status `running` | game_date `2022-08-29` | day `21/21`
+- `2026-03-26T18:24:33.444308+00:00` | `+694.2s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `umpires` | status `running` | game_date `2022-08-29` | day `21/21`
+- `2026-03-26T18:24:33.522944+00:00` | `+694.3s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `complete` | status `running` | game_date `2022-08-29` | day `21/21`
+- `2026-03-26T18:24:33.524540+00:00` | `+694.3s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `complete` | status `complete` | game_date `n/a`
+- `2026-03-26T18:24:33.533213+00:00` | `+694.3s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `finalize` | status `loading_rows` | game_date `n/a`
+- `2026-03-26T18:24:33.768872+00:00` | `+694.5s` | chunk `33/61` | dates `2022-08-09..2022-08-29` | stage `complete` | status `complete` | game_date `n/a`
+- `2026-03-26T18:24:33.892280+00:00` | `+0.0s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `prepare` | status `starting` | game_date `n/a`
+- `2026-03-26T18:24:34.427836+00:00` | `+0.5s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `bullpen` | status `running` | game_date `n/a`
+- `2026-03-26T18:28:47.074890+00:00` | `+253.2s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `baselines` | status `running` | game_date `n/a`
+- `2026-03-26T18:28:50.603858+00:00` | `+256.7s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `defense` | status `running` | game_date `n/a`
+- `2026-03-26T18:28:50.604364+00:00` | `+256.7s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `defense` | status `running` | game_date `2023-09-02`
+- `2026-03-26T18:28:51.538177+00:00` | `+257.6s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `defense` | status `running` | game_date `2023-09-03`
+- `2026-03-26T18:28:51.554377+00:00` | `+257.7s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `defense` | status `running` | game_date `2023-09-04`
+- `2026-03-26T18:28:51.570217+00:00` | `+257.7s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `defense` | status `running` | game_date `2023-09-05`
+- `2026-03-26T18:28:51.586369+00:00` | `+257.7s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `defense` | status `running` | game_date `2023-09-06`
+- `2026-03-26T18:28:51.603337+00:00` | `+257.7s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `defense` | status `running` | game_date `2023-09-07`
+- `2026-03-26T18:28:51.620359+00:00` | `+257.7s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `defense` | status `running` | game_date `2023-09-08`
+- `2026-03-26T18:28:51.636349+00:00` | `+257.7s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `defense` | status `running` | game_date `2023-09-09`
+- `2026-03-26T18:28:51.653943+00:00` | `+257.8s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `defense` | status `running` | game_date `2023-09-10`
+- `2026-03-26T18:28:51.669324+00:00` | `+257.8s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `defense` | status `running` | game_date `2023-09-11`
+- `2026-03-26T18:28:51.685752+00:00` | `+257.8s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `defense` | status `running` | game_date `2023-09-12`
+- `2026-03-26T18:28:51.702742+00:00` | `+257.8s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `defense` | status `running` | game_date `2023-09-13`
+- `2026-03-26T18:28:51.719255+00:00` | `+257.8s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `defense` | status `running` | game_date `2023-09-14`
+- `2026-03-26T18:28:51.737209+00:00` | `+257.8s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `defense` | status `running` | game_date `2023-09-15`
+- `2026-03-26T18:28:51.753197+00:00` | `+257.9s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `defense` | status `running` | game_date `2023-09-16`
+- `2026-03-26T18:28:51.764226+00:00` | `+257.9s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `defense` | status `running` | game_date `2023-09-17`
+- `2026-03-26T18:28:51.776225+00:00` | `+257.9s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `defense` | status `running` | game_date `2023-09-18`
+- `2026-03-26T18:28:51.792786+00:00` | `+257.9s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `defense` | status `running` | game_date `2023-09-19`
+- `2026-03-26T18:28:51.805014+00:00` | `+257.9s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `defense` | status `running` | game_date `2023-09-20`
+- `2026-03-26T18:28:51.818390+00:00` | `+257.9s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `defense` | status `running` | game_date `2023-09-21`
+- `2026-03-26T18:28:51.834107+00:00` | `+257.9s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `defense` | status `running` | game_date `2023-09-22`
+- `2026-03-26T18:28:53.526045+00:00` | `+259.6s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `prepare` | status `running` | game_date `2023-09-02` | day `1/21`
+- `2026-03-26T18:28:53.543115+00:00` | `+259.7s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `offense` | status `running` | game_date `2023-09-02` | day `1/21`
+- `2026-03-26T18:29:19.205351+00:00` | `+285.3s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `pitching` | status `running` | game_date `2023-09-02` | day `1/21`
+- `2026-03-26T18:29:21.323847+00:00` | `+287.4s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `umpires` | status `running` | game_date `2023-09-02` | day `1/21`
+- `2026-03-26T18:29:21.478020+00:00` | `+287.6s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `complete` | status `running` | game_date `2023-09-02` | day `1/21`
+- `2026-03-26T18:29:21.478020+00:00` | `+287.6s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `prepare` | status `running` | game_date `2023-09-03` | day `2/21`
+- `2026-03-26T18:29:21.494409+00:00` | `+287.6s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `offense` | status `running` | game_date `2023-09-03` | day `2/21`
+- `2026-03-26T18:29:47.674870+00:00` | `+313.8s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `pitching` | status `running` | game_date `2023-09-03` | day `2/21`
+- `2026-03-26T18:29:48.773858+00:00` | `+314.9s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `umpires` | status `running` | game_date `2023-09-03` | day `2/21`
+- `2026-03-26T18:29:48.862360+00:00` | `+315.0s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `complete` | status `running` | game_date `2023-09-03` | day `2/21`
+- `2026-03-26T18:29:48.862360+00:00` | `+315.0s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `prepare` | status `running` | game_date `2023-09-04` | day `3/21`
+- `2026-03-26T18:29:48.880268+00:00` | `+315.0s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `offense` | status `running` | game_date `2023-09-04` | day `3/21`
+- `2026-03-26T18:30:05.828653+00:00` | `+331.9s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `pitching` | status `running` | game_date `2023-09-04` | day `3/21`
+- `2026-03-26T18:30:06.778768+00:00` | `+332.9s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `umpires` | status `running` | game_date `2023-09-04` | day `3/21`
+- `2026-03-26T18:30:06.869961+00:00` | `+333.0s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `complete` | status `running` | game_date `2023-09-04` | day `3/21`
+- `2026-03-26T18:30:06.869961+00:00` | `+333.0s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `prepare` | status `running` | game_date `2023-09-05` | day `4/21`
+- `2026-03-26T18:30:06.886460+00:00` | `+333.0s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `offense` | status `running` | game_date `2023-09-05` | day `4/21`
+- `2026-03-26T18:30:27.666012+00:00` | `+353.8s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `pitching` | status `running` | game_date `2023-09-05` | day `4/21`
+- `2026-03-26T18:30:28.587128+00:00` | `+354.7s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `umpires` | status `running` | game_date `2023-09-05` | day `4/21`
+- `2026-03-26T18:30:28.672478+00:00` | `+354.8s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `complete` | status `running` | game_date `2023-09-05` | day `4/21`
+- `2026-03-26T18:30:28.673478+00:00` | `+354.8s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `prepare` | status `running` | game_date `2023-09-06` | day `5/21`
+- `2026-03-26T18:30:28.690268+00:00` | `+354.8s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `offense` | status `running` | game_date `2023-09-06` | day `5/21`
+- `2026-03-26T18:30:54.924094+00:00` | `+381.0s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `pitching` | status `running` | game_date `2023-09-06` | day `5/21`
+- `2026-03-26T18:30:55.998794+00:00` | `+382.1s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `umpires` | status `running` | game_date `2023-09-06` | day `5/21`
+- `2026-03-26T18:30:56.090527+00:00` | `+382.2s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `complete` | status `running` | game_date `2023-09-06` | day `5/21`
+- `2026-03-26T18:30:56.090527+00:00` | `+382.2s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `prepare` | status `running` | game_date `2023-09-07` | day `6/21`
+- `2026-03-26T18:30:56.106773+00:00` | `+382.2s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `offense` | status `running` | game_date `2023-09-07` | day `6/21`
+- `2026-03-26T18:31:06.697592+00:00` | `+392.8s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `pitching` | status `running` | game_date `2023-09-07` | day `6/21`
+- `2026-03-26T18:31:07.553836+00:00` | `+393.7s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `umpires` | status `running` | game_date `2023-09-07` | day `6/21`
+- `2026-03-26T18:31:07.650295+00:00` | `+393.8s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `complete` | status `running` | game_date `2023-09-07` | day `6/21`
+- `2026-03-26T18:31:07.651858+00:00` | `+393.8s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `prepare` | status `running` | game_date `2023-09-08` | day `7/21`
+- `2026-03-26T18:31:07.664629+00:00` | `+393.8s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `offense` | status `running` | game_date `2023-09-08` | day `7/21`
+- `2026-03-26T18:31:27.131384+00:00` | `+413.2s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `pitching` | status `running` | game_date `2023-09-08` | day `7/21`
+- `2026-03-26T18:31:27.921720+00:00` | `+414.0s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `umpires` | status `running` | game_date `2023-09-08` | day `7/21`
+- `2026-03-26T18:31:28.079947+00:00` | `+414.2s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `complete` | status `running` | game_date `2023-09-08` | day `7/21`
+- `2026-03-26T18:31:28.080453+00:00` | `+414.2s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `prepare` | status `running` | game_date `2023-09-09` | day `8/21`
+- `2026-03-26T18:31:28.096003+00:00` | `+414.2s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `offense` | status `running` | game_date `2023-09-09` | day `8/21`
+- `2026-03-26T18:31:54.583247+00:00` | `+440.7s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `pitching` | status `running` | game_date `2023-09-09` | day `8/21`
+- `2026-03-26T18:31:55.686942+00:00` | `+441.8s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `umpires` | status `running` | game_date `2023-09-09` | day `8/21`
+- `2026-03-26T18:31:55.782147+00:00` | `+441.9s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `complete` | status `running` | game_date `2023-09-09` | day `8/21`
+- `2026-03-26T18:31:55.782147+00:00` | `+441.9s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `prepare` | status `running` | game_date `2023-09-10` | day `9/21`
+- `2026-03-26T18:31:55.798847+00:00` | `+441.9s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `offense` | status `running` | game_date `2023-09-10` | day `9/21`
+- `2026-03-26T18:32:22.033812+00:00` | `+468.1s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `pitching` | status `running` | game_date `2023-09-10` | day `9/21`
+- `2026-03-26T18:32:22.955451+00:00` | `+469.1s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `umpires` | status `running` | game_date `2023-09-10` | day `9/21`
+- `2026-03-26T18:32:23.040054+00:00` | `+469.1s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `complete` | status `running` | game_date `2023-09-10` | day `9/21`
+- `2026-03-26T18:32:23.041573+00:00` | `+469.1s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `prepare` | status `running` | game_date `2023-09-11` | day `10/21`
+- `2026-03-26T18:32:23.058136+00:00` | `+469.2s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `offense` | status `running` | game_date `2023-09-11` | day `10/21`
+- `2026-03-26T18:32:37.445878+00:00` | `+483.6s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `pitching` | status `running` | game_date `2023-09-11` | day `10/21`
+- `2026-03-26T18:32:38.355978+00:00` | `+484.5s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `umpires` | status `running` | game_date `2023-09-11` | day `10/21`
+- `2026-03-26T18:32:38.445126+00:00` | `+484.6s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `complete` | status `running` | game_date `2023-09-11` | day `10/21`
+- `2026-03-26T18:32:38.445126+00:00` | `+484.6s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `prepare` | status `running` | game_date `2023-09-12` | day `11/21`
+- `2026-03-26T18:32:38.460184+00:00` | `+484.6s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `offense` | status `running` | game_date `2023-09-12` | day `11/21`
+- `2026-03-26T18:33:04.683099+00:00` | `+510.8s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `pitching` | status `running` | game_date `2023-09-12` | day `11/21`
+- `2026-03-26T18:33:05.780129+00:00` | `+511.9s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `umpires` | status `running` | game_date `2023-09-12` | day `11/21`
+- `2026-03-26T18:33:05.879251+00:00` | `+512.0s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `complete` | status `running` | game_date `2023-09-12` | day `11/21`
+- `2026-03-26T18:33:05.879756+00:00` | `+512.0s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `prepare` | status `running` | game_date `2023-09-13` | day `12/21`
+- `2026-03-26T18:33:05.897117+00:00` | `+512.0s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `offense` | status `running` | game_date `2023-09-13` | day `12/21`
+- `2026-03-26T18:33:30.550663+00:00` | `+536.7s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `pitching` | status `running` | game_date `2023-09-13` | day `12/21`
+- `2026-03-26T18:33:31.565863+00:00` | `+537.7s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `umpires` | status `running` | game_date `2023-09-13` | day `12/21`
+- `2026-03-26T18:33:31.656038+00:00` | `+537.8s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `complete` | status `running` | game_date `2023-09-13` | day `12/21`
+- `2026-03-26T18:33:31.656038+00:00` | `+537.8s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `prepare` | status `running` | game_date `2023-09-14` | day `13/21`
+- `2026-03-26T18:33:31.670797+00:00` | `+537.8s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `offense` | status `running` | game_date `2023-09-14` | day `13/21`
+- `2026-03-26T18:33:48.042419+00:00` | `+554.2s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `pitching` | status `running` | game_date `2023-09-14` | day `13/21`
+- `2026-03-26T18:33:48.984037+00:00` | `+555.1s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `umpires` | status `running` | game_date `2023-09-14` | day `13/21`
+- `2026-03-26T18:33:49.064920+00:00` | `+555.2s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `complete` | status `running` | game_date `2023-09-14` | day `13/21`
+- `2026-03-26T18:33:49.066430+00:00` | `+555.2s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `prepare` | status `running` | game_date `2023-09-15` | day `14/21`
+- `2026-03-26T18:33:49.082309+00:00` | `+555.2s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `offense` | status `running` | game_date `2023-09-15` | day `14/21`
+- `2026-03-26T18:34:03.447964+00:00` | `+569.6s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `pitching` | status `running` | game_date `2023-09-15` | day `14/21`
+- `2026-03-26T18:34:04.408679+00:00` | `+570.5s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `umpires` | status `running` | game_date `2023-09-15` | day `14/21`
+- `2026-03-26T18:34:04.506867+00:00` | `+570.6s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `complete` | status `running` | game_date `2023-09-15` | day `14/21`
+- `2026-03-26T18:34:04.508411+00:00` | `+570.6s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `prepare` | status `running` | game_date `2023-09-16` | day `15/21`
+- `2026-03-26T18:34:04.526357+00:00` | `+570.6s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `offense` | status `running` | game_date `2023-09-16` | day `15/21`
+- `2026-03-26T18:34:31.909298+00:00` | `+598.0s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `pitching` | status `running` | game_date `2023-09-16` | day `15/21`
+- `2026-03-26T18:34:33.041628+00:00` | `+599.2s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `umpires` | status `running` | game_date `2023-09-16` | day `15/21`
+- `2026-03-26T18:34:33.130358+00:00` | `+599.2s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `complete` | status `running` | game_date `2023-09-16` | day `15/21`
+- `2026-03-26T18:34:33.131942+00:00` | `+599.2s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `prepare` | status `running` | game_date `2023-09-17` | day `16/21`
+- `2026-03-26T18:34:33.148260+00:00` | `+599.3s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `offense` | status `running` | game_date `2023-09-17` | day `16/21`
+- `2026-03-26T18:35:00.114015+00:00` | `+626.2s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `pitching` | status `running` | game_date `2023-09-17` | day `16/21`
+- `2026-03-26T18:35:01.139431+00:00` | `+627.2s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `umpires` | status `running` | game_date `2023-09-17` | day `16/21`
+- `2026-03-26T18:35:01.308922+00:00` | `+627.4s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `complete` | status `running` | game_date `2023-09-17` | day `16/21`
+- `2026-03-26T18:35:01.308922+00:00` | `+627.4s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `prepare` | status `running` | game_date `2023-09-18` | day `17/21`
+- `2026-03-26T18:35:01.326892+00:00` | `+627.4s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `offense` | status `running` | game_date `2023-09-18` | day `17/21`
+- `2026-03-26T18:35:13.781601+00:00` | `+639.9s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `pitching` | status `running` | game_date `2023-09-18` | day `17/21`
+- `2026-03-26T18:35:14.902699+00:00` | `+641.0s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `umpires` | status `running` | game_date `2023-09-18` | day `17/21`
+- `2026-03-26T18:35:15.002227+00:00` | `+641.1s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `complete` | status `running` | game_date `2023-09-18` | day `17/21`
+- `2026-03-26T18:35:15.002227+00:00` | `+641.1s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `prepare` | status `running` | game_date `2023-09-19` | day `18/21`
+- `2026-03-26T18:35:15.020843+00:00` | `+641.1s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `offense` | status `running` | game_date `2023-09-19` | day `18/21`
+- `2026-03-26T18:35:41.043234+00:00` | `+667.2s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `pitching` | status `running` | game_date `2023-09-19` | day `18/21`
+- `2026-03-26T18:35:42.127087+00:00` | `+668.2s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `umpires` | status `running` | game_date `2023-09-19` | day `18/21`
+- `2026-03-26T18:35:42.216197+00:00` | `+668.3s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `complete` | status `running` | game_date `2023-09-19` | day `18/21`
+- `2026-03-26T18:35:42.216197+00:00` | `+668.3s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `prepare` | status `running` | game_date `2023-09-20` | day `19/21`
+- `2026-03-26T18:35:42.232569+00:00` | `+668.3s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `offense` | status `running` | game_date `2023-09-20` | day `19/21`
+- `2026-03-26T18:36:09.391906+00:00` | `+695.5s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `pitching` | status `running` | game_date `2023-09-20` | day `19/21`
+- `2026-03-26T18:36:10.539791+00:00` | `+696.6s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `umpires` | status `running` | game_date `2023-09-20` | day `19/21`
+- `2026-03-26T18:36:10.630099+00:00` | `+696.7s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `complete` | status `running` | game_date `2023-09-20` | day `19/21`
+- `2026-03-26T18:36:10.630099+00:00` | `+696.7s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `prepare` | status `running` | game_date `2023-09-21` | day `20/21`
+- `2026-03-26T18:36:10.646919+00:00` | `+696.8s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `offense` | status `running` | game_date `2023-09-21` | day `20/21`
+- `2026-03-26T18:36:26.244172+00:00` | `+712.4s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `pitching` | status `running` | game_date `2023-09-21` | day `20/21`
+- `2026-03-26T18:36:27.170666+00:00` | `+713.3s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `umpires` | status `running` | game_date `2023-09-21` | day `20/21`
+- `2026-03-26T18:36:27.264455+00:00` | `+713.4s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `complete` | status `running` | game_date `2023-09-21` | day `20/21`
+- `2026-03-26T18:36:27.264961+00:00` | `+713.4s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `prepare` | status `running` | game_date `2023-09-22` | day `21/21`
+- `2026-03-26T18:36:27.281754+00:00` | `+713.4s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `offense` | status `running` | game_date `2023-09-22` | day `21/21`
+- `2026-03-26T18:36:47.472356+00:00` | `+733.6s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `pitching` | status `running` | game_date `2023-09-22` | day `21/21`
+- `2026-03-26T18:36:48.370087+00:00` | `+734.5s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `umpires` | status `running` | game_date `2023-09-22` | day `21/21`
+- `2026-03-26T18:36:48.457305+00:00` | `+734.6s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `complete` | status `running` | game_date `2023-09-22` | day `21/21`
+- `2026-03-26T18:36:48.458870+00:00` | `+734.6s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `complete` | status `complete` | game_date `n/a`
+- `2026-03-26T18:36:48.481538+00:00` | `+734.6s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `finalize` | status `loading_rows` | game_date `n/a`
+- `2026-03-26T18:36:48.732442+00:00` | `+734.8s` | chunk `43/61` | dates `2023-09-02..2023-09-22` | stage `complete` | status `complete` | game_date `n/a`
+- `2026-03-26T18:36:48.848571+00:00` | `+0.0s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `prepare` | status `starting` | game_date `n/a`
+- `2026-03-26T18:36:49.294264+00:00` | `+0.4s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `bullpen` | status `running` | game_date `n/a`
+- `2026-03-26T18:40:58.799288+00:00` | `+250.0s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `baselines` | status `running` | game_date `n/a`
+- `2026-03-26T18:41:02.333249+00:00` | `+253.5s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `defense` | status `running` | game_date `n/a`
+- `2026-03-26T18:41:02.334801+00:00` | `+253.5s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `defense` | status `running` | game_date `2025-04-10`
+- `2026-03-26T18:41:03.293449+00:00` | `+254.4s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `defense` | status `running` | game_date `2025-04-11`
+- `2026-03-26T18:41:03.308937+00:00` | `+254.5s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `defense` | status `running` | game_date `2025-04-12`
+- `2026-03-26T18:41:03.327420+00:00` | `+254.5s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `defense` | status `running` | game_date `2025-04-13`
+- `2026-03-26T18:41:03.342891+00:00` | `+254.5s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `defense` | status `running` | game_date `2025-04-14`
+- `2026-03-26T18:41:03.356145+00:00` | `+254.5s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `defense` | status `running` | game_date `2025-04-15`
+- `2026-03-26T18:41:03.373752+00:00` | `+254.5s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `defense` | status `running` | game_date `2025-04-16`
+- `2026-03-26T18:41:03.389365+00:00` | `+254.5s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `defense` | status `running` | game_date `2025-04-17`
+- `2026-03-26T18:41:03.406463+00:00` | `+254.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `defense` | status `running` | game_date `2025-04-18`
+- `2026-03-26T18:41:03.421704+00:00` | `+254.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `defense` | status `running` | game_date `2025-04-19`
+- `2026-03-26T18:41:03.439389+00:00` | `+254.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `defense` | status `running` | game_date `2025-04-20`
+- `2026-03-26T18:41:03.457870+00:00` | `+254.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `defense` | status `running` | game_date `2025-04-21`
+- `2026-03-26T18:41:03.473350+00:00` | `+254.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `defense` | status `running` | game_date `2025-04-22`
+- `2026-03-26T18:41:03.489704+00:00` | `+254.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `defense` | status `running` | game_date `2025-04-23`
+- `2026-03-26T18:41:03.504611+00:00` | `+254.7s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `defense` | status `running` | game_date `2025-04-24`
+- `2026-03-26T18:41:03.518948+00:00` | `+254.7s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `defense` | status `running` | game_date `2025-04-25`
+- `2026-03-26T18:41:03.534744+00:00` | `+254.7s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `defense` | status `running` | game_date `2025-04-26`
+- `2026-03-26T18:41:03.550220+00:00` | `+254.7s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `defense` | status `running` | game_date `2025-04-27`
+- `2026-03-26T18:41:03.567328+00:00` | `+254.7s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `defense` | status `running` | game_date `2025-04-28`
+- `2026-03-26T18:41:03.583663+00:00` | `+254.7s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `defense` | status `running` | game_date `2025-04-29`
+- `2026-03-26T18:41:03.600622+00:00` | `+254.8s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `defense` | status `running` | game_date `2025-04-30`
+- `2026-03-26T18:41:05.294506+00:00` | `+256.4s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `prepare` | status `running` | game_date `2025-04-10` | day `1/21`
+- `2026-03-26T18:41:05.309037+00:00` | `+256.5s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `offense` | status `running` | game_date `2025-04-10` | day `1/21`
+- `2026-03-26T18:41:12.394381+00:00` | `+263.5s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `pitching` | status `running` | game_date `2025-04-10` | day `1/21`
+- `2026-03-26T18:41:14.093679+00:00` | `+265.2s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `umpires` | status `running` | game_date `2025-04-10` | day `1/21`
+- `2026-03-26T18:41:14.257745+00:00` | `+265.4s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `complete` | status `running` | game_date `2025-04-10` | day `1/21`
+- `2026-03-26T18:41:14.257745+00:00` | `+265.4s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `prepare` | status `running` | game_date `2025-04-11` | day `2/21`
+- `2026-03-26T18:41:14.273954+00:00` | `+265.4s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `offense` | status `running` | game_date `2025-04-11` | day `2/21`
+- `2026-03-26T18:41:22.319186+00:00` | `+273.5s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `pitching` | status `running` | game_date `2025-04-11` | day `2/21`
+- `2026-03-26T18:41:23.051134+00:00` | `+274.2s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `umpires` | status `running` | game_date `2025-04-11` | day `2/21`
+- `2026-03-26T18:41:23.146074+00:00` | `+274.3s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `complete` | status `running` | game_date `2025-04-11` | day `2/21`
+- `2026-03-26T18:41:23.147666+00:00` | `+274.3s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `prepare` | status `running` | game_date `2025-04-12` | day `3/21`
+- `2026-03-26T18:41:23.163349+00:00` | `+274.3s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `offense` | status `running` | game_date `2025-04-12` | day `3/21`
+- `2026-03-26T18:41:39.453576+00:00` | `+290.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `pitching` | status `running` | game_date `2025-04-12` | day `3/21`
+- `2026-03-26T18:41:40.339229+00:00` | `+291.5s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `umpires` | status `running` | game_date `2025-04-12` | day `3/21`
+- `2026-03-26T18:41:40.438297+00:00` | `+291.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `complete` | status `running` | game_date `2025-04-12` | day `3/21`
+- `2026-03-26T18:41:40.439301+00:00` | `+291.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `prepare` | status `running` | game_date `2025-04-13` | day `4/21`
+- `2026-03-26T18:41:40.455680+00:00` | `+291.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `offense` | status `running` | game_date `2025-04-13` | day `4/21`
+- `2026-03-26T18:41:56.829592+00:00` | `+308.0s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `pitching` | status `running` | game_date `2025-04-13` | day `4/21`
+- `2026-03-26T18:41:57.751961+00:00` | `+308.9s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `umpires` | status `running` | game_date `2025-04-13` | day `4/21`
+- `2026-03-26T18:41:57.936711+00:00` | `+309.1s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `complete` | status `running` | game_date `2025-04-13` | day `4/21`
+- `2026-03-26T18:41:57.936711+00:00` | `+309.1s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `prepare` | status `running` | game_date `2025-04-14` | day `5/21`
+- `2026-03-26T18:41:57.953684+00:00` | `+309.1s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `offense` | status `running` | game_date `2025-04-14` | day `5/21`
+- `2026-03-26T18:42:07.642892+00:00` | `+318.8s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `pitching` | status `running` | game_date `2025-04-14` | day `5/21`
+- `2026-03-26T18:42:08.349743+00:00` | `+319.5s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `umpires` | status `running` | game_date `2025-04-14` | day `5/21`
+- `2026-03-26T18:42:08.448678+00:00` | `+319.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `complete` | status `running` | game_date `2025-04-14` | day `5/21`
+- `2026-03-26T18:42:08.448678+00:00` | `+319.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `prepare` | status `running` | game_date `2025-04-15` | day `6/21`
+- `2026-03-26T18:42:08.465028+00:00` | `+319.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `offense` | status `running` | game_date `2025-04-15` | day `6/21`
+- `2026-03-26T18:42:24.076686+00:00` | `+335.2s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `pitching` | status `running` | game_date `2025-04-15` | day `6/21`
+- `2026-03-26T18:42:24.924968+00:00` | `+336.1s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `umpires` | status `running` | game_date `2025-04-15` | day `6/21`
+- `2026-03-26T18:42:25.007056+00:00` | `+336.2s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `complete` | status `running` | game_date `2025-04-15` | day `6/21`
+- `2026-03-26T18:42:25.007570+00:00` | `+336.2s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `prepare` | status `running` | game_date `2025-04-16` | day `7/21`
+- `2026-03-26T18:42:25.020140+00:00` | `+336.2s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `offense` | status `running` | game_date `2025-04-16` | day `7/21`
+- `2026-03-26T18:42:39.079315+00:00` | `+350.2s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `pitching` | status `running` | game_date `2025-04-16` | day `7/21`
+- `2026-03-26T18:42:39.738155+00:00` | `+350.9s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `umpires` | status `running` | game_date `2025-04-16` | day `7/21`
+- `2026-03-26T18:42:39.801616+00:00` | `+351.0s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `complete` | status `running` | game_date `2025-04-16` | day `7/21`
+- `2026-03-26T18:42:39.801616+00:00` | `+351.0s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `prepare` | status `running` | game_date `2025-04-17` | day `8/21`
+- `2026-03-26T18:42:39.817461+00:00` | `+351.0s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `offense` | status `running` | game_date `2025-04-17` | day `8/21`
+- `2026-03-26T18:42:49.717981+00:00` | `+360.9s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `pitching` | status `running` | game_date `2025-04-17` | day `8/21`
+- `2026-03-26T18:42:50.333931+00:00` | `+361.5s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `umpires` | status `running` | game_date `2025-04-17` | day `8/21`
+- `2026-03-26T18:42:50.408425+00:00` | `+361.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `complete` | status `running` | game_date `2025-04-17` | day `8/21`
+- `2026-03-26T18:42:50.408954+00:00` | `+361.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `prepare` | status `running` | game_date `2025-04-18` | day `9/21`
+- `2026-03-26T18:42:50.419211+00:00` | `+361.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `offense` | status `running` | game_date `2025-04-18` | day `9/21`
+- `2026-03-26T18:43:01.642280+00:00` | `+372.8s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `pitching` | status `running` | game_date `2025-04-18` | day `9/21`
+- `2026-03-26T18:43:02.324304+00:00` | `+373.5s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `umpires` | status `running` | game_date `2025-04-18` | day `9/21`
+- `2026-03-26T18:43:02.415006+00:00` | `+373.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `complete` | status `running` | game_date `2025-04-18` | day `9/21`
+- `2026-03-26T18:43:02.415608+00:00` | `+373.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `prepare` | status `running` | game_date `2025-04-19` | day `10/21`
+- `2026-03-26T18:43:02.433587+00:00` | `+373.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `offense` | status `running` | game_date `2025-04-19` | day `10/21`
+- `2026-03-26T18:43:16.557292+00:00` | `+387.7s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `pitching` | status `running` | game_date `2025-04-19` | day `10/21`
+- `2026-03-26T18:43:17.350846+00:00` | `+388.5s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `umpires` | status `running` | game_date `2025-04-19` | day `10/21`
+- `2026-03-26T18:43:17.414116+00:00` | `+388.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `complete` | status `running` | game_date `2025-04-19` | day `10/21`
+- `2026-03-26T18:43:17.415674+00:00` | `+388.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `prepare` | status `running` | game_date `2025-04-20` | day `11/21`
+- `2026-03-26T18:43:17.425408+00:00` | `+388.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `offense` | status `running` | game_date `2025-04-20` | day `11/21`
+- `2026-03-26T18:43:31.730008+00:00` | `+402.9s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `pitching` | status `running` | game_date `2025-04-20` | day `11/21`
+- `2026-03-26T18:43:32.400092+00:00` | `+403.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `umpires` | status `running` | game_date `2025-04-20` | day `11/21`
+- `2026-03-26T18:43:32.487866+00:00` | `+403.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `complete` | status `running` | game_date `2025-04-20` | day `11/21`
+- `2026-03-26T18:43:32.487866+00:00` | `+403.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `prepare` | status `running` | game_date `2025-04-21` | day `12/21`
+- `2026-03-26T18:43:32.503849+00:00` | `+403.7s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `offense` | status `running` | game_date `2025-04-21` | day `12/21`
+- `2026-03-26T18:43:39.834634+00:00` | `+411.0s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `pitching` | status `running` | game_date `2025-04-21` | day `12/21`
+- `2026-03-26T18:43:40.384056+00:00` | `+411.5s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `umpires` | status `running` | game_date `2025-04-21` | day `12/21`
+- `2026-03-26T18:43:40.468444+00:00` | `+411.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `complete` | status `running` | game_date `2025-04-21` | day `12/21`
+- `2026-03-26T18:43:40.470113+00:00` | `+411.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `prepare` | status `running` | game_date `2025-04-22` | day `13/21`
+- `2026-03-26T18:43:40.482414+00:00` | `+411.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `offense` | status `running` | game_date `2025-04-22` | day `13/21`
+- `2026-03-26T18:43:53.172110+00:00` | `+424.3s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `pitching` | status `running` | game_date `2025-04-22` | day `13/21`
+- `2026-03-26T18:43:53.910714+00:00` | `+425.1s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `umpires` | status `running` | game_date `2025-04-22` | day `13/21`
+- `2026-03-26T18:43:54.000431+00:00` | `+425.2s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `complete` | status `running` | game_date `2025-04-22` | day `13/21`
+- `2026-03-26T18:43:54.002012+00:00` | `+425.2s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `prepare` | status `running` | game_date `2025-04-23` | day `14/21`
+- `2026-03-26T18:43:54.017505+00:00` | `+425.2s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `offense` | status `running` | game_date `2025-04-23` | day `14/21`
+- `2026-03-26T18:44:07.891980+00:00` | `+439.0s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `pitching` | status `running` | game_date `2025-04-23` | day `14/21`
+- `2026-03-26T18:44:08.648274+00:00` | `+439.8s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `umpires` | status `running` | game_date `2025-04-23` | day `14/21`
+- `2026-03-26T18:44:08.715824+00:00` | `+439.9s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `complete` | status `running` | game_date `2025-04-23` | day `14/21`
+- `2026-03-26T18:44:08.715824+00:00` | `+439.9s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `prepare` | status `running` | game_date `2025-04-24` | day `15/21`
+- `2026-03-26T18:44:08.732644+00:00` | `+439.9s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `offense` | status `running` | game_date `2025-04-24` | day `15/21`
+- `2026-03-26T18:44:17.444217+00:00` | `+448.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `pitching` | status `running` | game_date `2025-04-24` | day `15/21`
+- `2026-03-26T18:44:18.169699+00:00` | `+449.3s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `umpires` | status `running` | game_date `2025-04-24` | day `15/21`
+- `2026-03-26T18:44:18.261511+00:00` | `+449.4s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `complete` | status `running` | game_date `2025-04-24` | day `15/21`
+- `2026-03-26T18:44:18.261511+00:00` | `+449.4s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `prepare` | status `running` | game_date `2025-04-25` | day `16/21`
+- `2026-03-26T18:44:18.275948+00:00` | `+449.4s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `offense` | status `running` | game_date `2025-04-25` | day `16/21`
+- `2026-03-26T18:44:26.200691+00:00` | `+457.4s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `pitching` | status `running` | game_date `2025-04-25` | day `16/21`
+- `2026-03-26T18:44:26.832318+00:00` | `+458.0s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `umpires` | status `running` | game_date `2025-04-25` | day `16/21`
+- `2026-03-26T18:44:26.907041+00:00` | `+458.1s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `complete` | status `running` | game_date `2025-04-25` | day `16/21`
+- `2026-03-26T18:44:26.907041+00:00` | `+458.1s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `prepare` | status `running` | game_date `2025-04-26` | day `17/21`
+- `2026-03-26T18:44:26.919242+00:00` | `+458.1s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `offense` | status `running` | game_date `2025-04-26` | day `17/21`
+- `2026-03-26T18:44:42.246359+00:00` | `+473.4s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `pitching` | status `running` | game_date `2025-04-26` | day `17/21`
+- `2026-03-26T18:44:43.181238+00:00` | `+474.3s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `umpires` | status `running` | game_date `2025-04-26` | day `17/21`
+- `2026-03-26T18:44:43.283616+00:00` | `+474.4s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `complete` | status `running` | game_date `2025-04-26` | day `17/21`
+- `2026-03-26T18:44:43.284962+00:00` | `+474.4s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `prepare` | status `running` | game_date `2025-04-27` | day `18/21`
+- `2026-03-26T18:44:43.300066+00:00` | `+474.5s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `offense` | status `running` | game_date `2025-04-27` | day `18/21`
+- `2026-03-26T18:44:59.064181+00:00` | `+490.2s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `pitching` | status `running` | game_date `2025-04-27` | day `18/21`
+- `2026-03-26T18:44:59.985593+00:00` | `+491.1s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `umpires` | status `running` | game_date `2025-04-27` | day `18/21`
+- `2026-03-26T18:45:00.075939+00:00` | `+491.2s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `complete` | status `running` | game_date `2025-04-27` | day `18/21`
+- `2026-03-26T18:45:00.075939+00:00` | `+491.2s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `prepare` | status `running` | game_date `2025-04-28` | day `19/21`
+- `2026-03-26T18:45:00.093177+00:00` | `+491.2s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `offense` | status `running` | game_date `2025-04-28` | day `19/21`
+- `2026-03-26T18:45:04.999393+00:00` | `+496.2s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `pitching` | status `running` | game_date `2025-04-28` | day `19/21`
+- `2026-03-26T18:45:05.491482+00:00` | `+496.6s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `umpires` | status `running` | game_date `2025-04-28` | day `19/21`
+- `2026-03-26T18:45:05.564430+00:00` | `+496.7s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `complete` | status `running` | game_date `2025-04-28` | day `19/21`
+- `2026-03-26T18:45:05.566014+00:00` | `+496.7s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `prepare` | status `running` | game_date `2025-04-29` | day `20/21`
+- `2026-03-26T18:45:05.578082+00:00` | `+496.7s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `offense` | status `running` | game_date `2025-04-29` | day `20/21`
+- `2026-03-26T18:45:19.527823+00:00` | `+510.7s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `pitching` | status `running` | game_date `2025-04-29` | day `20/21`
+- `2026-03-26T18:45:20.347542+00:00` | `+511.5s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `umpires` | status `running` | game_date `2025-04-29` | day `20/21`
+- `2026-03-26T18:45:20.521019+00:00` | `+511.7s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `complete` | status `running` | game_date `2025-04-29` | day `20/21`
+- `2026-03-26T18:45:20.521019+00:00` | `+511.7s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `prepare` | status `running` | game_date `2025-04-30` | day `21/21`
+- `2026-03-26T18:45:20.537998+00:00` | `+511.7s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `offense` | status `running` | game_date `2025-04-30` | day `21/21`
+- `2026-03-26T18:45:38.034662+00:00` | `+529.2s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `pitching` | status `running` | game_date `2025-04-30` | day `21/21`
+- `2026-03-26T18:45:38.947873+00:00` | `+530.1s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `umpires` | status `running` | game_date `2025-04-30` | day `21/21`
+- `2026-03-26T18:45:39.043559+00:00` | `+530.2s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `complete` | status `running` | game_date `2025-04-30` | day `21/21`
+- `2026-03-26T18:45:39.043559+00:00` | `+530.2s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `complete` | status `complete` | game_date `n/a`
+- `2026-03-26T18:45:39.051249+00:00` | `+530.2s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `finalize` | status `loading_rows` | game_date `n/a`
+- `2026-03-26T18:45:39.294059+00:00` | `+530.4s` | chunk `54/61` | dates `2025-04-10..2025-04-30` | stage `complete` | status `complete` | game_date `n/a`
