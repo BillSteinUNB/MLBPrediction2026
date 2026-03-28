@@ -1,0 +1,16 @@
+Traceback (most recent call last):
+  File "C:\Users\bills\Documents\Personal Code\MLBPrediction2026\AutoResearch\train.py", line 17, in <module>
+    import pandas as pd
+  File "C:\Users\bills\Documents\Personal Code\MLBPrediction2026\.venv\Lib\site-packages\pandas\__init__.py", line 34, in <module>
+    from pandas.compat import (
+  File "C:\Users\bills\Documents\Personal Code\MLBPrediction2026\.venv\Lib\site-packages\pandas\compat\__init__.py", line 28, in <module>
+    from pandas.compat.pyarrow import (
+  File "C:\Users\bills\Documents\Personal Code\MLBPrediction2026\.venv\Lib\site-packages\pandas\compat\pyarrow.py", line 12, in <module>
+    import pyarrow as pa
+  File "C:\Users\bills\Documents\Personal Code\MLBPrediction2026\.venv\Lib\site-packages\pyarrow\__init__.py", line 71, in <module>
+    from pyarrow.lib import (BuildInfo, CppBuildInfo, RuntimeInfo, set_timezone_db_path,
+  File "<stringsource>", line 23, in init pyarrow.lib
+  File "C:\Users\bills\Documents\Personal Code\MLBPrediction2026\.uv-python\cpython-3.11.14-windows-x86_64-none\Lib\enum.py", line 688, in __call__
+    def __call__(cls, value, names=None, *, module=None, qualname=None, type=None, start=1, boundary=None):
+
+KeyboardInterrupt

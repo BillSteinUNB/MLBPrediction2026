@@ -46,8 +46,8 @@ MAX_FEATURES = 80
 SELECTOR_TYPE = "pearson"
 BUCKET_QUOTAS = [80, 0, 0, 0]
 EXCLUDE_PATTERNS: list[str] = []
-FORCE_INCLUDE_PATTERNS: list[str] = ["*_7g"]
-FORCED_DELTA_COUNT = 4
+FORCE_INCLUDE_PATTERNS: list[str] = ["*_7g", "*_7s", "*_delta_7v30g"]
+FORCED_DELTA_COUNT = 14
 TRIALS = 120
 FOLDS = 3
 # AGENT_CONFIG_END
@@ -234,6 +234,7 @@ def apply_training_overrides(config: EffectiveTrainingConfig) -> Iterator[None]:
             target_column: str,
             candidate_feature_columns: Sequence[str],
             max_feature_count: int = rct.DEFAULT_RUN_COUNT_MAX_FEATURE_COUNT,
+            forced_delta_count: int = rct.DEFAULT_RUN_COUNT_FORCED_DELTA_FEATURE_COUNT,
         ) -> rct.RunCountFeatureSelectionResult:
             if not config.force_include_patterns:
                 return selector(
@@ -241,12 +242,14 @@ def apply_training_overrides(config: EffectiveTrainingConfig) -> Iterator[None]:
                     target_column=target_column,
                     candidate_feature_columns=candidate_feature_columns,
                     max_feature_count=max_feature_count,
+                    forced_delta_count=forced_delta_count,
                 )
             return _select_flat_with_force_includes(
                 dataframe,
                 target_column=target_column,
                 candidate_feature_columns=candidate_feature_columns,
                 max_feature_count=max_feature_count,
+                forced_delta_count=forced_delta_count,
                 force_include_patterns=config.force_include_patterns,
             )
 
@@ -311,20 +314,29 @@ def _select_flat_with_force_includes(
     target_column: str,
     candidate_feature_columns: Sequence[str],
     max_feature_count: int,
+    forced_delta_count: int,
     force_include_patterns: Sequence[str],
 ) -> rct.RunCountFeatureSelectionResult:
+    base_result = rct._select_run_count_feature_columns_flat(
+        dataframe,
+        target_column=target_column,
+        candidate_feature_columns=candidate_feature_columns,
+        max_feature_count=max_feature_count,
+        forced_delta_count=forced_delta_count,
+    )
     scored = rct._score_run_count_candidate_features(
         dataframe,
         target_column=target_column,
         candidate_feature_columns=candidate_feature_columns,
     )
-    forced = [
+    forced_pattern_features = [
         feature_name
         for _, feature_name in scored
         if _matches_any_pattern(feature_name, force_include_patterns)
     ]
-    selected = _ordered_unique([*forced, *(feature_name for _, feature_name in scored)])[
-        :max_feature_count
+    selected = _ordered_unique([*forced_pattern_features, *base_result.feature_columns])[:max_feature_count]
+    forced_delta_features = [
+        feature_name for feature_name in selected if rct._resolve_run_count_feature_bucket(feature_name) == "delta"
     ]
     selected_set = set(selected)
     omitted = [
@@ -337,6 +349,7 @@ def _select_flat_with_force_includes(
         bucket_counts={"flat": len(selected)},
         bucket_targets={"flat": max_feature_count},
         selected_features_by_bucket={"flat": sorted(selected)},
+        forced_delta_features=sorted(forced_delta_features),
         omitted_top_features_by_bucket={"flat": omitted},
         family_decisions=[],
     )
