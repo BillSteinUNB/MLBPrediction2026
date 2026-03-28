@@ -1232,8 +1232,11 @@ def plan_next_experiment(
         except Exception as exc:
             if llm_client.require_llm():
                 raise RuntimeError(f"LLM planning failed and AUTORESEARCH_REQUIRE_LLM is enabled: {exc}") from exc
+            heuristic_history = [
+                row for row in history_rows if str(row["status"]) in {"succeeded", "running"}
+            ]
             heuristic_decision = plan_next_experiment_heuristic(
-                history_rows,
+                heuristic_history,
                 program_text=program_text,
                 exploration_mode=exploration_mode,
             )
