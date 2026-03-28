@@ -233,6 +233,64 @@ Canonical first delta-forcing experiment:
   --forced-delta-count 12
 ```
 
+### Experiment stacking for sequential runs
+
+When the user wants to run multiple manual experiments back-to-back, prefer a single PowerShell loop that:
+
+- defines one shared common argument block
+- defines a small list of per-run overrides like experiment name and forced-delta count
+- runs each experiment sequentially
+- stops immediately on the first failure
+
+This is the preferred manual batching pattern for the canonical train script. Do not invent a new Python orchestrator for this unless the user explicitly asks for one.
+
+Canonical example:
+
+```powershell
+$common = @(
+  "scripts\train_run_count.py",
+  "--profile", "flat-fast",
+  "--training-data", "data\training\ParquetDefault.parquet",
+  "--start", "2018",
+  "--end", "2025",
+  "--holdout", "2025",
+  "--XGBWork", "4",
+  "--OptunaWork", "3",
+  "--Iterations", "120",
+  "--Folds", "3",
+  "--feature-selection-mode", "flat",
+  "--blend-mode", "xgb_only",
+  "--cv-aggregation-mode", "mean"
+)
+
+$runs = @(
+  @{ Name = "2026-away-flat-xgbonly-forceddelta8-fast-120x3-cc10";  ForcedDelta = "8"  }
+  @{ Name = "2026-away-flat-xgbonly-forceddelta10-fast-120x3-cc10"; ForcedDelta = "10" }
+  @{ Name = "2026-away-flat-xgbonly-forceddelta14-fast-120x3-cc10"; ForcedDelta = "14" }
+)
+
+foreach ($run in $runs) {
+  Write-Host ""
+  Write-Host "Running $($run.Name) ..." -ForegroundColor Green
+
+  & .\.venv\Scripts\python.exe `
+    $common `
+    --experiment $run.Name `
+    --forced-delta-count $run.ForcedDelta
+
+  if ($LASTEXITCODE -ne 0) {
+    throw "Run failed: $($run.Name)"
+  }
+}
+```
+
+How future agents should use this:
+
+- change only the values inside `$runs` for a small batch comparison
+- keep the shared block identical across all runs unless the user explicitly wants a second axis changed
+- keep batch comparisons apples-to-apples
+- do not mix selector mode, CV mode, blend mode, season range, and search budget changes all in one batch unless the user explicitly wants a broad sweep
+
 ### Important command-format preference
 
 When giving multi-line commands, format them with **PowerShell backtick continuation**. The user explicitly prefers this and may be pasting commands directly.
