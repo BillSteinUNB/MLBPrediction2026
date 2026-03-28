@@ -42,12 +42,12 @@ LIGHTGBM_PARAM_MODE = "derived"
 EXPERIMENT_PREFIX = "autoresearch-away-runs"
 
 # AGENT_CONFIG_START
-MAX_FEATURES = 88
+MAX_FEATURES = 80
 SELECTOR_TYPE = "pearson"
-BUCKET_QUOTAS = [88, 0, 0, 0]
+BUCKET_QUOTAS = [80, 0, 0, 0]
 EXCLUDE_PATTERNS: list[str] = []
-FORCE_INCLUDE_PATTERNS: list[str] = ["*_7g", "*_7s", "*_delta_7v30g"]
-FORCED_DELTA_COUNT = 14
+FORCE_INCLUDE_PATTERNS: list[str] = ["*_7g", "*_7s", "*_delta_7v30g", "*_delta_7v30s"]
+FORCED_DELTA_COUNT = 8
 TRIALS = 120
 FOLDS = 3
 # AGENT_CONFIG_END
@@ -250,6 +250,7 @@ def apply_training_overrides(config: EffectiveTrainingConfig) -> Iterator[None]:
                 candidate_feature_columns=candidate_feature_columns,
                 max_feature_count=max_feature_count,
                 forced_delta_count=forced_delta_count,
+                base_selector=selector,
                 force_include_patterns=config.force_include_patterns,
             )
 
@@ -315,9 +316,10 @@ def _select_flat_with_force_includes(
     candidate_feature_columns: Sequence[str],
     max_feature_count: int,
     forced_delta_count: int,
+    base_selector,
     force_include_patterns: Sequence[str],
 ) -> rct.RunCountFeatureSelectionResult:
-    base_result = rct._select_run_count_feature_columns_flat(
+    base_result = base_selector(
         dataframe,
         target_column=target_column,
         candidate_feature_columns=candidate_feature_columns,

@@ -109,6 +109,15 @@ def prepare_git_checkpoint(*, reports_dir: str | Path = autoresearch_agent.DEFAU
     push_branch = _run_git_command("push", "-u", "origin", branch_name)
     if push_branch.returncode != 0:
         raise RuntimeError(push_branch.stderr.strip() or push_branch.stdout.strip() or "git push branch failed")
+    autoresearch_agent.append_debug_trace(
+        event_type="git_checkpoint",
+        payload={
+            "branch_before": branch_before.stdout.strip(),
+            "status_before": status_before.stdout.strip(),
+            "commit_message": commit_message,
+            "branch_name": branch_name,
+        },
+    )
 
     autoresearch_agent.append_nightly_log(
         event_type="git_checkpoint",
@@ -275,6 +284,10 @@ def run_launcher(
     )
     if planner_self_check:
         payload = autoresearch_agent.run_planner_self_check()
+        autoresearch_agent.append_debug_trace(
+            event_type="planner_self_check_passed",
+            payload={"session_id": session_id, **payload},
+        )
         autoresearch_agent.append_nightly_log(
             event_type="planner_self_check",
             heading="Planner self-check passed",
@@ -329,6 +342,10 @@ def run_launcher(
                         sort_keys=True,
                     )
                 )
+                autoresearch_agent.append_debug_trace(
+                    event_type="issue_validation_completed",
+                    payload={"session_id": session_id, **validation_payload},
+                )
             now = datetime.now(UTC)
             if should_start_fast_run(
                 now=now,
@@ -360,6 +377,10 @@ def run_launcher(
                         sort_keys=True,
                     )
                 )
+                autoresearch_agent.append_debug_trace(
+                    event_type="fast_experiment_completed",
+                    payload={"session_id": session_id, **payload},
+                )
                 autoresearch_agent.append_nightly_log(
                     event_type="fast_experiment",
                     heading="Fast experiment completed",
@@ -386,6 +407,10 @@ def run_launcher(
                 indent=2,
                 sort_keys=True,
             )
+        )
+        autoresearch_agent.append_debug_trace(
+            event_type="launcher_interrupted",
+            payload={"session_id": session_id},
         )
         autoresearch_agent.append_nightly_log(
             event_type="launcher_interrupted",
@@ -423,6 +448,10 @@ def run_launcher(
                 indent=2,
                 sort_keys=True,
             )
+        )
+        autoresearch_agent.append_debug_trace(
+            event_type="full_experiment_completed",
+            payload={"session_id": session_id, **payload, "session_summary": summary_payload},
         )
         autoresearch_agent.append_nightly_log(
             event_type="full_experiment",
@@ -476,6 +505,10 @@ def run_launcher(
             f"status: `{summary['status']}`",
             f"summary_md_path: `{summary['summary_md_path']}`",
         ],
+    )
+    autoresearch_agent.append_debug_trace(
+        event_type="session_completed",
+        payload={"session_id": session_id, **summary},
     )
     return summary
 

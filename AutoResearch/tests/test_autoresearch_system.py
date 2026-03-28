@@ -103,12 +103,12 @@ def test_plan_next_experiment_uses_llm_when_configured(monkeypatch) -> None:
             model="custom:Test-Model-0",
             text=json.dumps(
                 {
-                    "hypothesis": "Flat Pearson 100-feature selection may recover the Run 3 signal.",
+                    "hypothesis": "Flat Pearson 72-feature selection may improve local refinement.",
                     "reasoning": "The prior winner suggests flat ranking is underexplored.",
                     "config": {
-                        "max_features": 100,
+                        "max_features": 72,
                         "selector_type": "pearson",
-                        "bucket_quotas": [24, 28, 12, 16],
+                        "bucket_quotas": [72, 0, 0, 0],
                         "exclude_patterns": [],
                         "force_include_patterns": [],
                         "trials": 50,
@@ -124,8 +124,58 @@ def test_plan_next_experiment_uses_llm_when_configured(monkeypatch) -> None:
 
     assert decision.planner_type == "llm"
     assert decision.planner_model == "droid:custom:Test-Model-0"
-    assert decision.proposal.max_features == 100
+    assert decision.proposal.max_features == 72
     assert decision.proposal.selector_type == "pearson"
+
+
+def test_planner_prompt_and_validation_follow_current_max_feature_surface(monkeypatch) -> None:
+    prompt_text = agent._planner_user_prompt(
+        program_text="baseline",
+        history_rows=[],
+        session_context=None,
+        exploration_mode="fast",
+    )
+
+    assert "[72, 80, 88]" in prompt_text
+
+    monkeypatch.setattr(
+        llm_client,
+        "load_llm_config",
+        lambda: llm_client.LLMConfig(
+            provider="droid",
+            model="custom:Test-Model-0",
+            command="droid",
+            reasoning_effort="medium",
+        ),
+    )
+    monkeypatch.setattr(
+        llm_client,
+        "generate_text",
+        lambda **_kwargs: llm_client.LLMTextResponse(
+            provider="droid",
+            model="custom:Test-Model-0",
+            text=json.dumps(
+                {
+                    "hypothesis": "Use the stage-2 local refinement width.",
+                    "reasoning": "72 features is part of the current forced-delta local search surface.",
+                    "config": {
+                        "max_features": 72,
+                        "selector_type": "pearson",
+                        "bucket_quotas": [72, 0, 0, 0],
+                        "exclude_patterns": [],
+                        "force_include_patterns": [],
+                        "trials": 50,
+                        "folds": 3,
+                    },
+                }
+            ),
+            raw_payload={},
+        ),
+    )
+
+    decision = agent.plan_next_experiment([], program_text="baseline")
+
+    assert decision.proposal.max_features == 72
 
 
 def test_plan_next_experiment_falls_back_when_llm_response_is_invalid(monkeypatch) -> None:

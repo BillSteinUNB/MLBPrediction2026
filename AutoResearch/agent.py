@@ -28,6 +28,7 @@ DEFAULT_PROGRAM_PATH = AUTORESEARCH_ROOT / "program.md"
 DEFAULT_TRAIN_PATH = AUTORESEARCH_ROOT / "train.py"
 DEFAULT_LOG_DIR = AUTORESEARCH_ROOT / "logs" / "autoresearch"
 DEFAULT_REPORTS_DIR = AUTORESEARCH_ROOT / "reports"
+DEFAULT_DEBUG_LOG_PATH = DEFAULT_REPORTS_DIR / "debug_trace.jsonl"
 _FORCE_7G_PATTERNS = ["*_7g", "*_7s", "*_delta_7v30g", "*_delta_7v30s"]
 
 
@@ -71,6 +72,29 @@ class SuspectedIssue:
     body: str
     metadata: dict[str, Any]
     created_at: str
+
+
+def append_debug_trace(
+    *,
+    event_type: str,
+    payload: dict[str, Any],
+    debug_log_path: str | Path = DEFAULT_DEBUG_LOG_PATH,
+) -> Path:
+    resolved_path = Path(debug_log_path)
+    resolved_path.parent.mkdir(parents=True, exist_ok=True)
+    with resolved_path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "event_type": event_type,
+                    "payload": payload,
+                },
+                sort_keys=True,
+            )
+            + "\n"
+        )
+    return resolved_path
 
 
 def ensure_experiment_db(db_path: str | Path = DEFAULT_DB_PATH) -> Path:
@@ -812,6 +836,13 @@ def _planner_user_prompt(
 ) -> str:
     history_digest = _history_digest(history_rows)
     expected_trials, expected_folds = _expected_trials_and_folds(exploration_mode)
+    allowed_proposals = [
+        proposal
+        for proposal in build_proposal_catalog(program_text)
+        if proposal.trials == expected_trials and proposal.folds == expected_folds
+    ]
+    allowed_max_features = sorted({proposal.max_features for proposal in allowed_proposals})
+    example_proposal = allowed_proposals[0] if allowed_proposals else None
     return "\n".join(
         [
             "Research instructions:",
@@ -821,7 +852,7 @@ def _planner_user_prompt(
             "- Only edit the AGENT_CONFIG block in train.py.",
             f"- Exploration mode for this session is `{exploration_mode}`.",
             f"- This session must use trials={expected_trials} and folds={expected_folds}.",
-            "- max_features must be one of [60, 80, 100, 120].",
+            f"- max_features must be one of {allowed_max_features}.",
             "- selector_type must be one of ['pearson', 'bucketed', 'ablation'].",
             "- bucket_quotas must contain 3 or 4 non-negative integers with total <= max_features.",
             "- exclude_patterns and force_include_patterns must be short lists of feature name patterns.",
@@ -841,13 +872,34 @@ def _planner_user_prompt(
             '  "hypothesis": "one concise sentence",',
             '  "reasoning": "brief explanation of why this experiment should improve accuracy",',
             '  "config": {',
-            '    "max_features": 80,',
-            '    "selector_type": "pearson",',
-            '    "bucket_quotas": [24, 28, 12, 16],',
-            '    "exclude_patterns": [],',
-            '    "force_include_patterns": [],',
-            '    "trials": 50,',
-            '    "folds": 3',
+            f'    "max_features": {80 if example_proposal is None else example_proposal.max_features},',
+            (
+                '    "selector_type": "pearson",'
+                if example_proposal is None
+                else f'    "selector_type": "{example_proposal.selector_type}",'
+            ),
+            (
+                '    "bucket_quotas": [80, 0, 0, 0],'
+                if example_proposal is None
+                else f'    "bucket_quotas": {json.dumps(example_proposal.bucket_quotas)},'
+            ),
+            (
+                '    "exclude_patterns": [],'
+                if example_proposal is None
+                else f'    "exclude_patterns": {json.dumps(example_proposal.exclude_patterns)},'
+            ),
+            (
+                '    "force_include_patterns": [],'
+                if example_proposal is None
+                else f'    "force_include_patterns": {json.dumps(example_proposal.force_include_patterns)},'
+            ),
+            (
+                '    "forced_delta_count": 8,'
+                if example_proposal is None
+                else f'    "forced_delta_count": {example_proposal.forced_delta_count},'
+            ),
+            f'    "trials": {expected_trials},',
+            f'    "folds": {expected_folds}',
             "  }",
             "}",
         ]
@@ -865,11 +917,20 @@ def _coerce_pattern_list(value: Any) -> list[str]:
     return patterns
 
 
-def _proposal_from_payload(payload: dict[str, Any]) -> ExperimentProposal:
+def _proposal_from_payload(
+    payload: dict[str, Any],
+    *,
+    allowed_max_features: Sequence[int],
+) -> ExperimentProposal:
     config = dict(payload["config"])
     max_features = int(config["max_features"])
-    if max_features not in {60, 80, 100, 120}:
-        raise ValueError("max_features must be one of 60, 80, 100, 120")
+    normalized_allowed_max_features = sorted({int(value) for value in allowed_max_features})
+    if not normalized_allowed_max_features:
+        raise ValueError("No allowed max_features values were configured for the planner")
+    if max_features not in normalized_allowed_max_features:
+        raise ValueError(
+            f"max_features must be one of {', '.join(str(value) for value in normalized_allowed_max_features)}"
+        )
 
     selector_type = str(config["selector_type"]).strip().lower()
     if selector_type not in {"pearson", "bucketed", "ablation"}:
@@ -907,6 +968,14 @@ def _plan_next_experiment_with_llm(
     session_context: dict[str, Any] | None,
     exploration_mode: str,
 ) -> PlannerDecision:
+    expected_trials, expected_folds = _expected_trials_and_folds(exploration_mode)
+    allowed_max_features = sorted(
+        {
+            proposal.max_features
+            for proposal in build_proposal_catalog(program_text)
+            if proposal.trials == expected_trials and proposal.folds == expected_folds
+        }
+    )
     prompt_text = _planner_user_prompt(
         program_text=program_text,
         history_rows=history_rows,
@@ -921,10 +990,9 @@ def _plan_next_experiment_with_llm(
     )
     payload = json.loads(_json_code_block_payload(response.text))
     proposal = _proposal_for_exploration_mode(
-        _proposal_from_payload(payload),
+        _proposal_from_payload(payload, allowed_max_features=allowed_max_features),
         exploration_mode,
     )
-    expected_trials, expected_folds = _expected_trials_and_folds(exploration_mode)
     if proposal.trials != expected_trials or proposal.folds != expected_folds:
         raise ValueError(
             f"Planner must use exactly {expected_trials} trials and {expected_folds} folds "
@@ -1230,6 +1298,15 @@ def plan_next_experiment(
                 exploration_mode=exploration_mode,
             )
         except Exception as exc:
+            append_debug_trace(
+                event_type="planner_failure",
+                payload={
+                    "error": repr(exc),
+                    "exploration_mode": exploration_mode,
+                    "history_count": len(history_rows),
+                    "session_context_present": session_context is not None,
+                },
+            )
             if llm_client.require_llm():
                 raise RuntimeError(f"LLM planning failed and AUTORESEARCH_REQUIRE_LLM is enabled: {exc}") from exc
             heuristic_history = [
@@ -1437,6 +1514,16 @@ def maybe_record_experiment_notes(
 ) -> list[int]:
     note_ids: list[int] = []
     if status != "succeeded" or result_payload is None:
+        append_debug_trace(
+            event_type="experiment_failure",
+            payload={
+                "experiment_id": experiment_id,
+                "session_id": session_id,
+                "exploration_mode": exploration_mode,
+                "error_message": error_message,
+                "proposal": proposal_to_snapshot(proposal),
+            },
+        )
         failure_metadata = {
             "exploration_mode": exploration_mode,
             "selector_type": proposal.selector_type,
@@ -1595,6 +1682,14 @@ def maybe_record_experiment_notes(
         )
         diagnostic_suspicious.append("negative holdout_r2 pushed the run into a likely bad region")
     if diagnostics is not None:
+        append_debug_trace(
+            event_type="experiment_diagnostics",
+            payload={
+                "experiment_id": experiment_id,
+                "session_id": session_id,
+                "diagnostics": diagnostics,
+            },
+        )
         expected_delta = dict(diagnostics.get("expected_delta_columns") or {})
         fill_health = dict(diagnostics.get("selected_feature_fill_health") or {})
         holdout_fill = dict(fill_health.get("holdout") or {})
