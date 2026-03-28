@@ -62,3 +62,38 @@ TypeError: apply_training_overrides.<locals>._wrap_flat_selector.<locals>._wrapp
 - experiment_name: `autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T023024Z`
 - note_ids: `[1]`
 
+## 2026-03-28T02:37:19.653302+00:00 - Startup git checkpoint
+- event_type: `git_checkpoint`
+- branch_before: `AutoResearch-2026-03-28`
+- status_before: `M AutoResearch/agent.py
+ M AutoResearch/experiments.db
+ M AutoResearch/train.py
+?? AutoResearch/logs/
+?? AutoResearch/reports/`
+- checkpoint_commit: `Start of auto research 2026-03-28`
+- night_branch: `AutoResearch-2026-03-28`
+
+## 2026-03-28T02:40:54.038835+00:00 - AutoResearch session started
+- event_type: `session_start`
+- session_id: `2`
+- exploration_mode: `fast`
+- duration_hours: `0`
+- run_full_at_end: `False`
+- git_branch: `AutoResearch-2026-03-28`
+
+## 2026-03-28T02:41:16.697110+00:00 - Planner self-check passed
+- event_type: `planner_self_check`
+- session_id: `2`
+- provider: `droid`
+- model: `custom:GLM-5.1-(Z.AI-Coding)-4`
+
+## 2026-03-28T02:43:53.371317+00:00 - Launcher interrupted
+- event_type: `launcher_interrupted`
+- session_id: `2`
+
+## 2026-03-28T02:43:53.378271+00:00 - Session completed
+- event_type: `session_completed`
+- session_id: `2`
+- status: `interrupted`
+- summary_md_path: `C:\Users\bills\Documents\Personal Code\MLBPrediction2026\AutoResearch\reports\sessions\session_2_2026-03-28T024054.035837+0000.md`
+

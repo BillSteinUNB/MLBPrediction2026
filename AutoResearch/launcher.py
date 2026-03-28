@@ -7,6 +7,10 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
+from rich.console import Console
+from rich.live import Live
+from rich.table import Table
 
 AUTORESEARCH_ROOT = Path(__file__).resolve().parent
 REPO_ROOT = AUTORESEARCH_ROOT.parent
@@ -21,6 +25,45 @@ DEFAULT_PROGRAM_PATH = AUTORESEARCH_ROOT / "program.md"
 DEFAULT_TRAIN_PATH = AUTORESEARCH_ROOT / "train.py"
 DEFAULT_MIN_FAST_WINDOW_MINUTES = 30
 DEFAULT_POLL_INTERVAL_SECONDS = 15
+_CONSOLE = Console()
+
+
+def _render_run_table(rows: list[dict[str, object]], current_status: str) -> Table:
+    table = Table(title="AutoResearch Overnight Progress")
+    table.add_column("Run")
+    table.add_column("Kind")
+    table.add_column("Elapsed")
+    table.add_column("Status")
+    for row in rows:
+        table.add_row(str(row["run_number"]), str(row["kind"]), str(row["elapsed"]), str(row["status"]))
+    table.caption = current_status
+    return table
+
+
+def _run_with_live_timer(
+    *,
+    rows: list[dict[str, object]],
+    kind: str,
+    action,
+):
+    run_number = len(rows) + 1
+    row = {"run_number": run_number, "kind": kind, "elapsed": "00:00", "status": "running"}
+    rows.append(row)
+    started = time.monotonic()
+    with Live(_render_run_table(rows, f"{kind} {run_number} running"), console=_CONSOLE, refresh_per_second=2) as live:
+        while True:
+            if hasattr(action, "done") and action.done():
+                break
+            elapsed_seconds = int(time.monotonic() - started)
+            row["elapsed"] = f"{elapsed_seconds // 60:02d}:{elapsed_seconds % 60:02d}"
+            live.update(_render_run_table(rows, f"{kind} {run_number} running"))
+            time.sleep(0.5)
+        payload = action.result()
+        elapsed_seconds = int(time.monotonic() - started)
+        row["elapsed"] = f"{elapsed_seconds // 60:02d}:{elapsed_seconds % 60:02d}"
+        row["status"] = str(payload.get("status", "completed"))
+        live.update(_render_run_table(rows, f"{kind} {run_number} finished"))
+    return payload
 
 
 def _run_git_command(*args: str) -> subprocess.CompletedProcess[str]:
@@ -254,6 +297,8 @@ def run_launcher(
         )
 
     interrupted = False
+    run_rows: list[dict[str, object]] = []
+    executor = ThreadPoolExecutor(max_workers=1)
     try:
         while True:
             pending_issues = autoresearch_agent.pending_suspected_issues(
@@ -261,11 +306,17 @@ def run_launcher(
                 session_id=session_id,
             )
             if pending_issues:
-                validation_payload = autoresearch_agent._run_validation_retest(
+                future = executor.submit(
+                    autoresearch_agent._run_validation_retest,
                     issue=pending_issues[0],
                     db_path=db_path,
                     train_path=train_path,
                     session_id=session_id,
+                )
+                validation_payload = _run_with_live_timer(
+                    rows=run_rows,
+                    kind="validation",
+                    action=future,
                 )
                 print(
                     json.dumps(
@@ -284,12 +335,18 @@ def run_launcher(
                 stop_at=stop_at,
                 min_fast_window_minutes=min_fast_window_minutes,
             ):
-                payload = autoresearch_agent.run_fast_once(
+                future = executor.submit(
+                    autoresearch_agent.run_fast_once,
                     db_path=db_path,
                     program_path=program_path,
                     train_path=train_path,
                     exploration_mode=session_config.exploration_mode,
                     session_id=session_id,
+                )
+                payload = _run_with_live_timer(
+                    rows=run_rows,
+                    kind="fast",
+                    action=future,
                 )
                 print(
                     json.dumps(
@@ -337,11 +394,17 @@ def run_launcher(
         )
 
     if session_config.run_full_at_end:
-        payload = autoresearch_agent.run_best_full(
+        future = executor.submit(
+            autoresearch_agent.run_best_full,
             db_path=db_path,
             program_path=program_path,
             train_path=train_path,
             session_id=session_id,
+        )
+        payload = _run_with_live_timer(
+            rows=run_rows,
+            kind="full",
+            action=future,
         )
         summary_payload = _session_summary(
             db_path=db_path,
