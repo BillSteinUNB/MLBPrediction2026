@@ -19,6 +19,7 @@ FACTORY_SETTINGS_FILES = (
     Path.home() / ".factory" / "settings.local.json",
     Path.home() / ".factory" / "settings.json",
 )
+DEFAULT_DROID_EXEC_TIMEOUT_SECONDS = 600
 
 
 @dataclass(frozen=True, slots=True)
@@ -286,7 +287,7 @@ def _run_droid_exec_json(
             encoding="utf-8",
             errors="replace",
             check=False,
-            timeout=180,
+            timeout=DEFAULT_DROID_EXEC_TIMEOUT_SECONDS,
         )
         if completed.returncode != 0:
             raise RuntimeError(

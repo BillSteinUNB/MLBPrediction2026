@@ -12,6 +12,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+import threading
 from typing import Any, Sequence
 
 AUTORESEARCH_ROOT = Path(__file__).resolve().parent
@@ -28,7 +29,20 @@ DEFAULT_PROGRAM_PATH = AUTORESEARCH_ROOT / "program.md"
 DEFAULT_TRAIN_PATH = AUTORESEARCH_ROOT / "train.py"
 DEFAULT_LOG_DIR = AUTORESEARCH_ROOT / "logs" / "autoresearch"
 DEFAULT_REPORTS_DIR = AUTORESEARCH_ROOT / "reports"
+DEFAULT_DEBUG_LOG_PATH = DEFAULT_REPORTS_DIR / "debug_trace.jsonl"
 _FORCE_7G_PATTERNS = ["*_7g", "*_7s", "*_delta_7v30g", "*_delta_7v30s"]
+VALIDATION_PLANNER_TYPES = {"validation_fix", "validation_improvement"}
+VALIDATION_RIGOR_SEQUENCE: tuple[tuple[int, int], ...] = (
+    (300, 3),
+    (120, 5),
+    (300, 5),
+)
+CLEAR_R2_GAIN = 0.0015
+CLEAR_RMSE_GAIN = 0.03
+CLEAR_POISSON_GAIN = 0.02
+VALIDATION_R2_TOLERANCE = 0.0010
+VALIDATION_RMSE_TOLERANCE = 0.05
+VALIDATION_POISSON_TOLERANCE = 0.03
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +78,16 @@ class AutoresearchSessionConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class PreparedExperimentRun:
+    mode: str
+    session_id: int | None
+    planner_decision: PlannerDecision
+    experiment_name: str
+    prior_session_best: dict[str, Any] | None
+    parent_experiment_id: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SuspectedIssue:
     note_id: int
     experiment_id: int | None
@@ -71,6 +95,36 @@ class SuspectedIssue:
     body: str
     metadata: dict[str, Any]
     created_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class TrainProcessResult:
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+def append_debug_trace(
+    *,
+    event_type: str,
+    payload: dict[str, Any],
+    debug_log_path: str | Path = DEFAULT_DEBUG_LOG_PATH,
+) -> Path:
+    resolved_path = Path(debug_log_path)
+    resolved_path.parent.mkdir(parents=True, exist_ok=True)
+    with resolved_path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "event_type": event_type,
+                    "payload": payload,
+                },
+                sort_keys=True,
+            )
+            + "\n"
+        )
+    return resolved_path
 
 
 def ensure_experiment_db(db_path: str | Path = DEFAULT_DB_PATH) -> Path:
@@ -481,6 +535,31 @@ def pending_suspected_issues(
     return [issue for issue in issues if issue.note_id not in validated_note_ids]
 
 
+def pending_fix_validation_issues(
+    *,
+    db_path: str | Path = DEFAULT_DB_PATH,
+    session_id: int,
+) -> list[SuspectedIssue]:
+    issues = [
+        issue
+        for issue in identify_suspected_issues(db_path=db_path, session_id=session_id)
+        if issue.metadata.get("config") and issue.metadata.get("suspicious") and issue.title == "Experiment failed"
+    ]
+    if not issues:
+        return []
+    with _connect(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT issue_note_id
+            FROM issue_validations
+            WHERE session_id = ?
+            """,
+            (int(session_id),),
+        ).fetchall()
+    validated_note_ids = {int(row["issue_note_id"]) for row in rows}
+    return [issue for issue in issues if issue.note_id not in validated_note_ids]
+
+
 def record_issue_validation(
     *,
     db_path: str | Path = DEFAULT_DB_PATH,
@@ -812,6 +891,13 @@ def _planner_user_prompt(
 ) -> str:
     history_digest = _history_digest(history_rows)
     expected_trials, expected_folds = _expected_trials_and_folds(exploration_mode)
+    allowed_proposals = [
+        proposal
+        for proposal in build_proposal_catalog(program_text)
+        if proposal.trials == expected_trials and proposal.folds == expected_folds
+    ]
+    allowed_max_features = sorted({proposal.max_features for proposal in allowed_proposals})
+    example_proposal = allowed_proposals[0] if allowed_proposals else None
     return "\n".join(
         [
             "Research instructions:",
@@ -821,7 +907,7 @@ def _planner_user_prompt(
             "- Only edit the AGENT_CONFIG block in train.py.",
             f"- Exploration mode for this session is `{exploration_mode}`.",
             f"- This session must use trials={expected_trials} and folds={expected_folds}.",
-            "- max_features must be one of [60, 80, 100, 120].",
+            f"- max_features must be one of {allowed_max_features}.",
             "- selector_type must be one of ['pearson', 'bucketed', 'ablation'].",
             "- bucket_quotas must contain 3 or 4 non-negative integers with total <= max_features.",
             "- exclude_patterns and force_include_patterns must be short lists of feature name patterns.",
@@ -841,13 +927,34 @@ def _planner_user_prompt(
             '  "hypothesis": "one concise sentence",',
             '  "reasoning": "brief explanation of why this experiment should improve accuracy",',
             '  "config": {',
-            '    "max_features": 80,',
-            '    "selector_type": "pearson",',
-            '    "bucket_quotas": [24, 28, 12, 16],',
-            '    "exclude_patterns": [],',
-            '    "force_include_patterns": [],',
-            '    "trials": 50,',
-            '    "folds": 3',
+            f'    "max_features": {80 if example_proposal is None else example_proposal.max_features},',
+            (
+                '    "selector_type": "pearson",'
+                if example_proposal is None
+                else f'    "selector_type": "{example_proposal.selector_type}",'
+            ),
+            (
+                '    "bucket_quotas": [80, 0, 0, 0],'
+                if example_proposal is None
+                else f'    "bucket_quotas": {json.dumps(example_proposal.bucket_quotas)},'
+            ),
+            (
+                '    "exclude_patterns": [],'
+                if example_proposal is None
+                else f'    "exclude_patterns": {json.dumps(example_proposal.exclude_patterns)},'
+            ),
+            (
+                '    "force_include_patterns": [],'
+                if example_proposal is None
+                else f'    "force_include_patterns": {json.dumps(example_proposal.force_include_patterns)},'
+            ),
+            (
+                '    "forced_delta_count": 8,'
+                if example_proposal is None
+                else f'    "forced_delta_count": {example_proposal.forced_delta_count},'
+            ),
+            f'    "trials": {expected_trials},',
+            f'    "folds": {expected_folds}',
             "  }",
             "}",
         ]
@@ -865,11 +972,20 @@ def _coerce_pattern_list(value: Any) -> list[str]:
     return patterns
 
 
-def _proposal_from_payload(payload: dict[str, Any]) -> ExperimentProposal:
+def _proposal_from_payload(
+    payload: dict[str, Any],
+    *,
+    allowed_max_features: Sequence[int],
+) -> ExperimentProposal:
     config = dict(payload["config"])
     max_features = int(config["max_features"])
-    if max_features not in {60, 80, 100, 120}:
-        raise ValueError("max_features must be one of 60, 80, 100, 120")
+    normalized_allowed_max_features = sorted({int(value) for value in allowed_max_features})
+    if not normalized_allowed_max_features:
+        raise ValueError("No allowed max_features values were configured for the planner")
+    if max_features not in normalized_allowed_max_features:
+        raise ValueError(
+            f"max_features must be one of {', '.join(str(value) for value in normalized_allowed_max_features)}"
+        )
 
     selector_type = str(config["selector_type"]).strip().lower()
     if selector_type not in {"pearson", "bucketed", "ablation"}:
@@ -907,6 +1023,14 @@ def _plan_next_experiment_with_llm(
     session_context: dict[str, Any] | None,
     exploration_mode: str,
 ) -> PlannerDecision:
+    expected_trials, expected_folds = _expected_trials_and_folds(exploration_mode)
+    allowed_max_features = sorted(
+        {
+            proposal.max_features
+            for proposal in build_proposal_catalog(program_text)
+            if proposal.trials == expected_trials and proposal.folds == expected_folds
+        }
+    )
     prompt_text = _planner_user_prompt(
         program_text=program_text,
         history_rows=history_rows,
@@ -921,10 +1045,9 @@ def _plan_next_experiment_with_llm(
     )
     payload = json.loads(_json_code_block_payload(response.text))
     proposal = _proposal_for_exploration_mode(
-        _proposal_from_payload(payload),
+        _proposal_from_payload(payload, allowed_max_features=allowed_max_features),
         exploration_mode,
     )
-    expected_trials, expected_folds = _expected_trials_and_folds(exploration_mode)
     if proposal.trials != expected_trials or proposal.folds != expected_folds:
         raise ValueError(
             f"Planner must use exactly {expected_trials} trials and {expected_folds} folds "
@@ -1046,7 +1169,12 @@ def update_train_config(
         flags=re.DOTALL,
     )
     if updated == source:
-        raise ValueError("Could not locate AGENT_CONFIG block in train.py")
+        if "# AGENT_CONFIG_START" in source and "# AGENT_CONFIG_END" in source:
+            start_index = source.index("# AGENT_CONFIG_START")
+            end_index = source.index("# AGENT_CONFIG_END") + len("# AGENT_CONFIG_END")
+            updated = source[:start_index] + replacement + source[end_index:]
+        else:
+            raise ValueError("Could not locate AGENT_CONFIG block in train.py")
     resolved_train_path.write_text(updated, encoding="utf-8")
 
 
@@ -1106,6 +1234,116 @@ def best_fast_experiment(
             parameters,
         ).fetchone()
     return row
+
+
+def _metrics_from_experiment_row(row: sqlite3.Row) -> dict[str, float]:
+    metrics = json.loads(str(row["metrics_json"] or "{}"))
+    return {
+        "holdout_r2": float(metrics.get("holdout_r2", row["holdout_r2"] or 0.0)),
+        "holdout_rmse": float(metrics.get("holdout_rmse", row["holdout_rmse"] or float("inf"))),
+        "holdout_poisson_deviance": float(
+            metrics.get("holdout_poisson_deviance", float("inf"))
+        ),
+        "cv_rmse": float(metrics.get("cv_rmse", row["cv_rmse"] or float("inf"))),
+    }
+
+
+def _is_validation_planner_type(planner_type: str | None) -> bool:
+    return str(planner_type or "") in VALIDATION_PLANNER_TYPES
+
+
+def _experiment_rank_key(row: sqlite3.Row) -> tuple[float, float, float, str]:
+    metrics = _metrics_from_experiment_row(row)
+    return (
+        metrics["holdout_r2"],
+        -metrics["holdout_poisson_deviance"],
+        -metrics["holdout_rmse"],
+        str(row["started_at"]),
+    )
+
+
+def _is_clearly_better(candidate_row: sqlite3.Row, comparison_row: sqlite3.Row) -> bool:
+    candidate_metrics = _metrics_from_experiment_row(candidate_row)
+    comparison_metrics = _metrics_from_experiment_row(comparison_row)
+    r2_gain = candidate_metrics["holdout_r2"] - comparison_metrics["holdout_r2"]
+    rmse_gain = comparison_metrics["holdout_rmse"] - candidate_metrics["holdout_rmse"]
+    poisson_gain = (
+        comparison_metrics["holdout_poisson_deviance"]
+        - candidate_metrics["holdout_poisson_deviance"]
+    )
+    if r2_gain < CLEAR_R2_GAIN:
+        return False
+    if rmse_gain < -CLEAR_RMSE_GAIN:
+        return False
+    if poisson_gain < -CLEAR_POISSON_GAIN:
+        return False
+    return True
+
+
+def _supports_additional_improvement_validation(
+    *,
+    anchor_row: sqlite3.Row,
+    validation_row: sqlite3.Row,
+) -> bool:
+    anchor_metrics = _metrics_from_experiment_row(anchor_row)
+    validation_metrics = _metrics_from_experiment_row(validation_row)
+    if validation_metrics["holdout_r2"] + VALIDATION_R2_TOLERANCE < anchor_metrics["holdout_r2"]:
+        return False
+    if validation_metrics["holdout_rmse"] - VALIDATION_RMSE_TOLERANCE > anchor_metrics["holdout_rmse"]:
+        return False
+    if (
+        validation_metrics["holdout_poisson_deviance"] - VALIDATION_POISSON_TOLERANCE
+        > anchor_metrics["holdout_poisson_deviance"]
+    ):
+        return False
+    return True
+
+
+def _proposal_from_experiment_row(row: sqlite3.Row) -> ExperimentProposal:
+    config = json.loads(str(row["config_json"]))
+    bucket_quotas = list(config.get("bucket_quotas") or [])
+    if not bucket_quotas:
+        bucket_targets = dict(config.get("bucket_targets") or config.get("feature_selection_bucket_targets") or {})
+        bucket_quotas = [
+            int(bucket_targets.get("short_form", 0)),
+            int(bucket_targets.get("medium_form", 0)),
+            int(bucket_targets.get("delta", 0)),
+            int(bucket_targets.get("context", 0)),
+        ]
+    return ExperimentProposal(
+        max_features=int(config["max_features"]),
+        selector_type=str(config["selector_type"]),
+        bucket_quotas=[int(value) for value in bucket_quotas],
+        exclude_patterns=[str(value) for value in config.get("exclude_patterns", [])],
+        force_include_patterns=[str(value) for value in config.get("force_include_patterns", [])],
+        forced_delta_count=int(config.get("forced_delta_count", 0)),
+        trials=int(config.get("search_iterations", train_module.TRIALS)),
+        folds=int(config.get("time_series_splits", train_module.FOLDS)),
+        rationale=f"Derived from experiment `{row['experiment_name']}`.",
+    )
+
+
+def select_promising_fast_candidate(
+    *,
+    db_path: str | Path = DEFAULT_DB_PATH,
+    session_id: int,
+    recent_success_count: int = 3,
+) -> sqlite3.Row | None:
+    session_history = load_history(db_path=db_path, mode="fast", session_id=session_id)
+    successful_exploration_runs = [
+        row
+        for row in session_history
+        if row["status"] == "succeeded" and not _is_validation_planner_type(row["planner_type"])
+    ]
+    if len(successful_exploration_runs) < recent_success_count:
+        return None
+    recent_runs = successful_exploration_runs[-recent_success_count:]
+    ranked = sorted(recent_runs, key=_experiment_rank_key, reverse=True)
+    if len(ranked) < 2:
+        return ranked[0]
+    if _is_clearly_better(ranked[0], ranked[1]):
+        return ranked[0]
+    return None
 
 
 def _successful_history(rows: Sequence[sqlite3.Row]) -> list[sqlite3.Row]:
@@ -1225,10 +1463,22 @@ def plan_next_experiment(
                 exploration_mode=exploration_mode,
             )
         except Exception as exc:
+            append_debug_trace(
+                event_type="planner_failure",
+                payload={
+                    "error": repr(exc),
+                    "exploration_mode": exploration_mode,
+                    "history_count": len(history_rows),
+                    "session_context_present": session_context is not None,
+                },
+            )
             if llm_client.require_llm():
                 raise RuntimeError(f"LLM planning failed and AUTORESEARCH_REQUIRE_LLM is enabled: {exc}") from exc
+            heuristic_history = [
+                row for row in history_rows if str(row["status"]) in {"succeeded", "running"}
+            ]
             heuristic_decision = plan_next_experiment_heuristic(
-                history_rows,
+                heuristic_history,
                 program_text=program_text,
                 exploration_mode=exploration_mode,
             )
@@ -1429,6 +1679,16 @@ def maybe_record_experiment_notes(
 ) -> list[int]:
     note_ids: list[int] = []
     if status != "succeeded" or result_payload is None:
+        append_debug_trace(
+            event_type="experiment_failure",
+            payload={
+                "experiment_id": experiment_id,
+                "session_id": session_id,
+                "exploration_mode": exploration_mode,
+                "error_message": error_message,
+                "proposal": proposal_to_snapshot(proposal),
+            },
+        )
         failure_metadata = {
             "exploration_mode": exploration_mode,
             "selector_type": proposal.selector_type,
@@ -1587,6 +1847,14 @@ def maybe_record_experiment_notes(
         )
         diagnostic_suspicious.append("negative holdout_r2 pushed the run into a likely bad region")
     if diagnostics is not None:
+        append_debug_trace(
+            event_type="experiment_diagnostics",
+            payload={
+                "experiment_id": experiment_id,
+                "session_id": session_id,
+                "diagnostics": diagnostics,
+            },
+        )
         expected_delta = dict(diagnostics.get("expected_delta_columns") or {})
         fill_health = dict(diagnostics.get("selected_feature_fill_health") or {})
         holdout_fill = dict(fill_health.get("holdout") or {})
@@ -1982,8 +2250,9 @@ def _run_train_process(
     mode: str,
     experiment_name: str,
     train_path: str | Path,
-) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    live_line_callback=None,
+) -> TrainProcessResult:
+    process = subprocess.Popen(
         [
             sys.executable,
             str(Path(train_path)),
@@ -1994,11 +2263,57 @@ def _run_train_process(
             "--json-output",
         ],
         cwd=REPO_ROOT,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
-        check=False,
+        bufsize=1,
+    )
+    stdout_chunks: list[str] = []
+    stderr_chunks: list[str] = []
+
+    def _emit_live_line(raw_line: str) -> None:
+        if live_line_callback is None:
+            return
+        normalized = " ".join(str(raw_line).replace("\r", "\n").split()).strip()
+        if not normalized:
+            return
+        live_line_callback(normalized)
+
+    def _read_stream(stream, sink: list[str], *, emit_live_lines: bool) -> None:
+        try:
+            while True:
+                line = stream.readline()
+                if line == "":
+                    break
+                sink.append(line)
+                if emit_live_lines:
+                    _emit_live_line(line)
+        finally:
+            stream.close()
+
+    stdout_thread = threading.Thread(
+        target=_read_stream,
+        args=(process.stdout, stdout_chunks),
+        kwargs={"emit_live_lines": False},
+        daemon=True,
+    )
+    stderr_thread = threading.Thread(
+        target=_read_stream,
+        args=(process.stderr, stderr_chunks),
+        kwargs={"emit_live_lines": True},
+        daemon=True,
+    )
+    stdout_thread.start()
+    stderr_thread.start()
+    returncode = process.wait()
+    stdout_thread.join()
+    stderr_thread.join()
+    return TrainProcessResult(
+        returncode=returncode,
+        stdout="".join(stdout_chunks),
+        stderr="".join(stderr_chunks),
     )
 
 
@@ -2042,6 +2357,7 @@ def _run_validation_retest(
     train_path: str | Path,
     session_id: int,
     reports_dir: str | Path = DEFAULT_REPORTS_DIR,
+    live_line_callback=None,
 ) -> dict[str, Any]:
     config = dict(issue.metadata.get("config") or {})
     if not config:
@@ -2073,6 +2389,7 @@ def _run_validation_retest(
         bucket_quotas=[int(value) for value in config["bucket_quotas"]],
         exclude_patterns=[str(value) for value in config.get("exclude_patterns", [])],
         force_include_patterns=[str(value) for value in config.get("force_include_patterns", [])],
+        forced_delta_count=int(config.get("forced_delta_count", len(config.get("force_include_patterns", [])))),
         trials=int(config["trials"]),
         folds=int(config["folds"]),
         rationale=f"Validation retest for suspicious issue note {issue.note_id}",
@@ -2084,7 +2401,7 @@ def _run_validation_retest(
     planner_decision = PlannerDecision(
         proposal=proposal,
         hypothesis=f"Retest suspicious issue note {issue.note_id}: {issue.title}",
-        planner_type="issue_validation",
+        planner_type="validation_fix",
         planner_model=None,
         reasoning=issue.body,
     )
@@ -2101,6 +2418,7 @@ def _run_validation_retest(
         mode="fast",
         experiment_name=experiment_name,
         train_path=train_path,
+        live_line_callback=live_line_callback,
     )
     stdout_path, stderr_path = _write_process_logs(
         experiment_name=experiment_name,
@@ -2171,7 +2489,16 @@ def _run_validation_retest(
 
 
 def _parse_result_payload(stdout: str) -> dict[str, Any]:
-    return json.loads(stdout)
+    normalized = str(stdout or "").strip()
+    if not normalized:
+        raise ValueError("train.py returned success but produced no stdout payload")
+    try:
+        return json.loads(normalized)
+    except json.JSONDecodeError:
+        json_start = normalized.find("{")
+        if json_start < 0:
+            raise
+        return json.loads(normalized[json_start:])
 
 
 def run_planner_self_check() -> dict[str, Any]:
@@ -2185,14 +2512,101 @@ def run_planner_self_check() -> dict[str, Any]:
     }
 
 
-def run_fast_once(
+def prepare_improvement_validation(
+    *,
+    anchor_experiment_id: int,
+    db_path: str | Path = DEFAULT_DB_PATH,
+    train_path: str | Path = DEFAULT_TRAIN_PATH,
+    session_id: int | None = None,
+) -> PreparedExperimentRun | None:
+    anchor_row = load_experiment(anchor_experiment_id, db_path=db_path)
+    if anchor_row["status"] != "succeeded":
+        return None
+    validation_rows = [
+        row
+        for row in load_history(db_path=db_path, mode="fast", session_id=session_id)
+        if row["parent_experiment_id"] == anchor_experiment_id
+        and str(row["planner_type"]) == "validation_improvement"
+    ]
+    if validation_rows:
+        latest_validation = validation_rows[-1]
+        if latest_validation["status"] != "succeeded":
+            return None
+        if not _supports_additional_improvement_validation(
+            anchor_row=anchor_row,
+            validation_row=latest_validation,
+        ):
+            return None
+
+    used_pairs = {
+        (
+            int(json.loads(str(row["config_json"])).get("search_iterations", 0)),
+            int(json.loads(str(row["config_json"])).get("time_series_splits", 0)),
+        )
+        for row in validation_rows
+        if row["config_json"]
+    }
+    next_pair = next(
+        (
+            (trials, folds)
+            for trials, folds in VALIDATION_RIGOR_SEQUENCE
+            if (trials, folds) not in used_pairs
+        ),
+        None,
+    )
+    if next_pair is None:
+        return None
+
+    anchor_proposal = _proposal_from_experiment_row(anchor_row)
+    proposal = ExperimentProposal(
+        max_features=anchor_proposal.max_features,
+        selector_type=anchor_proposal.selector_type,
+        bucket_quotas=list(anchor_proposal.bucket_quotas),
+        exclude_patterns=list(anchor_proposal.exclude_patterns),
+        force_include_patterns=list(anchor_proposal.force_include_patterns),
+        forced_delta_count=anchor_proposal.forced_delta_count,
+        trials=int(next_pair[0]),
+        folds=int(next_pair[1]),
+        rationale=(
+            f"Validate whether `{anchor_row['experiment_name']}` holds up at "
+            f"{next_pair[0]} trials and {next_pair[1]} folds."
+        ),
+    )
+    planner_decision = PlannerDecision(
+        proposal=proposal,
+        hypothesis=(
+            f"Validate promising run `{anchor_row['experiment_name']}` at "
+            f"{next_pair[0]}x{next_pair[1]} to see if the gain survives higher rigor."
+        ),
+        planner_type="validation_improvement",
+        planner_model=None,
+        reasoning=proposal.rationale,
+    )
+    update_train_config(train_path=train_path, proposal=proposal)
+    train_api = _reload_train_module()
+    effective_config = train_api.resolve_effective_config("fast")
+    experiment_name = train_api.build_experiment_name("fast", effective_config)
+    return PreparedExperimentRun(
+        mode="fast",
+        session_id=session_id,
+        planner_decision=planner_decision,
+        experiment_name=experiment_name,
+        prior_session_best={
+            "holdout_r2": _metrics_from_experiment_row(anchor_row)["holdout_r2"],
+            "cv_rmse": _metrics_from_experiment_row(anchor_row)["cv_rmse"],
+        },
+        parent_experiment_id=anchor_experiment_id,
+    )
+
+
+def prepare_fast_once(
     *,
     db_path: str | Path = DEFAULT_DB_PATH,
     program_path: str | Path = DEFAULT_PROGRAM_PATH,
     train_path: str | Path = DEFAULT_TRAIN_PATH,
     exploration_mode: str = "fast",
     session_id: int | None = None,
-) -> dict[str, Any]:
+) -> PreparedExperimentRun:
     ensure_experiment_db(db_path)
     program_text = load_program_text(program_path)
     history = load_history(db_path, mode="fast")
@@ -2209,26 +2623,48 @@ def run_fast_once(
     train_api = _reload_train_module()
     effective_config = train_api.resolve_effective_config(exploration_mode)
     experiment_name = train_api.build_experiment_name(exploration_mode, effective_config)
-    planner_prompt_path, planner_response_path = _write_planner_logs(
+    return PreparedExperimentRun(
+        mode=exploration_mode,
+        session_id=session_id,
+        planner_decision=planner_decision,
         experiment_name=experiment_name,
+        prior_session_best=prior_session_best,
+        parent_experiment_id=None,
+    )
+
+
+def execute_prepared_fast_once(
+    *,
+    prepared_run: PreparedExperimentRun,
+    db_path: str | Path = DEFAULT_DB_PATH,
+    train_path: str | Path = DEFAULT_TRAIN_PATH,
+    live_line_callback=None,
+) -> dict[str, Any]:
+    planner_decision = prepared_run.planner_decision
+    proposal = planner_decision.proposal
+    update_train_config(train_path=train_path, proposal=proposal)
+    planner_prompt_path, planner_response_path = _write_planner_logs(
+        experiment_name=prepared_run.experiment_name,
         planner_decision=planner_decision,
     )
 
     experiment_id = _insert_started_experiment(
         db_path=db_path,
-        mode=exploration_mode,
+        mode=prepared_run.mode,
         planner_decision=planner_decision,
         proposal=proposal,
-        experiment_name=experiment_name,
-        session_id=session_id,
+        experiment_name=prepared_run.experiment_name,
+        session_id=prepared_run.session_id,
+        parent_experiment_id=prepared_run.parent_experiment_id,
     )
     completed = _run_train_process(
-        mode=exploration_mode,
-        experiment_name=experiment_name,
+        mode=prepared_run.mode,
+        experiment_name=prepared_run.experiment_name,
         train_path=train_path,
+        live_line_callback=live_line_callback,
     )
     stdout_path, stderr_path = _write_process_logs(
-        experiment_name=experiment_name,
+        experiment_name=prepared_run.experiment_name,
         stdout=completed.stdout,
         stderr=completed.stderr,
     )
@@ -2261,24 +2697,24 @@ def run_fast_once(
     note_ids = maybe_record_experiment_notes(
         db_path=db_path,
         experiment_id=experiment_id,
-        session_id=session_id,
+        session_id=prepared_run.session_id,
         proposal=proposal,
-        exploration_mode=exploration_mode,
-        prior_session_best=prior_session_best,
+        exploration_mode=prepared_run.mode,
+        prior_session_best=prepared_run.prior_session_best,
         result_payload=result_payload,
         status=status,
         error_message=error_message,
     )
     return {
         "experiment_id": experiment_id,
-        "session_id": session_id,
-        "experiment_name": experiment_name,
+        "session_id": prepared_run.session_id,
+        "experiment_name": prepared_run.experiment_name,
         "status": status,
         "hypothesis": planner_decision.hypothesis,
         "planner_type": planner_decision.planner_type,
         "planner_model": planner_decision.planner_model,
         "planner_reasoning": planner_decision.reasoning,
-        "exploration_mode": exploration_mode,
+        "exploration_mode": prepared_run.mode,
         "proposal": proposal_to_snapshot(proposal),
         "result": result_payload,
         "note_ids": note_ids,
@@ -2289,12 +2725,35 @@ def run_fast_once(
     }
 
 
+def run_fast_once(
+    *,
+    db_path: str | Path = DEFAULT_DB_PATH,
+    program_path: str | Path = DEFAULT_PROGRAM_PATH,
+    train_path: str | Path = DEFAULT_TRAIN_PATH,
+    exploration_mode: str = "fast",
+    session_id: int | None = None,
+) -> dict[str, Any]:
+    prepared_run = prepare_fast_once(
+        db_path=db_path,
+        program_path=program_path,
+        train_path=train_path,
+        exploration_mode=exploration_mode,
+        session_id=session_id,
+    )
+    return execute_prepared_fast_once(
+        prepared_run=prepared_run,
+        db_path=db_path,
+        train_path=train_path,
+    )
+
+
 def run_best_full(
     *,
     db_path: str | Path = DEFAULT_DB_PATH,
     program_path: str | Path = DEFAULT_PROGRAM_PATH,
     train_path: str | Path = DEFAULT_TRAIN_PATH,
     session_id: int | None = None,
+    live_line_callback=None,
 ) -> dict[str, Any]:
     ensure_experiment_db(db_path)
     best_row = best_fast_experiment(db_path, session_id=session_id)
@@ -2371,6 +2830,7 @@ def run_best_full(
         mode="full",
         experiment_name=experiment_name,
         train_path=train_path,
+        live_line_callback=live_line_callback,
     )
     stdout_path, stderr_path = _write_process_logs(
         experiment_name=experiment_name,

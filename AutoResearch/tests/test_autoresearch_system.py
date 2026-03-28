@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 AUTORESEARCH_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = AUTORESEARCH_ROOT.parent
@@ -27,6 +29,16 @@ def test_resolve_bucket_targets_supports_three_value_layout() -> None:
         "delta": 0,
         "context": 40,
     }
+
+
+def test_resolve_effective_config_uses_mode_specific_parallelism() -> None:
+    fast_config = train.resolve_effective_config("fast")
+    full_config = train.resolve_effective_config("full")
+
+    assert fast_config.optuna_workers == 2
+    assert fast_config.xgboost_n_jobs == 3
+    assert full_config.optuna_workers == 3
+    assert full_config.xgboost_n_jobs == 4
 
 
 def test_update_train_config_rewrites_agent_block(tmp_path: Path) -> None:
@@ -103,12 +115,12 @@ def test_plan_next_experiment_uses_llm_when_configured(monkeypatch) -> None:
             model="custom:Test-Model-0",
             text=json.dumps(
                 {
-                    "hypothesis": "Flat Pearson 100-feature selection may recover the Run 3 signal.",
+                    "hypothesis": "Flat Pearson 72-feature selection may improve local refinement.",
                     "reasoning": "The prior winner suggests flat ranking is underexplored.",
                     "config": {
-                        "max_features": 100,
+                        "max_features": 72,
                         "selector_type": "pearson",
-                        "bucket_quotas": [24, 28, 12, 16],
+                        "bucket_quotas": [72, 0, 0, 0],
                         "exclude_patterns": [],
                         "force_include_patterns": [],
                         "trials": 50,
@@ -124,8 +136,58 @@ def test_plan_next_experiment_uses_llm_when_configured(monkeypatch) -> None:
 
     assert decision.planner_type == "llm"
     assert decision.planner_model == "droid:custom:Test-Model-0"
-    assert decision.proposal.max_features == 100
+    assert decision.proposal.max_features == 72
     assert decision.proposal.selector_type == "pearson"
+
+
+def test_planner_prompt_and_validation_follow_current_max_feature_surface(monkeypatch) -> None:
+    prompt_text = agent._planner_user_prompt(
+        program_text="baseline",
+        history_rows=[],
+        session_context=None,
+        exploration_mode="fast",
+    )
+
+    assert "[72, 80, 88]" in prompt_text
+
+    monkeypatch.setattr(
+        llm_client,
+        "load_llm_config",
+        lambda: llm_client.LLMConfig(
+            provider="droid",
+            model="custom:Test-Model-0",
+            command="droid",
+            reasoning_effort="medium",
+        ),
+    )
+    monkeypatch.setattr(
+        llm_client,
+        "generate_text",
+        lambda **_kwargs: llm_client.LLMTextResponse(
+            provider="droid",
+            model="custom:Test-Model-0",
+            text=json.dumps(
+                {
+                    "hypothesis": "Use the stage-2 local refinement width.",
+                    "reasoning": "72 features is part of the current forced-delta local search surface.",
+                    "config": {
+                        "max_features": 72,
+                        "selector_type": "pearson",
+                        "bucket_quotas": [72, 0, 0, 0],
+                        "exclude_patterns": [],
+                        "force_include_patterns": [],
+                        "trials": 50,
+                        "folds": 3,
+                    },
+                }
+            ),
+            raw_payload={},
+        ),
+    )
+
+    decision = agent.plan_next_experiment([], program_text="baseline")
+
+    assert decision.proposal.max_features == 72
 
 
 def test_plan_next_experiment_falls_back_when_llm_response_is_invalid(monkeypatch) -> None:
@@ -154,6 +216,16 @@ def test_plan_next_experiment_falls_back_when_llm_response_is_invalid(monkeypatc
 
     assert decision.planner_type == "heuristic_fallback"
     assert "fallback" in decision.reasoning.lower()
+
+
+def test_parse_result_payload_tolerates_rich_progress_prefix() -> None:
+    payload = agent._parse_result_payload(
+        "Training full_game_away_runs_model 100% best 2.3525 latest done state complete\n"
+        '{\n  "mode": "fast",\n  "metrics": {"holdout_r2": 0.02}\n}'
+    )
+
+    assert payload["mode"] == "fast"
+    assert payload["metrics"]["holdout_r2"] == 0.02
 
 
 def test_best_fast_experiment_orders_by_holdout_r2_then_cv_rmse(tmp_path: Path) -> None:
@@ -687,6 +759,317 @@ def test_pending_suspected_issues_excludes_already_validated_notes(tmp_path: Pat
     assert pending_after == []
 
 
+def test_pending_fix_validation_issues_only_returns_failed_runs(tmp_path: Path) -> None:
+    db_path = agent.ensure_experiment_db(tmp_path / "experiments.db")
+    session_id = agent.create_session(
+        db_path=db_path,
+        config=agent.AutoresearchSessionConfig(
+            exploration_mode="fast",
+            duration_hours=4,
+            until_interrupted=False,
+            run_full_at_end=False,
+        ),
+        stop_at=None,
+    )
+    failure_note_id = agent.record_note(
+        db_path=db_path,
+        session_id=session_id,
+        experiment_id=1,
+        note_type="failure",
+        importance="high",
+        title="Experiment failed",
+        body="broken thing",
+        metadata={"config": {"max_features": 80, "selector_type": "pearson", "bucket_quotas": [80, 0, 0, 0], "exclude_patterns": [], "force_include_patterns": [], "forced_delta_count": 8, "trials": 120, "folds": 3}, "suspicious": True},
+        reports_dir=tmp_path / "reports",
+    )
+    agent.record_note(
+        db_path=db_path,
+        session_id=session_id,
+        experiment_id=2,
+        note_type="new_best",
+        importance="high",
+        title="New session best configuration",
+        body="good run",
+        metadata={},
+        reports_dir=tmp_path / "reports",
+    )
+
+    issues = agent.pending_fix_validation_issues(db_path=db_path, session_id=session_id)
+
+    assert [issue.note_id for issue in issues] == [failure_note_id]
+
+
+def test_select_promising_fast_candidate_returns_clear_recent_winner(tmp_path: Path) -> None:
+    db_path = agent.ensure_experiment_db(tmp_path / "experiments.db")
+    session_id = agent.create_session(
+        db_path=db_path,
+        config=agent.AutoresearchSessionConfig(
+            exploration_mode="fast",
+            duration_hours=4,
+            until_interrupted=False,
+            run_full_at_end=False,
+        ),
+        stop_at=None,
+    )
+
+    def insert_experiment(name: str, started_minute: int, holdout_r2: float, rmse: float, poisson: float) -> None:
+        config = {
+            "max_features": 80,
+            "selector_type": "pearson",
+            "bucket_quotas": [80, 0, 0, 0],
+            "exclude_patterns": [],
+            "force_include_patterns": ["*_7g"],
+            "forced_delta_count": 8,
+            "search_iterations": 120,
+            "time_series_splits": 3,
+        }
+        metrics = {
+            "holdout_r2": holdout_r2,
+            "holdout_rmse": rmse,
+            "holdout_poisson_deviance": poisson,
+            "cv_rmse": rmse,
+        }
+        with sqlite3.connect(db_path) as connection:
+            connection.execute(
+                """
+                INSERT INTO experiments (
+                    started_at, completed_at, mode, status, hypothesis, config_json, config_fingerprint,
+                    experiment_name, holdout_r2, holdout_rmse, cv_rmse, metrics_json, session_id, planner_type
+                )
+                VALUES (?, ?, 'fast', 'succeeded', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    datetime(2026, 3, 27, 22, started_minute, 0).isoformat(),
+                    datetime(2026, 3, 27, 22, started_minute, 30).isoformat(),
+                    "good run",
+                    json.dumps(config, sort_keys=True),
+                    agent.config_fingerprint(config),
+                    name,
+                    holdout_r2,
+                    rmse,
+                    rmse,
+                    json.dumps(metrics, sort_keys=True),
+                    session_id,
+                    "heuristic",
+                ),
+            )
+            connection.commit()
+
+    insert_experiment("fast-one", 0, 0.0210, 3.30, 2.55)
+    insert_experiment("fast-two", 10, 0.0245, 3.24, 2.50)
+    insert_experiment("fast-three", 20, 0.0220, 3.29, 2.54)
+
+    candidate = agent.select_promising_fast_candidate(db_path=db_path, session_id=session_id)
+
+    assert candidate is not None
+    assert candidate["experiment_name"] == "fast-two"
+
+
+def test_prepare_improvement_validation_uses_next_rigor_pair(tmp_path: Path, monkeypatch) -> None:
+    db_path = agent.ensure_experiment_db(tmp_path / "experiments.db")
+    session_id = agent.create_session(
+        db_path=db_path,
+        config=agent.AutoresearchSessionConfig(
+            exploration_mode="fast",
+            duration_hours=4,
+            until_interrupted=False,
+            run_full_at_end=False,
+        ),
+        stop_at=None,
+    )
+    config = {
+        "max_features": 80,
+        "selector_type": "pearson",
+        "bucket_quotas": [80, 0, 0, 0],
+        "exclude_patterns": [],
+        "force_include_patterns": ["*_7g"],
+        "forced_delta_count": 8,
+        "search_iterations": 120,
+        "time_series_splits": 3,
+    }
+    metrics = {
+        "holdout_r2": 0.0245,
+        "holdout_rmse": 3.24,
+        "holdout_poisson_deviance": 2.50,
+        "cv_rmse": 3.24,
+    }
+    with sqlite3.connect(db_path) as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO experiments (
+                started_at, completed_at, mode, status, hypothesis, config_json, config_fingerprint,
+                experiment_name, holdout_r2, holdout_rmse, cv_rmse, metrics_json, session_id, planner_type
+            )
+            VALUES (?, ?, 'fast', 'succeeded', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                datetime(2026, 3, 27, 22, 0, 0).isoformat(),
+                datetime(2026, 3, 27, 22, 10, 0).isoformat(),
+                "good run",
+                json.dumps(config, sort_keys=True),
+                agent.config_fingerprint(config),
+                "fast-one",
+                0.0245,
+                3.24,
+                3.24,
+                json.dumps(metrics, sort_keys=True),
+                session_id,
+                "heuristic",
+            ),
+        )
+        experiment_id = int(cursor.lastrowid)
+        connection.commit()
+
+    monkeypatch.setattr(
+        agent,
+        "update_train_config",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        agent,
+        "_reload_train_module",
+        lambda: SimpleNamespace(
+            resolve_effective_config=lambda mode: {"mode": mode},
+            build_experiment_name=lambda mode, config: f"{mode}-validation",
+        ),
+    )
+
+    prepared = agent.prepare_improvement_validation(
+        anchor_experiment_id=experiment_id,
+        db_path=db_path,
+        train_path=tmp_path / "train.py",
+        session_id=session_id,
+    )
+
+    assert prepared is not None
+    assert prepared.parent_experiment_id == experiment_id
+    assert prepared.planner_decision.proposal.trials == 300
+    assert prepared.planner_decision.proposal.folds == 3
+
+
+def test_prepare_fast_once_surfaces_planner_decision_before_execution(monkeypatch, tmp_path: Path) -> None:
+    proposal = agent.ExperimentProposal(
+        max_features=80,
+        selector_type="pearson",
+        bucket_quotas=[80, 0, 0, 0],
+        exclude_patterns=[],
+        force_include_patterns=["*_7g"],
+        forced_delta_count=8,
+        trials=120,
+        folds=3,
+        rationale="Anchor the first overnight run in the repaired manual region.",
+    )
+    decision = agent.PlannerDecision(
+        proposal=proposal,
+        hypothesis="Start from the repaired manual baseline before local refinement.",
+        planner_type="llm",
+        planner_model="droid:test",
+        reasoning="This gives the night a stable anchor before neighboring configs move.",
+    )
+
+    monkeypatch.setattr(agent, "ensure_experiment_db", lambda _db_path: Path(_db_path))
+    monkeypatch.setattr(agent, "load_program_text", lambda _program_path: "baseline")
+    monkeypatch.setattr(agent, "load_history", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(agent, "build_session_context", lambda *_args, **_kwargs: {"best_run": {"holdout_r2": 0.04}})
+    monkeypatch.setattr(agent, "plan_next_experiment", lambda *_args, **_kwargs: decision)
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        agent,
+        "update_train_config",
+        lambda **kwargs: captured.update({"proposal": kwargs["proposal"], "train_path": kwargs["train_path"]}),
+    )
+    monkeypatch.setattr(
+        agent,
+        "_reload_train_module",
+        lambda: SimpleNamespace(
+            resolve_effective_config=lambda mode: {"mode": mode},
+            build_experiment_name=lambda mode, config: f"{mode}-experiment",
+        ),
+    )
+
+    prepared = agent.prepare_fast_once(
+        db_path=tmp_path / "experiments.db",
+        program_path=tmp_path / "program.md",
+        train_path=tmp_path / "train.py",
+        exploration_mode="fast",
+        session_id=7,
+    )
+
+    assert prepared.experiment_name == "fast-experiment"
+    assert prepared.session_id == 7
+    assert prepared.planner_decision.hypothesis.startswith("Start from the repaired")
+    assert prepared.prior_session_best == {"holdout_r2": 0.04}
+    assert captured["proposal"] == proposal
+
+
+def test_run_training_passes_single_model_spec_to_trainer(monkeypatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    @contextmanager
+    def fake_overrides(_config):
+        yield
+
+    artifact = SimpleNamespace(
+        holdout_metrics={
+            "r2": 0.0382,
+            "rmse": 2.25,
+            "mae": 1.78,
+            "poisson_deviance": 2.19,
+            "rmse_improvement_vs_naive_pct": 1.2,
+        },
+        cv_metric_name="poisson_deviance",
+        cv_best_score=2.11,
+        model_name=train.MODEL_NAME,
+        target_column=train.TARGET_COLUMN,
+        model_version="version-1",
+        model_path=tmp_path / "model.joblib",
+        metadata_path=tmp_path / "model.metadata.json",
+        final_n_estimators=321,
+        best_params={"max_depth": 4},
+        feature_columns=["feature_a"],
+        feature_selection_bucket_targets={"flat": 80},
+        feature_selection_bucket_counts={"flat": 80},
+        excluded_candidate_counts={"pattern_excluded": 0},
+        holdout_season=train.HOLDOUT_SEASON,
+    )
+
+    monkeypatch.setattr(
+        train,
+        "inspect_run_count_training_data",
+        lambda _path: SimpleNamespace(
+            parquet_path=str(tmp_path / "input.parquet"),
+            data_version_hash="hash",
+            schema_name="schema",
+            schema_version="1",
+            row_count=10,
+            feature_column_count=5,
+            metadata_path=None,
+            has_temporal_delta_features=True,
+        ),
+    )
+    monkeypatch.setattr(train, "apply_training_overrides", fake_overrides)
+    monkeypatch.setattr(train, "_compute_cv_rmse", lambda **_kwargs: 3.05)
+    monkeypatch.setattr(
+        train.rct,
+        "train_run_count_models",
+        lambda **kwargs: captured.update(kwargs) or SimpleNamespace(
+            summary_path=tmp_path / "summary.json",
+            models={train.MODEL_NAME: artifact},
+        ),
+    )
+
+    payload = train.run_training(
+        mode="fast",
+        experiment_name="test-experiment",
+        training_data=tmp_path / "input.parquet",
+        show_training_data_summary=False,
+    )
+
+    assert captured["model_specs"] == ({"model_name": train.MODEL_NAME, "target_column": train.TARGET_COLUMN},)
+    assert captured["optuna_workers"] == 2
+    assert payload["model"]["model_name"] == train.MODEL_NAME
+
+
 def test_collect_session_config_uses_interactive_prompts(monkeypatch) -> None:
     answers = iter(["0", "n"])
     monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
@@ -701,6 +1084,123 @@ def test_collect_session_config_uses_interactive_prompts(monkeypatch) -> None:
     assert config.until_interrupted is True
     assert config.exploration_mode == "fast"
     assert config.run_full_at_end is False
+
+
+def test_stop_after_current_run_controller_toggles_on_escape(monkeypatch) -> None:
+    class FakeMsvcrt:
+        def __init__(self) -> None:
+            self.keys = iter(["\x1b", "\x1b"])
+
+        def kbhit(self) -> bool:
+            if not hasattr(self, "_next_key"):
+                try:
+                    self._next_key = next(self.keys)
+                except StopIteration:
+                    return False
+            return True
+
+        def getwch(self) -> str:
+            key = self._next_key
+            del self._next_key
+            return key
+
+    monkeypatch.setattr(launcher, "msvcrt", FakeMsvcrt())
+    controller = launcher._StopAfterCurrentRunController()
+
+    assert controller.poll() is True
+    assert controller.enabled is True
+    assert "ON" in controller.status_text()
+    assert controller.poll() is True
+    assert controller.enabled is False
+    assert "OFF" in controller.status_text()
+
+
+def test_launcher_marks_graceful_stop_after_current_run(monkeypatch) -> None:
+    captured_statuses: list[str] = []
+    monkeypatch.setattr(agent, "ensure_experiment_db", lambda _db_path: Path("experiments.db"))
+    monkeypatch.setattr(
+        launcher,
+        "prepare_git_checkpoint",
+        lambda: {"branch_name": "AutoResearch-2026-03-27"},
+    )
+    monkeypatch.setattr(
+        launcher,
+        "collect_session_config",
+        lambda **_kwargs: agent.AutoresearchSessionConfig(
+            exploration_mode="fast",
+            duration_hours=1,
+            until_interrupted=False,
+            run_full_at_end=False,
+        ),
+    )
+    monkeypatch.setattr(agent, "create_session", lambda **_kwargs: 7)
+    monkeypatch.setattr(agent, "finalize_session", lambda *_args, **kwargs: captured_statuses.append(kwargs["status"]))
+    monkeypatch.setattr(agent, "append_nightly_log", lambda **_kwargs: Path("nightly_log.md"))
+    monkeypatch.setattr(agent, "pending_fix_validation_issues", lambda **_kwargs: [])
+    monkeypatch.setattr(agent, "select_promising_fast_candidate", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        agent,
+        "prepare_fast_once",
+        lambda **_kwargs: agent.PreparedExperimentRun(
+            mode="fast",
+            session_id=7,
+            planner_decision=agent.PlannerDecision(
+                proposal=agent.ExperimentProposal(
+                    max_features=80,
+                    selector_type="pearson",
+                    bucket_quotas=[80, 0, 0, 0],
+                    exclude_patterns=[],
+                    force_include_patterns=[],
+                    forced_delta_count=8,
+                    trials=120,
+                    folds=3,
+                    rationale="test",
+                ),
+                hypothesis="test",
+                planner_type="heuristic",
+                planner_model=None,
+                reasoning="test",
+            ),
+            experiment_name="fast-one",
+            prior_session_best=None,
+        ),
+    )
+    monkeypatch.setattr(
+        launcher,
+        "_run_with_live_timer",
+        lambda **kwargs: (
+            kwargs["rows"].append({"run_number": 1, "kind": kwargs["kind"], "elapsed": "00:10", "status": "succeeded"}),
+            setattr(kwargs["stop_controller"], "enabled", True),
+            {"status": "succeeded", "experiment_id": 1, "experiment_name": "fast-one", "note_ids": []},
+        )[2],
+    )
+    monkeypatch.setattr(
+        agent,
+        "write_session_summary",
+        lambda *args, **kwargs: (
+            {
+                "best_exploration": {
+                    "experiment_name": "fast-one",
+                    "holdout_r2": 0.051,
+                    "cv_rmse": 3.1,
+                },
+                "notes": [],
+                "recommendations": [],
+                "session": {
+                    "status": kwargs.get("status_override", "completed"),
+                    "ended_at": "2026-03-27T00:00:00+00:00",
+                },
+            },
+            Path("summary.json"),
+            Path("summary.md"),
+            Path("review_prompt.md"),
+        ),
+    )
+
+    payload = launcher.run_launcher(planner_self_check=False)
+
+    assert payload["status"] == "stopped_after_run"
+    assert captured_statuses == ["stopped_after_run"]
 
 
 def test_launcher_runs_planner_self_check_before_full_promotion(monkeypatch) -> None:
@@ -730,7 +1230,7 @@ def test_launcher_runs_planner_self_check_before_full_promotion(monkeypatch) -> 
         "run_planner_self_check",
         lambda: events.append("self-check") or {"provider": "droid", "model": "custom:GLM-5.1-(Z.AI)-1"},
     )
-    monkeypatch.setattr(agent, "pending_suspected_issues", lambda **_kwargs: [])
+    monkeypatch.setattr(agent, "pending_fix_validation_issues", lambda **_kwargs: [])
     monkeypatch.setattr(
         launcher,
         "resolve_stop_at",

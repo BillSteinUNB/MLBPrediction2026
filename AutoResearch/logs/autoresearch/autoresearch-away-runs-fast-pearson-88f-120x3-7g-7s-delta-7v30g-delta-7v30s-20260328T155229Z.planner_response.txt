@@ -1,0 +1,16 @@
+```json
+{
+  "hypothesis": "The forced-delta curve has stabilized with a clear peak at 8 (R²=2.45% vs 2.40% at 6 and 2.33% at 10/12); move to Stage 2 local refinement by testing max_features=88 with the winning forced_delta_count=8 to see if expanding the feature budget captures additional signal just below the top-80 threshold.",
+  "reasoning": "Stage 1 mapping shows forced_delta_count=8 is the clear winner (holdout R²=2.447%), beating 6 (2.396%), 10 (2.331%), and 12 (2.338%). The delta-count curve is stable enough to justify Stage 2. Testing max_features=88 at the best delta count probes whether the Pearson selector's ranks 81–88 contain useful features that were excluded by the 80-feature cap, without the noise risk of a much larger jump.",
+  "config": {
+    "max_features": 88,
+    "selector_type": "pearson",
+    "bucket_quotas": [88, 0, 0, 0],
+    "exclude_patterns": [],
+    "force_include_patterns": ["*_7g", "*_7s", "*_delta_7v30g", "*_delta_7v30s"],
+    "forced_delta_count": 8,
+    "trials": 120,
+    "folds": 3
+  }
+}
+```

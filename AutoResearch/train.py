@@ -35,23 +35,21 @@ TARGET_COLUMN = "final_away_score"
 TRAINING_DATA_PATH = REPO_ROOT / "data" / "training" / "ParquetDefault.parquet"
 MODEL_OUTPUT_ROOT = REPO_ROOT / "data" / "models"
 HOLDOUT_SEASON = 2025
-OPTUNA_WORKERS = max(1, int(os.getenv("MLB_OPTUNA_N_JOBS", "2")))
 BLEND_MODE = "xgb_only"
 CV_AGGREGATION_MODE = "mean"
 LIGHTGBM_PARAM_MODE = "derived"
 EXPERIMENT_PREFIX = "autoresearch-away-runs"
+FAST_OPTUNA_WORKERS = 2
+FULL_OPTUNA_WORKERS = 3
+FAST_XGBOOST_N_JOBS = 3
+FULL_XGBOOST_N_JOBS = 4
 
 # AGENT_CONFIG_START
 MAX_FEATURES = 80
 SELECTOR_TYPE = "pearson"
 BUCKET_QUOTAS = [80, 0, 0, 0]
 EXCLUDE_PATTERNS: list[str] = []
-FORCE_INCLUDE_PATTERNS: list[str] = [
-    "*_delta_7v30g",
-    "*_delta_7v30s",
-    "*_7g",
-    "*_7s",
-]
+FORCE_INCLUDE_PATTERNS: list[str] = []
 FORCED_DELTA_COUNT = 8
 TRIALS = 120
 FOLDS = 3
@@ -78,6 +76,8 @@ class EffectiveTrainingConfig:
     search_iterations: int
     time_series_splits: int
     early_stopping_rounds: int
+    optuna_workers: int
+    xgboost_n_jobs: int
     blend_mode: str
     cv_aggregation_mode: str
     lightgbm_param_mode: str
@@ -113,6 +113,8 @@ def resolve_effective_config(mode: str) -> EffectiveTrainingConfig:
         early_stopping_rounds=int(
             FAST_EARLY_STOPPING_ROUNDS if normalized_mode == "fast" else FULL_EARLY_STOPPING_ROUNDS
         ),
+        optuna_workers=FAST_OPTUNA_WORKERS if normalized_mode == "fast" else FULL_OPTUNA_WORKERS,
+        xgboost_n_jobs=FAST_XGBOOST_N_JOBS if normalized_mode == "fast" else FULL_XGBOOST_N_JOBS,
         blend_mode=BLEND_MODE,
         cv_aggregation_mode=CV_AGGREGATION_MODE,
         lightgbm_param_mode=LIGHTGBM_PARAM_MODE,
@@ -191,6 +193,7 @@ def apply_training_overrides(config: EffectiveTrainingConfig) -> Iterator[None]:
     original_medium_form = rct.DEFAULT_RUN_COUNT_MEDIUM_FORM_FEATURE_COUNT
     original_delta = rct.DEFAULT_RUN_COUNT_DELTA_FEATURE_COUNT
     original_context = rct.DEFAULT_RUN_COUNT_CONTEXT_FEATURE_COUNT
+    original_xgboost_n_jobs = rct.DEFAULT_XGBOOST_N_JOBS
     original_candidate_resolver = rct._resolve_run_count_candidate_feature_columns
     original_flat_selector = rct._select_run_count_feature_columns_flat
     original_bucketed_selector = rct._select_run_count_feature_columns_bucketed
@@ -200,6 +203,7 @@ def apply_training_overrides(config: EffectiveTrainingConfig) -> Iterator[None]:
     rct.DEFAULT_RUN_COUNT_MEDIUM_FORM_FEATURE_COUNT = config.bucket_targets["medium_form"]
     rct.DEFAULT_RUN_COUNT_DELTA_FEATURE_COUNT = config.bucket_targets["delta"]
     rct.DEFAULT_RUN_COUNT_CONTEXT_FEATURE_COUNT = config.bucket_targets["context"]
+    rct.DEFAULT_XGBOOST_N_JOBS = config.xgboost_n_jobs
 
     def _resolve_candidates(dataframe: pd.DataFrame) -> rct.RunCountCandidateResolution:
         base_resolution = original_candidate_resolver(dataframe)
@@ -239,6 +243,7 @@ def apply_training_overrides(config: EffectiveTrainingConfig) -> Iterator[None]:
             target_column: str,
             candidate_feature_columns: Sequence[str],
             max_feature_count: int = rct.DEFAULT_RUN_COUNT_MAX_FEATURE_COUNT,
+            forced_delta_count: int = rct.DEFAULT_RUN_COUNT_FORCED_DELTA_FEATURE_COUNT,
         ) -> rct.RunCountFeatureSelectionResult:
             if not config.force_include_patterns:
                 return selector(
@@ -246,12 +251,15 @@ def apply_training_overrides(config: EffectiveTrainingConfig) -> Iterator[None]:
                     target_column=target_column,
                     candidate_feature_columns=candidate_feature_columns,
                     max_feature_count=max_feature_count,
+                    forced_delta_count=forced_delta_count,
                 )
             return _select_flat_with_force_includes(
                 dataframe,
                 target_column=target_column,
                 candidate_feature_columns=candidate_feature_columns,
                 max_feature_count=max_feature_count,
+                forced_delta_count=forced_delta_count,
+                base_selector=selector,
                 force_include_patterns=config.force_include_patterns,
             )
 
@@ -305,6 +313,7 @@ def apply_training_overrides(config: EffectiveTrainingConfig) -> Iterator[None]:
         rct.DEFAULT_RUN_COUNT_MEDIUM_FORM_FEATURE_COUNT = original_medium_form
         rct.DEFAULT_RUN_COUNT_DELTA_FEATURE_COUNT = original_delta
         rct.DEFAULT_RUN_COUNT_CONTEXT_FEATURE_COUNT = original_context
+        rct.DEFAULT_XGBOOST_N_JOBS = original_xgboost_n_jobs
         rct._resolve_run_count_candidate_feature_columns = original_candidate_resolver
         rct._select_run_count_feature_columns_flat = original_flat_selector
         rct._select_run_count_feature_columns_bucketed = original_bucketed_selector
@@ -316,20 +325,30 @@ def _select_flat_with_force_includes(
     target_column: str,
     candidate_feature_columns: Sequence[str],
     max_feature_count: int,
+    forced_delta_count: int,
+    base_selector,
     force_include_patterns: Sequence[str],
 ) -> rct.RunCountFeatureSelectionResult:
+    base_result = base_selector(
+        dataframe,
+        target_column=target_column,
+        candidate_feature_columns=candidate_feature_columns,
+        max_feature_count=max_feature_count,
+        forced_delta_count=forced_delta_count,
+    )
     scored = rct._score_run_count_candidate_features(
         dataframe,
         target_column=target_column,
         candidate_feature_columns=candidate_feature_columns,
     )
-    forced = [
+    forced_pattern_features = [
         feature_name
         for _, feature_name in scored
         if _matches_any_pattern(feature_name, force_include_patterns)
     ]
-    selected = _ordered_unique([*forced, *(feature_name for _, feature_name in scored)])[
-        :max_feature_count
+    selected = _ordered_unique([*forced_pattern_features, *base_result.feature_columns])[:max_feature_count]
+    forced_delta_features = [
+        feature_name for feature_name in selected if rct._resolve_run_count_feature_bucket(feature_name) == "delta"
     ]
     selected_set = set(selected)
     omitted = [
@@ -342,6 +361,7 @@ def _select_flat_with_force_includes(
         bucket_counts={"flat": len(selected)},
         bucket_targets={"flat": max_feature_count},
         selected_features_by_bucket={"flat": sorted(selected)},
+        forced_delta_features=sorted(forced_delta_features),
         omitted_top_features_by_bucket={"flat": omitted},
         family_decisions=[],
     )
@@ -476,10 +496,10 @@ def run_training(
     started_at = datetime.now(UTC)
     effective_experiment_name = experiment_name or build_experiment_name(mode, config)
     output_dir = MODEL_OUTPUT_ROOT / effective_experiment_name
-
-    rct.DEFAULT_RUN_COUNT_MODEL_SPECS = (
+    model_specs = (
         {"model_name": MODEL_NAME, "target_column": TARGET_COLUMN},
     )
+
     with apply_training_overrides(config):
         result = rct.train_run_count_models(
             training_data=training_path,
@@ -487,12 +507,13 @@ def run_training(
             holdout_season=HOLDOUT_SEASON,
             search_iterations=config.search_iterations,
             time_series_splits=config.time_series_splits,
-            optuna_workers=OPTUNA_WORKERS,
+            optuna_workers=config.optuna_workers,
             early_stopping_rounds=config.early_stopping_rounds,
             feature_selection_mode=config.feature_selection_mode,
             cv_aggregation_mode=config.cv_aggregation_mode,
             lightgbm_param_mode=config.lightgbm_param_mode,
             blend_mode=config.blend_mode,
+            model_specs=model_specs,
         )
 
     artifact = result.models[MODEL_NAME]

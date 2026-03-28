@@ -723,6 +723,15 @@ def _build_optuna_progress_callback(
             latest="pruned" if latest_value is None else f"{latest_value:.6f}",
             state=trial.state.name.lower(),
         )
+        logger.info(
+            "%s progress: %s/%s trials complete, best=%s, latest=%s, state=%s",
+            model_name,
+            completed_trial_count,
+            target_trial_count,
+            "n/a" if best_value is None else f"{best_value:.6f}",
+            "pruned" if latest_value is None else f"{latest_value:.6f}",
+            trial.state.name.lower(),
+        )
 
     return _callback
 

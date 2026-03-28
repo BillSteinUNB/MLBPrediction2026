@@ -1,0 +1,16 @@
+```json
+{
+  "hypothesis": "Test forced_delta_count=6 to map the downward side of the forced-delta curve around the current anchor at 8, since moving up to 10 slightly degraded holdout R² (2.45% → 2.33%), suggesting the peak may lie at or below 8.",
+  "reasoning": "The only completed delta-count sweep points are 8 (best, R²=2.447%) and 10 (worse, R²=2.331%). The degradation when going from 8→10 hints that the optimal region is at or below 8. Testing 6 completes the first local neighborhood around the anchor and determines whether the peak is exactly at 8 or shifts lower. This is a pure Stage-1 discovery move — one lever (forced_delta_count), all other config frozen — and does not repeat any tried fingerprint.",
+  "config": {
+    "max_features": 80,
+    "selector_type": "pearson",
+    "bucket_quotas": [80, 0, 0, 0],
+    "exclude_patterns": [],
+    "force_include_patterns": ["*_7g", "*_7s", "*_delta_7v30g", "*_delta_7v30s"],
+    "forced_delta_count": 6,
+    "trials": 120,
+    "folds": 3
+  }
+}
+```

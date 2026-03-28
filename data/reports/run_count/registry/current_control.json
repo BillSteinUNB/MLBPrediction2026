@@ -1,0 +1,12 @@
+{
+  "selected_artifact_path": "data/models/2026-away-flat-xgbonly-forceddelta8-fast-120x3-cc10/full_game_away_runs_model_20260328T012328Z_cc10c0f6.metadata.json",
+  "experiment_dir": "data/models/2026-away-flat-xgbonly-forceddelta8-fast-120x3-cc10",
+  "selection_reason": "matched forceddelta8 + xgb_only + flat + holdout 2025 + highest holdout_r2",
+  "warning": null,
+  "holdout_r2": 0.03824683352672564,
+  "holdout_rmse": 3.294146612251993,
+  "holdout_poisson_deviance": 2.5095824478095023,
+  "data_version_hash": "cc10c0f691285c930a71958f258e4eaa2fe1ea198ea0227c6e40d438a8e4ebc0",
+  "blend_mode": "xgb_only",
+  "feature_selection_mode": "flat"
+}

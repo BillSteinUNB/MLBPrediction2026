@@ -1,0 +1,578 @@
+{
+  "artifact_references": [
+    {
+      "experiment_id": 1,
+      "experiment_name": "autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T151401Z",
+      "files": [
+        {
+          "file_name": "full_game_away_runs_model_20260328T151403Z_cc10c0f6.joblib",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T151401Z\\full_game_away_runs_model_20260328T151403Z_cc10c0f6.joblib"
+        },
+        {
+          "file_name": "full_game_away_runs_model_20260328T151403Z_cc10c0f6.metadata.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T151401Z\\full_game_away_runs_model_20260328T151403Z_cc10c0f6.metadata.json"
+        },
+        {
+          "file_name": "full_game_away_runs_model_training_run_20260328T151403Z_cc10c0f6.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T151401Z\\full_game_away_runs_model_training_run_20260328T151403Z_cc10c0f6.json"
+        },
+        {
+          "file_name": "optuna_studies.db",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T151401Z\\optuna_studies.db"
+        },
+        {
+          "file_name": "run_count_training_run_20260328T151403Z_cc10c0f6.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T151401Z\\run_count_training_run_20260328T151403Z_cc10c0f6.json"
+        }
+      ],
+      "output_dir": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T151401Z",
+      "summary_path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T151401Z\\run_count_training_run_20260328T151403Z_cc10c0f6.json"
+    },
+    {
+      "experiment_id": 2,
+      "experiment_name": "autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T152444Z",
+      "files": [
+        {
+          "file_name": "full_game_away_runs_model_20260328T152447Z_cc10c0f6.joblib",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T152444Z\\full_game_away_runs_model_20260328T152447Z_cc10c0f6.joblib"
+        },
+        {
+          "file_name": "full_game_away_runs_model_20260328T152447Z_cc10c0f6.metadata.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T152444Z\\full_game_away_runs_model_20260328T152447Z_cc10c0f6.metadata.json"
+        },
+        {
+          "file_name": "full_game_away_runs_model_training_run_20260328T152447Z_cc10c0f6.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T152444Z\\full_game_away_runs_model_training_run_20260328T152447Z_cc10c0f6.json"
+        },
+        {
+          "file_name": "optuna_studies.db",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T152444Z\\optuna_studies.db"
+        },
+        {
+          "file_name": "run_count_training_run_20260328T152447Z_cc10c0f6.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T152444Z\\run_count_training_run_20260328T152447Z_cc10c0f6.json"
+        }
+      ],
+      "output_dir": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T152444Z",
+      "summary_path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T152444Z\\run_count_training_run_20260328T152447Z_cc10c0f6.json"
+    },
+    {
+      "experiment_id": 3,
+      "experiment_name": "autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T153254Z",
+      "files": [
+        {
+          "file_name": "full_game_away_runs_model_20260328T153256Z_cc10c0f6.joblib",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T153254Z\\full_game_away_runs_model_20260328T153256Z_cc10c0f6.joblib"
+        },
+        {
+          "file_name": "full_game_away_runs_model_20260328T153256Z_cc10c0f6.metadata.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T153254Z\\full_game_away_runs_model_20260328T153256Z_cc10c0f6.metadata.json"
+        },
+        {
+          "file_name": "full_game_away_runs_model_training_run_20260328T153256Z_cc10c0f6.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T153254Z\\full_game_away_runs_model_training_run_20260328T153256Z_cc10c0f6.json"
+        },
+        {
+          "file_name": "optuna_studies.db",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T153254Z\\optuna_studies.db"
+        },
+        {
+          "file_name": "run_count_training_run_20260328T153256Z_cc10c0f6.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T153254Z\\run_count_training_run_20260328T153256Z_cc10c0f6.json"
+        }
+      ],
+      "output_dir": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T153254Z",
+      "summary_path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T153254Z\\run_count_training_run_20260328T153256Z_cc10c0f6.json"
+    },
+    {
+      "experiment_id": 4,
+      "experiment_name": "autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T154503Z",
+      "files": [
+        {
+          "file_name": "full_game_away_runs_model_20260328T154505Z_cc10c0f6.joblib",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T154503Z\\full_game_away_runs_model_20260328T154505Z_cc10c0f6.joblib"
+        },
+        {
+          "file_name": "full_game_away_runs_model_20260328T154505Z_cc10c0f6.metadata.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T154503Z\\full_game_away_runs_model_20260328T154505Z_cc10c0f6.metadata.json"
+        },
+        {
+          "file_name": "full_game_away_runs_model_training_run_20260328T154505Z_cc10c0f6.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T154503Z\\full_game_away_runs_model_training_run_20260328T154505Z_cc10c0f6.json"
+        },
+        {
+          "file_name": "optuna_studies.db",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T154503Z\\optuna_studies.db"
+        },
+        {
+          "file_name": "run_count_training_run_20260328T154505Z_cc10c0f6.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T154503Z\\run_count_training_run_20260328T154505Z_cc10c0f6.json"
+        }
+      ],
+      "output_dir": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T154503Z",
+      "summary_path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T154503Z\\run_count_training_run_20260328T154505Z_cc10c0f6.json"
+    },
+    {
+      "experiment_id": 5,
+      "experiment_name": "autoresearch-away-runs-fast-pearson-88f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T155229Z",
+      "files": [
+        {
+          "file_name": "full_game_away_runs_model_20260328T155231Z_cc10c0f6.joblib",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-88f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T155229Z\\full_game_away_runs_model_20260328T155231Z_cc10c0f6.joblib"
+        },
+        {
+          "file_name": "full_game_away_runs_model_20260328T155231Z_cc10c0f6.metadata.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-88f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T155229Z\\full_game_away_runs_model_20260328T155231Z_cc10c0f6.metadata.json"
+        },
+        {
+          "file_name": "full_game_away_runs_model_training_run_20260328T155231Z_cc10c0f6.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-88f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T155229Z\\full_game_away_runs_model_training_run_20260328T155231Z_cc10c0f6.json"
+        },
+        {
+          "file_name": "optuna_studies.db",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-88f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T155229Z\\optuna_studies.db"
+        },
+        {
+          "file_name": "run_count_training_run_20260328T155231Z_cc10c0f6.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-88f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T155229Z\\run_count_training_run_20260328T155231Z_cc10c0f6.json"
+        }
+      ],
+      "output_dir": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-88f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T155229Z",
+      "summary_path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-88f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T155229Z\\run_count_training_run_20260328T155231Z_cc10c0f6.json"
+    },
+    {
+      "experiment_id": 6,
+      "experiment_name": "autoresearch-away-runs-fast-pearson-72f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T160324Z",
+      "files": [
+        {
+          "file_name": "full_game_away_runs_model_20260328T160331Z_cc10c0f6.joblib",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-72f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T160324Z\\full_game_away_runs_model_20260328T160331Z_cc10c0f6.joblib"
+        },
+        {
+          "file_name": "full_game_away_runs_model_20260328T160331Z_cc10c0f6.metadata.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-72f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T160324Z\\full_game_away_runs_model_20260328T160331Z_cc10c0f6.metadata.json"
+        },
+        {
+          "file_name": "full_game_away_runs_model_training_run_20260328T160331Z_cc10c0f6.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-72f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T160324Z\\full_game_away_runs_model_training_run_20260328T160331Z_cc10c0f6.json"
+        },
+        {
+          "file_name": "optuna_studies.db",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-72f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T160324Z\\optuna_studies.db"
+        },
+        {
+          "file_name": "run_count_training_run_20260328T160331Z_cc10c0f6.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-72f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T160324Z\\run_count_training_run_20260328T160331Z_cc10c0f6.json"
+        }
+      ],
+      "output_dir": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-72f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T160324Z",
+      "summary_path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-72f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T160324Z\\run_count_training_run_20260328T160331Z_cc10c0f6.json"
+    }
+  ],
+  "best_exploration": {
+    "config": {
+      "blend_mode": "xgb_only",
+      "bucket_quotas": [
+        80,
+        0,
+        0,
+        0
+      ],
+      "bucket_targets": {
+        "context": 0,
+        "delta": 0,
+        "medium_form": 0,
+        "short_form": 80
+      },
+      "cv_aggregation_mode": "mean",
+      "early_stopping_rounds": 30,
+      "exclude_patterns": [],
+      "feature_selection_mode": "flat",
+      "force_include_patterns": [
+        "*_7g",
+        "*_7s",
+        "*_delta_7v30g",
+        "*_delta_7v30s"
+      ],
+      "forced_delta_count": 8,
+      "lightgbm_param_mode": "derived",
+      "max_features": 80,
+      "mode": "fast",
+      "optuna_workers": 2,
+      "search_iterations": 120,
+      "selector_type": "pearson",
+      "time_series_splits": 3,
+      "xgboost_n_jobs": 3
+    },
+    "cv_rmse": 3.2075190826533215,
+    "experiment_name": "autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T151401Z",
+    "holdout_r2": 0.024468603600688477,
+    "mode": "fast"
+  },
+  "best_overall": {
+    "cv_rmse": 3.2075190826533215,
+    "experiment_name": "autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T151401Z",
+    "holdout_r2": 0.024468603600688477,
+    "mode": "fast"
+  },
+  "counts": {
+    "by_mode": {
+      "fast": 7
+    },
+    "by_status": {
+      "running": 1,
+      "succeeded": 6
+    },
+    "experiments": 7
+  },
+  "delta_vs_prior_best_exploration_r2": null,
+  "leaderboard": [
+    {
+      "artifact_references": [
+        {
+          "file_name": "full_game_away_runs_model_20260328T151403Z_cc10c0f6.joblib",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T151401Z\\full_game_away_runs_model_20260328T151403Z_cc10c0f6.joblib"
+        },
+        {
+          "file_name": "full_game_away_runs_model_20260328T151403Z_cc10c0f6.metadata.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T151401Z\\full_game_away_runs_model_20260328T151403Z_cc10c0f6.metadata.json"
+        },
+        {
+          "file_name": "full_game_away_runs_model_training_run_20260328T151403Z_cc10c0f6.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T151401Z\\full_game_away_runs_model_training_run_20260328T151403Z_cc10c0f6.json"
+        },
+        {
+          "file_name": "optuna_studies.db",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T151401Z\\optuna_studies.db"
+        },
+        {
+          "file_name": "run_count_training_run_20260328T151403Z_cc10c0f6.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T151401Z\\run_count_training_run_20260328T151403Z_cc10c0f6.json"
+        }
+      ],
+      "cv_rmse": 3.2075190826533215,
+      "experiment_name": "autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T151401Z",
+      "holdout_r2": 0.024468603600688477,
+      "mode": "fast",
+      "status": "succeeded"
+    },
+    {
+      "artifact_references": [
+        {
+          "file_name": "full_game_away_runs_model_20260328T153256Z_cc10c0f6.joblib",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T153254Z\\full_game_away_runs_model_20260328T153256Z_cc10c0f6.joblib"
+        },
+        {
+          "file_name": "full_game_away_runs_model_20260328T153256Z_cc10c0f6.metadata.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T153254Z\\full_game_away_runs_model_20260328T153256Z_cc10c0f6.metadata.json"
+        },
+        {
+          "file_name": "full_game_away_runs_model_training_run_20260328T153256Z_cc10c0f6.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T153254Z\\full_game_away_runs_model_training_run_20260328T153256Z_cc10c0f6.json"
+        },
+        {
+          "file_name": "optuna_studies.db",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T153254Z\\optuna_studies.db"
+        },
+        {
+          "file_name": "run_count_training_run_20260328T153256Z_cc10c0f6.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T153254Z\\run_count_training_run_20260328T153256Z_cc10c0f6.json"
+        }
+      ],
+      "cv_rmse": 3.2054652162442405,
+      "experiment_name": "autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T153254Z",
+      "holdout_r2": 0.02396094142558014,
+      "mode": "fast",
+      "status": "succeeded"
+    },
+    {
+      "artifact_references": [
+        {
+          "file_name": "full_game_away_runs_model_20260328T155231Z_cc10c0f6.joblib",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-88f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T155229Z\\full_game_away_runs_model_20260328T155231Z_cc10c0f6.joblib"
+        },
+        {
+          "file_name": "full_game_away_runs_model_20260328T155231Z_cc10c0f6.metadata.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-88f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T155229Z\\full_game_away_runs_model_20260328T155231Z_cc10c0f6.metadata.json"
+        },
+        {
+          "file_name": "full_game_away_runs_model_training_run_20260328T155231Z_cc10c0f6.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-88f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T155229Z\\full_game_away_runs_model_training_run_20260328T155231Z_cc10c0f6.json"
+        },
+        {
+          "file_name": "optuna_studies.db",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-88f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T155229Z\\optuna_studies.db"
+        },
+        {
+          "file_name": "run_count_training_run_20260328T155231Z_cc10c0f6.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-88f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T155229Z\\run_count_training_run_20260328T155231Z_cc10c0f6.json"
+        }
+      ],
+      "cv_rmse": 3.2076445588268494,
+      "experiment_name": "autoresearch-away-runs-fast-pearson-88f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T155229Z",
+      "holdout_r2": 0.02375547682668977,
+      "mode": "fast",
+      "status": "succeeded"
+    },
+    {
+      "artifact_references": [
+        {
+          "file_name": "full_game_away_runs_model_20260328T154505Z_cc10c0f6.joblib",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T154503Z\\full_game_away_runs_model_20260328T154505Z_cc10c0f6.joblib"
+        },
+        {
+          "file_name": "full_game_away_runs_model_20260328T154505Z_cc10c0f6.metadata.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T154503Z\\full_game_away_runs_model_20260328T154505Z_cc10c0f6.metadata.json"
+        },
+        {
+          "file_name": "full_game_away_runs_model_training_run_20260328T154505Z_cc10c0f6.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T154503Z\\full_game_away_runs_model_training_run_20260328T154505Z_cc10c0f6.json"
+        },
+        {
+          "file_name": "optuna_studies.db",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T154503Z\\optuna_studies.db"
+        },
+        {
+          "file_name": "run_count_training_run_20260328T154505Z_cc10c0f6.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T154503Z\\run_count_training_run_20260328T154505Z_cc10c0f6.json"
+        }
+      ],
+      "cv_rmse": 3.206906254965057,
+      "experiment_name": "autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T154503Z",
+      "holdout_r2": 0.023376247825425578,
+      "mode": "fast",
+      "status": "succeeded"
+    },
+    {
+      "artifact_references": [
+        {
+          "file_name": "full_game_away_runs_model_20260328T152447Z_cc10c0f6.joblib",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T152444Z\\full_game_away_runs_model_20260328T152447Z_cc10c0f6.joblib"
+        },
+        {
+          "file_name": "full_game_away_runs_model_20260328T152447Z_cc10c0f6.metadata.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T152444Z\\full_game_away_runs_model_20260328T152447Z_cc10c0f6.metadata.json"
+        },
+        {
+          "file_name": "full_game_away_runs_model_training_run_20260328T152447Z_cc10c0f6.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T152444Z\\full_game_away_runs_model_training_run_20260328T152447Z_cc10c0f6.json"
+        },
+        {
+          "file_name": "optuna_studies.db",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T152444Z\\optuna_studies.db"
+        },
+        {
+          "file_name": "run_count_training_run_20260328T152447Z_cc10c0f6.json",
+          "path": "C:\\Users\\bills\\Documents\\Personal Code\\MLBPrediction2026\\data\\models\\autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T152444Z\\run_count_training_run_20260328T152447Z_cc10c0f6.json"
+        }
+      ],
+      "cv_rmse": 3.2082564413546786,
+      "experiment_name": "autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T152444Z",
+      "holdout_r2": 0.023311497764217037,
+      "mode": "fast",
+      "status": "succeeded"
+    }
+  ],
+  "notes": [
+    {
+      "body": "Forced include patterns ['*_7g', '*_7s', '*_delta_7v30g', '*_delta_7v30s']. Use this result to judge whether short-window features deserve more quota.",
+      "created_at": "2026-03-28T15:31:38.197075+00:00",
+      "experiment_id": 2,
+      "id": 4,
+      "importance": "medium",
+      "metadata": {
+        "force_include_patterns": [
+          "*_7g",
+          "*_7s",
+          "*_delta_7v30g",
+          "*_delta_7v30s"
+        ]
+      },
+      "note_type": "feature_bias",
+      "title": "Forced feature family test"
+    },
+    {
+      "body": "Good because: tested forced feature family ['*_7g', '*_7s', '*_delta_7v30g', '*_delta_7v30s']. Bad because: no obvious negative artifact pattern was detected. Suspicious because: no reproducible suspicious artifact signal was detected.",
+      "created_at": "2026-03-28T15:31:38.197075+00:00",
+      "experiment_id": 2,
+      "id": 5,
+      "importance": "medium",
+      "metadata": {
+        "bad": [
+          "no obvious negative artifact pattern was detected"
+        ],
+        "good": [
+          "tested forced feature family ['*_7g', '*_7s', '*_delta_7v30g', '*_delta_7v30s']"
+        ],
+        "suspicious": [
+          "no reproducible suspicious artifact signal was detected"
+        ]
+      },
+      "note_type": "diagnostic_summary",
+      "title": "Run diagnostic summary"
+    },
+    {
+      "body": "Forced include patterns ['*_7g', '*_7s', '*_delta_7v30g', '*_delta_7v30s']. Use this result to judge whether short-window features deserve more quota.",
+      "created_at": "2026-03-28T15:44:09.945585+00:00",
+      "experiment_id": 3,
+      "id": 6,
+      "importance": "medium",
+      "metadata": {
+        "force_include_patterns": [
+          "*_7g",
+          "*_7s",
+          "*_delta_7v30g",
+          "*_delta_7v30s"
+        ]
+      },
+      "note_type": "feature_bias",
+      "title": "Forced feature family test"
+    },
+    {
+      "body": "Good because: tested forced feature family ['*_7g', '*_7s', '*_delta_7v30g', '*_delta_7v30s']. Bad because: no obvious negative artifact pattern was detected. Suspicious because: no reproducible suspicious artifact signal was detected.",
+      "created_at": "2026-03-28T15:44:09.945585+00:00",
+      "experiment_id": 3,
+      "id": 7,
+      "importance": "medium",
+      "metadata": {
+        "bad": [
+          "no obvious negative artifact pattern was detected"
+        ],
+        "good": [
+          "tested forced feature family ['*_7g', '*_7s', '*_delta_7v30g', '*_delta_7v30s']"
+        ],
+        "suspicious": [
+          "no reproducible suspicious artifact signal was detected"
+        ]
+      },
+      "note_type": "diagnostic_summary",
+      "title": "Run diagnostic summary"
+    },
+    {
+      "body": "Forced include patterns ['*_7g', '*_7s', '*_delta_7v30g', '*_delta_7v30s']. Use this result to judge whether short-window features deserve more quota.",
+      "created_at": "2026-03-28T15:51:32.175830+00:00",
+      "experiment_id": 4,
+      "id": 8,
+      "importance": "medium",
+      "metadata": {
+        "force_include_patterns": [
+          "*_7g",
+          "*_7s",
+          "*_delta_7v30g",
+          "*_delta_7v30s"
+        ]
+      },
+      "note_type": "feature_bias",
+      "title": "Forced feature family test"
+    },
+    {
+      "body": "Good because: tested forced feature family ['*_7g', '*_7s', '*_delta_7v30g', '*_delta_7v30s']. Bad because: no obvious negative artifact pattern was detected. Suspicious because: no reproducible suspicious artifact signal was detected.",
+      "created_at": "2026-03-28T15:51:32.175830+00:00",
+      "experiment_id": 4,
+      "id": 9,
+      "importance": "medium",
+      "metadata": {
+        "bad": [
+          "no obvious negative artifact pattern was detected"
+        ],
+        "good": [
+          "tested forced feature family ['*_7g', '*_7s', '*_delta_7v30g', '*_delta_7v30s']"
+        ],
+        "suspicious": [
+          "no reproducible suspicious artifact signal was detected"
+        ]
+      },
+      "note_type": "diagnostic_summary",
+      "title": "Run diagnostic summary"
+    },
+    {
+      "body": "Forced include patterns ['*_7g', '*_7s', '*_delta_7v30g', '*_delta_7v30s']. Use this result to judge whether short-window features deserve more quota.",
+      "created_at": "2026-03-28T16:02:12.541674+00:00",
+      "experiment_id": 5,
+      "id": 10,
+      "importance": "medium",
+      "metadata": {
+        "force_include_patterns": [
+          "*_7g",
+          "*_7s",
+          "*_delta_7v30g",
+          "*_delta_7v30s"
+        ]
+      },
+      "note_type": "feature_bias",
+      "title": "Forced feature family test"
+    },
+    {
+      "body": "Good because: tested forced feature family ['*_7g', '*_7s', '*_delta_7v30g', '*_delta_7v30s']. Bad because: no obvious negative artifact pattern was detected. Suspicious because: no reproducible suspicious artifact signal was detected.",
+      "created_at": "2026-03-28T16:02:12.541674+00:00",
+      "experiment_id": 5,
+      "id": 11,
+      "importance": "medium",
+      "metadata": {
+        "bad": [
+          "no obvious negative artifact pattern was detected"
+        ],
+        "good": [
+          "tested forced feature family ['*_7g', '*_7s', '*_delta_7v30g', '*_delta_7v30s']"
+        ],
+        "suspicious": [
+          "no reproducible suspicious artifact signal was detected"
+        ]
+      },
+      "note_type": "diagnostic_summary",
+      "title": "Run diagnostic summary"
+    },
+    {
+      "body": "Forced include patterns ['*_7g', '*_7s', '*_delta_7v30g', '*_delta_7v30s']. Use this result to judge whether short-window features deserve more quota.",
+      "created_at": "2026-03-28T16:10:54.388992+00:00",
+      "experiment_id": 6,
+      "id": 12,
+      "importance": "medium",
+      "metadata": {
+        "force_include_patterns": [
+          "*_7g",
+          "*_7s",
+          "*_delta_7v30g",
+          "*_delta_7v30s"
+        ]
+      },
+      "note_type": "feature_bias",
+      "title": "Forced feature family test"
+    },
+    {
+      "body": "Good because: tested forced feature family ['*_7g', '*_7s', '*_delta_7v30g', '*_delta_7v30s']. Bad because: no obvious negative artifact pattern was detected. Suspicious because: no reproducible suspicious artifact signal was detected.",
+      "created_at": "2026-03-28T16:10:54.388992+00:00",
+      "experiment_id": 6,
+      "id": 13,
+      "importance": "medium",
+      "metadata": {
+        "bad": [
+          "no obvious negative artifact pattern was detected"
+        ],
+        "good": [
+          "tested forced feature family ['*_7g', '*_7s', '*_delta_7v30g', '*_delta_7v30s']"
+        ],
+        "suspicious": [
+          "no reproducible suspicious artifact signal was detected"
+        ]
+      },
+      "note_type": "diagnostic_summary",
+      "title": "Run diagnostic summary"
+    }
+  ],
+  "recommendations": [
+    "Start the next session near selector `pearson` with 80 features.",
+    "Investigate whether forced patterns ['*_7g', '*_7s', '*_delta_7v30g', '*_delta_7v30s'] deserve permanent quota."
+  ],
+  "session": {
+    "duration_hours": 0,
+    "ended_at": "2026-03-28T16:19:07.788446+00:00",
+    "exploration_mode": "fast",
+    "id": 1,
+    "run_full_at_end": false,
+    "started_at": "2026-03-28T15:08:06.274862+00:00",
+    "status": "interrupted",
+    "stop_at": null,
+    "until_interrupted": true
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "generated_at": "2026-03-28T18:33:25.708829+00:00",
+  "evaluated_artifacts": [
+    {
+      "model_version": "20260328T012328Z_cc10c0f6",
+      "artifact_path": "data/models/2026-away-flat-xgbonly-forceddelta8-fast-120x3-cc10/full_game_away_runs_model_20260328T012328Z_cc10c0f6.metadata.json",
+      "training_data_path": "data/training/ParquetDefault.parquet",
+      "output_paths": {
+        "json": "data/reports/run_count/distribution_eval/20260328T012328Z_cc10c0f6.distribution_eval.json",
+        "csv": "data/reports/run_count/distribution_eval/20260328T012328Z_cc10c0f6.distribution_eval.csv"
+      }
+    },
+    {
+      "model_version": "20260328T160331Z_cc10c0f6",
+      "artifact_path": "data/models/autoresearch-away-runs-fast-pearson-72f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T160324Z/full_game_away_runs_model_20260328T160331Z_cc10c0f6.metadata.json",
+      "training_data_path": "data/training/ParquetDefault.parquet",
+      "output_paths": {
+        "json": "data/reports/run_count/distribution_eval/20260328T160331Z_cc10c0f6.distribution_eval.json",
+        "csv": "data/reports/run_count/distribution_eval/20260328T160331Z_cc10c0f6.distribution_eval.csv"
+      }
+    }
+  ],
+  "comparison": {
+    "control_model_version": "20260328T012328Z_cc10c0f6",
+    "control_artifact_path": "data/models/2026-away-flat-xgbonly-forceddelta8-fast-120x3-cc10/full_game_away_runs_model_20260328T012328Z_cc10c0f6.metadata.json",
+    "weaker_model_version": "20260328T160331Z_cc10c0f6",
+    "weaker_artifact_path": "data/models/autoresearch-away-runs-fast-pearson-72f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T160324Z/full_game_away_runs_model_20260328T160331Z_cc10c0f6.metadata.json",
+    "family_comparison": {
+      "negative_binomial": {
+        "control_mean_crps": 1.7878878461726628,
+        "weaker_mean_crps": 1.8003818395233235,
+        "control_mean_negative_log_score": 2.4778237355815285,
+        "weaker_mean_negative_log_score": 2.482570538791955,
+        "control_beats_weaker_on_crps": true,
+        "control_beats_weaker_on_negative_log_score": true
+      },
+      "poisson": {
+        "control_mean_crps": 1.8674319204930183,
+        "weaker_mean_crps": 1.8840511227925103,
+        "control_mean_negative_log_score": 2.7378375429514508,
+        "weaker_mean_negative_log_score": 2.754880176900394,
+        "control_beats_weaker_on_crps": true,
+        "control_beats_weaker_on_negative_log_score": true
+      },
+      "zero_adjusted_negative_binomial": {
+        "control_mean_crps": 1.7864751228605773,
+        "weaker_mean_crps": 1.7992031489481937,
+        "control_mean_negative_log_score": 2.473841864168075,
+        "weaker_mean_negative_log_score": 2.4794350006241332,
+        "control_beats_weaker_on_crps": true,
+        "control_beats_weaker_on_negative_log_score": true
+      }
+    }
+  }
+}

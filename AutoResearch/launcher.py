@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import argparse
+from collections import deque
 from datetime import UTC, datetime, timedelta
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
+from rich.console import Console, Group
+from rich.live import Live
+from rich.panel import Panel
+from rich.table import Table
 
 AUTORESEARCH_ROOT = Path(__file__).resolve().parent
 REPO_ROOT = AUTORESEARCH_ROOT.parent
@@ -21,6 +28,208 @@ DEFAULT_PROGRAM_PATH = AUTORESEARCH_ROOT / "program.md"
 DEFAULT_TRAIN_PATH = AUTORESEARCH_ROOT / "train.py"
 DEFAULT_MIN_FAST_WINDOW_MINUTES = 30
 DEFAULT_POLL_INTERVAL_SECONDS = 15
+_CONSOLE = Console()
+_ESCAPE_KEY = "\x1b"
+
+try:
+    import msvcrt  # type: ignore
+except ImportError:  # pragma: no cover - non-Windows fallback
+    msvcrt = None
+
+
+class _StopAfterCurrentRunController:
+    def __init__(self) -> None:
+        self.enabled = False
+        self.supported = os.name == "nt" and msvcrt is not None
+
+    def poll(self) -> bool:
+        if not self.supported or msvcrt is None:
+            return False
+        while msvcrt.kbhit():
+            key = msvcrt.getwch()
+            if key == _ESCAPE_KEY:
+                self.enabled = not self.enabled
+                return True
+        return False
+
+    def status_text(self) -> str:
+        if not self.supported:
+            return "Esc toggle unavailable"
+        return (
+            "Esc: stop after current run ON"
+            if self.enabled
+            else "Esc: stop after current run OFF"
+        )
+
+
+def _trim_text(value: str | None, *, max_length: int = 220) -> str:
+    normalized = " ".join(str(value or "").split())
+    if len(normalized) <= max_length:
+        return normalized
+    return normalized[: max_length - 3].rstrip() + "..."
+
+
+def _print_event_panel(*, title: str, lines: list[str], border_style: str) -> None:
+    _CONSOLE.print(Panel("\n".join(lines), title=title, border_style=border_style))
+
+
+def _format_metrics(payload: dict[str, object]) -> list[str]:
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        return []
+    metrics = result.get("metrics")
+    model = result.get("model")
+    if not isinstance(metrics, dict):
+        return []
+    lines = [
+        (
+            "Holdout: "
+            f"R2={float(metrics['holdout_r2']) * 100:.2f}% "
+            f"RMSE={float(metrics['holdout_rmse']):.4f} "
+            f"Poisson={float(metrics['holdout_poisson_deviance']):.4f}"
+        ),
+        (
+            "CV: "
+            f"RMSE={float(metrics['cv_rmse']):.4f} "
+            f"{metrics['cv_metric_name']}={float(metrics['cv_metric_value']):.4f}"
+        ),
+    ]
+    if isinstance(model, dict):
+        lines.append(f"Model: `{model.get('model_name', '<unknown>')}`")
+    return lines
+
+
+def _print_planned_run(
+    *,
+    run_number: int,
+    kind_label: str,
+    prepared_run: autoresearch_agent.PreparedExperimentRun,
+) -> None:
+    decision = prepared_run.planner_decision
+    proposal = decision.proposal
+    planner_label = decision.planner_type
+    if decision.planner_model:
+        planner_label = f"{planner_label} via {decision.planner_model}"
+    _print_event_panel(
+        title=f"{kind_label} Run {run_number} Plan",
+        border_style="cyan",
+        lines=[
+            f"Planner: {planner_label}",
+            f"Hypothesis: {_trim_text(decision.hypothesis, max_length=260)}",
+            f"Why: {_trim_text(decision.reasoning, max_length=260)}",
+            (
+                "Config: "
+                f"selector={proposal.selector_type} "
+                f"max_features={proposal.max_features} "
+                f"forced_delta_count={proposal.forced_delta_count} "
+                f"trials={proposal.trials} folds={proposal.folds}"
+            ),
+            f"Buckets: {proposal.bucket_quotas}",
+            f"Force include: {proposal.force_include_patterns or '[]'}",
+        ],
+    )
+
+
+def _print_run_result(*, run_number: int, kind: str, payload: dict[str, object]) -> None:
+    status = str(payload.get("status", "unknown"))
+    lines = [
+        f"Experiment: `{payload.get('experiment_name', '<unknown>')}`",
+        f"Status: `{status}`",
+    ]
+    result_lines = _format_metrics(payload)
+    if result_lines:
+        lines.extend(result_lines)
+    if status != "succeeded":
+        error_message = _trim_text(str(payload.get("error_message") or ""), max_length=260)
+        if error_message:
+            lines.append(f"Error: {error_message}")
+        lines.append(f"stdout: `{payload.get('stdout_path', '<missing>')}`")
+        lines.append(f"stderr: `{payload.get('stderr_path', '<missing>')}`")
+    note_ids = payload.get("note_ids")
+    if note_ids:
+        lines.append(f"Notes recorded: {note_ids}")
+    _print_event_panel(
+        title=f"{kind.title()} Run {run_number} Result",
+        border_style="green" if status == "succeeded" else "red",
+        lines=lines,
+    )
+
+
+def _render_live_output_panel(lines: list[str]) -> Panel:
+    body = "\n".join(lines) if lines else "Waiting for trainer output..."
+    return Panel(body, title="Trainer Output", border_style="blue")
+
+
+def _render_run_table(rows: list[dict[str, object]], current_status: str) -> Table:
+    table = Table(title="AutoResearch Overnight Progress")
+    table.add_column("Run")
+    table.add_column("Kind")
+    table.add_column("Elapsed")
+    table.add_column("Status")
+    for row in rows:
+        table.add_row(str(row["run_number"]), str(row["kind"]), str(row["elapsed"]), str(row["status"]))
+    table.caption = current_status
+    return table
+
+
+def _render_live_view(
+    rows: list[dict[str, object]],
+    current_status: str,
+    live_output_lines: list[str],
+):
+    return Group(
+        _render_run_table(rows, current_status),
+        _render_live_output_panel(live_output_lines),
+    )
+
+
+def _run_with_live_timer(
+    *,
+    rows: list[dict[str, object]],
+    kind: str,
+    action,
+    live_output_lines: deque[str] | None = None,
+    stop_controller: _StopAfterCurrentRunController | None = None,
+):
+    run_number = len(rows) + 1
+    row = {"run_number": run_number, "kind": kind, "elapsed": "00:00", "status": "running"}
+    rows.append(row)
+    started = time.monotonic()
+    if live_output_lines is not None:
+        live_output_lines.clear()
+    current_status = f"{kind} {run_number} running"
+    if stop_controller is not None:
+        current_status = f"{current_status} | {stop_controller.status_text()}"
+    with Live(
+        _render_live_view(rows, current_status, list(live_output_lines or [])),
+        console=_CONSOLE,
+        refresh_per_second=4,
+    ) as live:
+        while True:
+            if hasattr(action, "done") and action.done():
+                break
+            if stop_controller is not None and stop_controller.poll():
+                _print_event_panel(
+                    title="Stop Toggle",
+                    border_style="yellow",
+                    lines=[stop_controller.status_text()],
+                )
+            elapsed_seconds = int(time.monotonic() - started)
+            row["elapsed"] = f"{elapsed_seconds // 60:02d}:{elapsed_seconds % 60:02d}"
+            current_status = f"{kind} {run_number} running"
+            if stop_controller is not None:
+                current_status = f"{current_status} | {stop_controller.status_text()}"
+            live.update(_render_live_view(rows, current_status, list(live_output_lines or [])))
+            time.sleep(0.5)
+        payload = action.result()
+        elapsed_seconds = int(time.monotonic() - started)
+        row["elapsed"] = f"{elapsed_seconds // 60:02d}:{elapsed_seconds % 60:02d}"
+        row["status"] = str(payload.get("status", "completed"))
+        current_status = f"{kind} {run_number} finished"
+        if stop_controller is not None:
+            current_status = f"{current_status} | {stop_controller.status_text()}"
+        live.update(_render_live_view(rows, current_status, list(live_output_lines or [])))
+    return payload
 
 
 def _run_git_command(*args: str) -> subprocess.CompletedProcess[str]:
@@ -66,6 +275,15 @@ def prepare_git_checkpoint(*, reports_dir: str | Path = autoresearch_agent.DEFAU
     push_branch = _run_git_command("push", "-u", "origin", branch_name)
     if push_branch.returncode != 0:
         raise RuntimeError(push_branch.stderr.strip() or push_branch.stdout.strip() or "git push branch failed")
+    autoresearch_agent.append_debug_trace(
+        event_type="git_checkpoint",
+        payload={
+            "branch_before": branch_before.stdout.strip(),
+            "status_before": status_before.stdout.strip(),
+            "commit_message": commit_message,
+            "branch_name": branch_name,
+        },
+    )
 
     autoresearch_agent.append_nightly_log(
         event_type="git_checkpoint",
@@ -232,6 +450,10 @@ def run_launcher(
     )
     if planner_self_check:
         payload = autoresearch_agent.run_planner_self_check()
+        autoresearch_agent.append_debug_trace(
+            event_type="planner_self_check_passed",
+            payload={"session_id": session_id, **payload},
+        )
         autoresearch_agent.append_nightly_log(
             event_type="planner_self_check",
             heading="Planner self-check passed",
@@ -241,31 +463,55 @@ def run_launcher(
                 f"model: `{payload['model']}`",
             ],
         )
-        print(
-            json.dumps(
-                {
-                    "event": "planner_self_check_passed",
-                    "session_id": session_id,
-                    "payload": payload,
-                },
-                indent=2,
-                sort_keys=True,
-            )
+        _print_event_panel(
+            title="Planner Self-Check",
+            border_style="green",
+            lines=[
+                f"Session: `{session_id}`",
+                f"Provider: `{payload['provider']}`",
+                f"Model: `{payload['model']}`",
+                f"Response: `{payload.get('response_text', 'OK')}`",
+            ],
         )
 
     interrupted = False
+    graceful_stop_requested = False
+    run_rows: list[dict[str, object]] = []
+    live_output_lines: deque[str] = deque(maxlen=10)
+    stop_controller = _StopAfterCurrentRunController()
+    successful_fast_runs_since_review = 0
+    active_improvement_anchor_id: int | None = None
+    executor = ThreadPoolExecutor(max_workers=1)
     try:
         while True:
-            pending_issues = autoresearch_agent.pending_suspected_issues(
+            if stop_controller.poll():
+                _print_event_panel(
+                    title="Stop Toggle",
+                    border_style="yellow",
+                    lines=[stop_controller.status_text()],
+                )
+            if stop_controller.enabled and run_rows:
+                graceful_stop_requested = True
+                break
+            pending_issues = autoresearch_agent.pending_fix_validation_issues(
                 db_path=db_path,
                 session_id=session_id,
             )
             if pending_issues:
-                validation_payload = autoresearch_agent._run_validation_retest(
+                future = executor.submit(
+                    autoresearch_agent._run_validation_retest,
                     issue=pending_issues[0],
                     db_path=db_path,
                     train_path=train_path,
                     session_id=session_id,
+                    live_line_callback=live_output_lines.append,
+                )
+                validation_payload = _run_with_live_timer(
+                    rows=run_rows,
+                    kind="validation",
+                    action=future,
+                    live_output_lines=live_output_lines,
+                    stop_controller=stop_controller,
                 )
                 print(
                     json.dumps(
@@ -278,30 +524,135 @@ def run_launcher(
                         sort_keys=True,
                     )
                 )
+                autoresearch_agent.append_debug_trace(
+                    event_type="issue_validation_completed",
+                    payload={"session_id": session_id, **validation_payload},
+                )
+                _print_run_result(
+                    run_number=len(run_rows),
+                    kind="validation-fix",
+                    payload=validation_payload,
+                )
+                successful_fast_runs_since_review = 0
+                active_improvement_anchor_id = None
+                if validation_payload.get("status") != "succeeded":
+                    time.sleep(poll_interval_seconds)
+                continue
+            prepared_validation_run = None
+            if active_improvement_anchor_id is not None:
+                with _CONSOLE.status("Planning improvement validation...", spinner="dots"):
+                    prepared_validation_run = autoresearch_agent.prepare_improvement_validation(
+                        anchor_experiment_id=active_improvement_anchor_id,
+                        db_path=db_path,
+                        train_path=train_path,
+                        session_id=session_id,
+                    )
+                if prepared_validation_run is None:
+                    active_improvement_anchor_id = None
+                else:
+                    _print_planned_run(
+                        run_number=len(run_rows) + 1,
+                        kind_label="Validation Improve",
+                        prepared_run=prepared_validation_run,
+                    )
+            elif successful_fast_runs_since_review >= 3:
+                candidate = autoresearch_agent.select_promising_fast_candidate(
+                    db_path=db_path,
+                    session_id=session_id,
+                )
+                successful_fast_runs_since_review = 0
+                if candidate is not None:
+                    active_improvement_anchor_id = int(candidate["id"])
+                    with _CONSOLE.status("Planning improvement validation...", spinner="dots"):
+                        prepared_validation_run = autoresearch_agent.prepare_improvement_validation(
+                            anchor_experiment_id=active_improvement_anchor_id,
+                            db_path=db_path,
+                            train_path=train_path,
+                            session_id=session_id,
+                        )
+                    if prepared_validation_run is not None:
+                        _print_planned_run(
+                            run_number=len(run_rows) + 1,
+                            kind_label="Validation Improve",
+                            prepared_run=prepared_validation_run,
+                        )
+                    else:
+                        active_improvement_anchor_id = None
+            if prepared_validation_run is not None:
+                future = executor.submit(
+                    autoresearch_agent.execute_prepared_fast_once,
+                    prepared_run=prepared_validation_run,
+                    db_path=db_path,
+                    train_path=train_path,
+                    live_line_callback=live_output_lines.append,
+                )
+                payload = _run_with_live_timer(
+                    rows=run_rows,
+                    kind="validation-improve",
+                    action=future,
+                    live_output_lines=live_output_lines,
+                    stop_controller=stop_controller,
+                )
+                autoresearch_agent.append_debug_trace(
+                    event_type="validation_improvement_completed",
+                    payload={"session_id": session_id, **payload},
+                )
+                autoresearch_agent.append_nightly_log(
+                    event_type="validation_improvement",
+                    heading="Improvement validation completed",
+                    body_lines=[
+                        f"session_id: `{session_id}`",
+                        f"experiment_id: `{payload['experiment_id']}`",
+                        f"status: `{payload['status']}`",
+                        f"experiment_name: `{payload['experiment_name']}`",
+                        f"parent_experiment_id: `{active_improvement_anchor_id}`",
+                    ],
+                )
+                _print_run_result(
+                    run_number=len(run_rows),
+                    kind="validation-improve",
+                    payload=payload,
+                )
+                if payload["status"] != "succeeded":
+                    active_improvement_anchor_id = None
+                    time.sleep(poll_interval_seconds)
+                continue
             now = datetime.now(UTC)
             if should_start_fast_run(
                 now=now,
                 stop_at=stop_at,
                 min_fast_window_minutes=min_fast_window_minutes,
             ):
-                payload = autoresearch_agent.run_fast_once(
-                    db_path=db_path,
-                    program_path=program_path,
-                    train_path=train_path,
-                    exploration_mode=session_config.exploration_mode,
-                    session_id=session_id,
-                )
-                print(
-                    json.dumps(
-                        {
-                            "event": "fast_experiment_completed",
-                            "session_id": session_id,
-                            "stop_at": None if stop_at is None else stop_at.isoformat(),
-                            "payload": payload,
-                        },
-                        indent=2,
-                        sort_keys=True,
+                with _CONSOLE.status("Planning next fast run...", spinner="dots"):
+                    prepared_fast_run = autoresearch_agent.prepare_fast_once(
+                        db_path=db_path,
+                        program_path=program_path,
+                        train_path=train_path,
+                        exploration_mode=session_config.exploration_mode,
+                        session_id=session_id,
                     )
+                _print_planned_run(
+                    run_number=len(run_rows) + 1,
+                    kind_label="Fast",
+                    prepared_run=prepared_fast_run,
+                )
+                future = executor.submit(
+                    autoresearch_agent.execute_prepared_fast_once,
+                    prepared_run=prepared_fast_run,
+                    db_path=db_path,
+                    train_path=train_path,
+                    live_line_callback=live_output_lines.append,
+                )
+                payload = _run_with_live_timer(
+                    rows=run_rows,
+                    kind="fast",
+                    action=future,
+                    live_output_lines=live_output_lines,
+                    stop_controller=stop_controller,
+                )
+                autoresearch_agent.append_debug_trace(
+                    event_type="fast_experiment_completed",
+                    payload={"session_id": session_id, **payload},
                 )
                 autoresearch_agent.append_nightly_log(
                     event_type="fast_experiment",
@@ -314,6 +665,16 @@ def run_launcher(
                         f"note_ids: `{payload.get('note_ids', [])}`",
                     ],
                 )
+                _print_run_result(
+                    run_number=len(run_rows),
+                    kind="fast",
+                    payload=payload,
+                )
+                if payload["status"] == "succeeded":
+                    successful_fast_runs_since_review += 1
+                else:
+                    successful_fast_runs_since_review = 0
+                    active_improvement_anchor_id = None
                 if payload["status"] != "succeeded":
                     time.sleep(poll_interval_seconds)
                 continue
@@ -330,6 +691,10 @@ def run_launcher(
                 sort_keys=True,
             )
         )
+        autoresearch_agent.append_debug_trace(
+            event_type="launcher_interrupted",
+            payload={"session_id": session_id},
+        )
         autoresearch_agent.append_nightly_log(
             event_type="launcher_interrupted",
             heading="Launcher interrupted",
@@ -337,29 +702,41 @@ def run_launcher(
         )
 
     if session_config.run_full_at_end:
-        payload = autoresearch_agent.run_best_full(
+        future = executor.submit(
+            autoresearch_agent.run_best_full,
             db_path=db_path,
             program_path=program_path,
             train_path=train_path,
             session_id=session_id,
+            live_line_callback=live_output_lines.append,
+        )
+        payload = _run_with_live_timer(
+            rows=run_rows,
+            kind="full",
+            action=future,
+            live_output_lines=live_output_lines,
+            stop_controller=stop_controller,
+        )
+        _print_run_result(
+            run_number=len(run_rows),
+            kind="full",
+            payload=payload,
         )
         summary_payload = _session_summary(
             db_path=db_path,
             session_id=session_id,
-            status="completed" if not interrupted else "interrupted_then_full",
+            status=(
+                "interrupted_then_full"
+                if interrupted
+                else "stopped_after_run_then_full"
+                if graceful_stop_requested
+                else "completed"
+            ),
             run_full_at_end=session_config.run_full_at_end,
         )
-        print(
-            json.dumps(
-                {
-                    "event": "full_experiment_completed",
-                    "session_id": session_id,
-                    "payload": payload,
-                    "session_summary": summary_payload,
-                },
-                indent=2,
-                sort_keys=True,
-            )
+        autoresearch_agent.append_debug_trace(
+            event_type="full_experiment_completed",
+            payload={"session_id": session_id, **payload, "session_summary": summary_payload},
         )
         autoresearch_agent.append_nightly_log(
             event_type="full_experiment",
@@ -373,7 +750,13 @@ def run_launcher(
         autoresearch_agent.finalize_session(
             session_id,
             db_path=db_path,
-            status="completed" if not interrupted else "interrupted_then_full",
+            status=(
+                "interrupted_then_full"
+                if interrupted
+                else "stopped_after_run_then_full"
+                if graceful_stop_requested
+                else "completed"
+            ),
             summary_json_path=summary_payload["summary_json_path"],
             summary_md_path=summary_payload["summary_md_path"],
         )
@@ -385,7 +768,13 @@ def run_launcher(
     summary = _session_summary(
         db_path=db_path,
         session_id=session_id,
-        status="completed" if not interrupted else "interrupted",
+        status=(
+            "interrupted"
+            if interrupted
+            else "stopped_after_run"
+            if graceful_stop_requested
+            else "completed"
+        ),
         run_full_at_end=session_config.run_full_at_end,
     )
     autoresearch_agent.finalize_session(
@@ -395,15 +784,20 @@ def run_launcher(
         summary_json_path=summary["summary_json_path"],
         summary_md_path=summary["summary_md_path"],
     )
-    print(
-        json.dumps(
-            {
-                "event": "session_completed",
-                "payload": summary,
-            },
-            indent=2,
-            sort_keys=True,
-        )
+    _print_event_panel(
+        title="Session Complete",
+        border_style="green",
+        lines=[
+            f"Session: `{summary['session_id']}`",
+            f"Status: `{summary['status']}`",
+            f"Best experiment: `{summary['best_experiment_name']}`",
+            (
+                "Best metrics: "
+                f"holdout_r2={summary['best_holdout_r2']} "
+                f"cv_rmse={summary['best_cv_rmse']}"
+            ),
+            f"Summary: `{summary['summary_md_path']}`",
+        ],
     )
     autoresearch_agent.append_nightly_log(
         event_type="session_completed",
@@ -413,6 +807,10 @@ def run_launcher(
             f"status: `{summary['status']}`",
             f"summary_md_path: `{summary['summary_md_path']}`",
         ],
+    )
+    autoresearch_agent.append_debug_trace(
+        event_type="session_completed",
+        payload={"session_id": session_id, **summary},
     )
     return summary
 

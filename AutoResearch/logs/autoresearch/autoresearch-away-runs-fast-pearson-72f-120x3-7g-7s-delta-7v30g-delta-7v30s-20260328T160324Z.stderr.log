@@ -1,0 +1,7 @@
+INFO Training full_game_away_runs_model for holdout season 2025 with 120 search iterations and 3 time-series splits
+INFO Running Optuna for full_game_away_runs_model with 120 requested trials, 3 time-series splits, and 2 workers
+INFO Optuna study full_game_away_runs_model_final_away_score_cc10c0f69128_2025 has 0 existing trials; running 120 additional trials
+INFO OOF blend learning selected xgb_weight=1.000, lightgbm_weight=0.000, loss=2.352017
+INFO full_game_away_runs_model best hyperparameters: {'max_depth': 3, 'n_estimators': 900, 'learning_rate': 0.006254658762042453, 'subsample': 0.7699766178719301, 'colsample_bytree': 0.5134504716456737, 'min_child_weight': 7, 'gamma': 0.1465105047102383, 'reg_alpha': 0.00010108828041612991, 'reg_lambda': 4.909955070368108}
+INFO full_game_away_runs_model holdout metrics: {'mae': 2.607341731526724, 'rmse': 3.3199546612560993, 'poisson_deviance': 2.543667715759721, 'r2': 0.023118057576344886, 'actual_mean': 4.404938271604938, 'predicted_mean': 4.404394671652052, 'naive_mean_prediction': 4.493962678375412, 'naive_mae': 2.6691728440234352, 'naive_rmse': 3.3601880782833202, 'naive_poisson_deviance': 2.6045327593436958, 'mae_improvement_vs_naive_pct': 2.316489643417351, 'rmse_improvement_vs_naive_pct': 1.1973561029886075, 'poisson_deviance_improvement_vs_naive_pct': 2.336889154710111}
+INFO OOF blend learning selected xgb_weight=1.000, lightgbm_weight=0.000, loss=2.352954
