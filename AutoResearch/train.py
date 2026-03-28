@@ -35,11 +35,14 @@ TARGET_COLUMN = "final_away_score"
 TRAINING_DATA_PATH = REPO_ROOT / "data" / "training" / "ParquetDefault.parquet"
 MODEL_OUTPUT_ROOT = REPO_ROOT / "data" / "models"
 HOLDOUT_SEASON = 2025
-OPTUNA_WORKERS = max(1, int(os.getenv("MLB_OPTUNA_N_JOBS", "2")))
 BLEND_MODE = "xgb_only"
 CV_AGGREGATION_MODE = "mean"
 LIGHTGBM_PARAM_MODE = "derived"
 EXPERIMENT_PREFIX = "autoresearch-away-runs"
+FAST_OPTUNA_WORKERS = 2
+FULL_OPTUNA_WORKERS = 3
+FAST_XGBOOST_N_JOBS = 3
+FULL_XGBOOST_N_JOBS = 4
 
 # AGENT_CONFIG_START
 MAX_FEATURES = 80
@@ -73,6 +76,8 @@ class EffectiveTrainingConfig:
     search_iterations: int
     time_series_splits: int
     early_stopping_rounds: int
+    optuna_workers: int
+    xgboost_n_jobs: int
     blend_mode: str
     cv_aggregation_mode: str
     lightgbm_param_mode: str
@@ -108,6 +113,8 @@ def resolve_effective_config(mode: str) -> EffectiveTrainingConfig:
         early_stopping_rounds=int(
             FAST_EARLY_STOPPING_ROUNDS if normalized_mode == "fast" else FULL_EARLY_STOPPING_ROUNDS
         ),
+        optuna_workers=FAST_OPTUNA_WORKERS if normalized_mode == "fast" else FULL_OPTUNA_WORKERS,
+        xgboost_n_jobs=FAST_XGBOOST_N_JOBS if normalized_mode == "fast" else FULL_XGBOOST_N_JOBS,
         blend_mode=BLEND_MODE,
         cv_aggregation_mode=CV_AGGREGATION_MODE,
         lightgbm_param_mode=LIGHTGBM_PARAM_MODE,
@@ -186,6 +193,7 @@ def apply_training_overrides(config: EffectiveTrainingConfig) -> Iterator[None]:
     original_medium_form = rct.DEFAULT_RUN_COUNT_MEDIUM_FORM_FEATURE_COUNT
     original_delta = rct.DEFAULT_RUN_COUNT_DELTA_FEATURE_COUNT
     original_context = rct.DEFAULT_RUN_COUNT_CONTEXT_FEATURE_COUNT
+    original_xgboost_n_jobs = rct.DEFAULT_XGBOOST_N_JOBS
     original_candidate_resolver = rct._resolve_run_count_candidate_feature_columns
     original_flat_selector = rct._select_run_count_feature_columns_flat
     original_bucketed_selector = rct._select_run_count_feature_columns_bucketed
@@ -195,6 +203,7 @@ def apply_training_overrides(config: EffectiveTrainingConfig) -> Iterator[None]:
     rct.DEFAULT_RUN_COUNT_MEDIUM_FORM_FEATURE_COUNT = config.bucket_targets["medium_form"]
     rct.DEFAULT_RUN_COUNT_DELTA_FEATURE_COUNT = config.bucket_targets["delta"]
     rct.DEFAULT_RUN_COUNT_CONTEXT_FEATURE_COUNT = config.bucket_targets["context"]
+    rct.DEFAULT_XGBOOST_N_JOBS = config.xgboost_n_jobs
 
     def _resolve_candidates(dataframe: pd.DataFrame) -> rct.RunCountCandidateResolution:
         base_resolution = original_candidate_resolver(dataframe)
@@ -304,6 +313,7 @@ def apply_training_overrides(config: EffectiveTrainingConfig) -> Iterator[None]:
         rct.DEFAULT_RUN_COUNT_MEDIUM_FORM_FEATURE_COUNT = original_medium_form
         rct.DEFAULT_RUN_COUNT_DELTA_FEATURE_COUNT = original_delta
         rct.DEFAULT_RUN_COUNT_CONTEXT_FEATURE_COUNT = original_context
+        rct.DEFAULT_XGBOOST_N_JOBS = original_xgboost_n_jobs
         rct._resolve_run_count_candidate_feature_columns = original_candidate_resolver
         rct._select_run_count_feature_columns_flat = original_flat_selector
         rct._select_run_count_feature_columns_bucketed = original_bucketed_selector
@@ -497,7 +507,7 @@ def run_training(
             holdout_season=HOLDOUT_SEASON,
             search_iterations=config.search_iterations,
             time_series_splits=config.time_series_splits,
-            optuna_workers=OPTUNA_WORKERS,
+            optuna_workers=config.optuna_workers,
             early_stopping_rounds=config.early_stopping_rounds,
             feature_selection_mode=config.feature_selection_mode,
             cv_aggregation_mode=config.cv_aggregation_mode,

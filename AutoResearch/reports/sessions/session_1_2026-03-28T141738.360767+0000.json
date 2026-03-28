@@ -1,0 +1,29 @@
+{
+  "artifact_references": [],
+  "best_exploration": null,
+  "best_overall": null,
+  "counts": {
+    "by_mode": {
+      "fast": 1
+    },
+    "by_status": {
+      "running": 1
+    },
+    "experiments": 1
+  },
+  "delta_vs_prior_best_exploration_r2": null,
+  "leaderboard": [],
+  "notes": [],
+  "recommendations": [],
+  "session": {
+    "duration_hours": 0,
+    "ended_at": "2026-03-28T14:23:38.380066+00:00",
+    "exploration_mode": "fast",
+    "id": 1,
+    "run_full_at_end": false,
+    "started_at": "2026-03-28T14:17:38.360767+00:00",
+    "status": "interrupted",
+    "stop_at": null,
+    "until_interrupted": true
+  }
+}

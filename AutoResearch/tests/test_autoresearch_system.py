@@ -31,6 +31,16 @@ def test_resolve_bucket_targets_supports_three_value_layout() -> None:
     }
 
 
+def test_resolve_effective_config_uses_mode_specific_parallelism() -> None:
+    fast_config = train.resolve_effective_config("fast")
+    full_config = train.resolve_effective_config("full")
+
+    assert fast_config.optuna_workers == 2
+    assert fast_config.xgboost_n_jobs == 3
+    assert full_config.optuna_workers == 3
+    assert full_config.xgboost_n_jobs == 4
+
+
 def test_update_train_config_rewrites_agent_block(tmp_path: Path) -> None:
     train_path = tmp_path / "train.py"
     train_path.write_text(
@@ -858,6 +868,7 @@ def test_run_training_passes_single_model_spec_to_trainer(monkeypatch, tmp_path:
     )
 
     assert captured["model_specs"] == ({"model_name": train.MODEL_NAME, "target_column": train.TARGET_COLUMN},)
+    assert captured["optuna_workers"] == 2
     assert payload["model"]["model_name"] == train.MODEL_NAME
 
 
