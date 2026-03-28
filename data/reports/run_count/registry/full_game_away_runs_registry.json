@@ -1,0 +1,2009 @@
+{
+  "generated_at": "2026-03-28T20:06:54.182854+00:00",
+  "models_root": "C:/Users/bills/Documents/Personal Code/MLBPrediction2026/data/models",
+  "target_model": "full_game_away_runs_model",
+  "row_count": 39,
+  "rows": [
+    {
+      "experiment_dir": "data/models/2026-away-flat-xgbonly-forceddelta6-fast-120x3-cc10",
+      "artifact_path": "data/models/2026-away-flat-xgbonly-forceddelta6-fast-120x3-cc10/full_game_away_runs_model_20260328T165816Z_cc10c0f6.metadata.json",
+      "artifact_modified_time_utc": "2026-03-28T17:02:11.668081+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260328T165816Z_cc10c0f6",
+      "data_version_hash": "cc10c0f691285c930a71958f258e4eaa2fe1ea198ea0227c6e40d438a8e4ebc0",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.3139904848949873,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.036668348741207835,
+      "holdout_rmse": 3.296848775708422,
+      "holdout_mae": 2.58524027832251,
+      "holdout_poisson_deviance": 2.5132360101017777,
+      "selected_feature_count": 80,
+      "feature_selection_mode": "flat",
+      "blend_mode": "xgb_only",
+      "cv_aggregation_mode": "mean",
+      "forced_delta_count": null,
+      "forced_delta_feature_count": 6,
+      "weather_feature_count": 4,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 6,
+      "top_5_features": [
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.046141065657138824
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.043093349784612656
+        },
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.02605392411351204
+        },
+        {
+          "feature": "home_starter_k_pct_7s",
+          "importance": 0.024834388867020607
+        },
+        {
+          "feature": "park_runs_factor",
+          "importance": 0.016971969977021217
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/fast-one",
+      "artifact_path": "data/models/fast-one/full_game_away_runs_model_20260328T163249Z_cc10c0f6.metadata.json",
+      "artifact_modified_time_utc": "2026-03-28T16:33:00.329852+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260328T163249Z_cc10c0f6",
+      "data_version_hash": "cc10c0f691285c930a71958f258e4eaa2fe1ea198ea0227c6e40d438a8e4ebc0",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.314965650345037,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.037499419380309984,
+      "holdout_rmse": 3.2954263655734217,
+      "holdout_mae": 2.5852176540673026,
+      "holdout_poisson_deviance": 2.5109770112634546,
+      "selected_feature_count": 80,
+      "feature_selection_mode": "flat",
+      "blend_mode": "xgb_only",
+      "cv_aggregation_mode": "mean",
+      "forced_delta_count": null,
+      "forced_delta_feature_count": 0,
+      "weather_feature_count": 4,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 0,
+      "top_5_features": [
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.04359973594546318
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.03681093454360962
+        },
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.024184221401810646
+        },
+        {
+          "feature": "home_starter_k_pct_7s",
+          "importance": 0.022984279319643974
+        },
+        {
+          "feature": "weather_air_density_factor",
+          "importance": 0.017666274681687355
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/fast-one",
+      "artifact_path": "data/models/fast-one/full_game_away_runs_model_20260328T162447Z_cc10c0f6.metadata.json",
+      "artifact_modified_time_utc": "2026-03-28T16:32:20.910651+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260328T162447Z_cc10c0f6",
+      "data_version_hash": "cc10c0f691285c930a71958f258e4eaa2fe1ea198ea0227c6e40d438a8e4ebc0",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.314965650345037,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.037499419380309984,
+      "holdout_rmse": 3.2954263655734217,
+      "holdout_mae": 2.5852176540673026,
+      "holdout_poisson_deviance": 2.5109770112634546,
+      "selected_feature_count": 80,
+      "feature_selection_mode": "flat",
+      "blend_mode": "xgb_only",
+      "cv_aggregation_mode": "mean",
+      "forced_delta_count": null,
+      "forced_delta_feature_count": 0,
+      "weather_feature_count": 4,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 0,
+      "top_5_features": [
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.04359973594546318
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.03681093454360962
+        },
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.024184221401810646
+        },
+        {
+          "feature": "home_starter_k_pct_7s",
+          "importance": 0.022984279319643974
+        },
+        {
+          "feature": "weather_air_density_factor",
+          "importance": 0.017666274681687355
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/fast-one",
+      "artifact_path": "data/models/fast-one/full_game_away_runs_model_20260328T162655Z_cc10c0f6.metadata.json",
+      "artifact_modified_time_utc": "2026-03-28T16:32:18.298344+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260328T162655Z_cc10c0f6",
+      "data_version_hash": "cc10c0f691285c930a71958f258e4eaa2fe1ea198ea0227c6e40d438a8e4ebc0",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.314965650345037,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.037499419380309984,
+      "holdout_rmse": 3.2954263655734217,
+      "holdout_mae": 2.5852176540673026,
+      "holdout_poisson_deviance": 2.5109770112634546,
+      "selected_feature_count": 80,
+      "feature_selection_mode": "flat",
+      "blend_mode": "xgb_only",
+      "cv_aggregation_mode": "mean",
+      "forced_delta_count": null,
+      "forced_delta_feature_count": 0,
+      "weather_feature_count": 4,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 0,
+      "top_5_features": [
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.04359973594546318
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.03681093454360962
+        },
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.024184221401810646
+        },
+        {
+          "feature": "home_starter_k_pct_7s",
+          "importance": 0.022984279319643974
+        },
+        {
+          "feature": "weather_air_density_factor",
+          "importance": 0.017666274681687355
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/autoresearch-away-runs-fast-pearson-72f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T160324Z",
+      "artifact_path": "data/models/autoresearch-away-runs-fast-pearson-72f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T160324Z/full_game_away_runs_model_20260328T160331Z_cc10c0f6.metadata.json",
+      "artifact_modified_time_utc": "2026-03-28T16:10:50.704181+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260328T160331Z_cc10c0f6",
+      "data_version_hash": "cc10c0f691285c930a71958f258e4eaa2fe1ea198ea0227c6e40d438a8e4ebc0",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.353650881580202,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.023118057576344886,
+      "holdout_rmse": 3.3199546612560993,
+      "holdout_mae": 2.607341731526724,
+      "holdout_poisson_deviance": 2.543667715759721,
+      "selected_feature_count": 72,
+      "feature_selection_mode": "flat",
+      "blend_mode": "xgb_only",
+      "cv_aggregation_mode": "mean",
+      "forced_delta_count": null,
+      "forced_delta_feature_count": 0,
+      "weather_feature_count": 0,
+      "log5_feature_count": 0,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 18,
+      "top_5_features": [
+        {
+          "feature": "home_starter_k_pct_7s",
+          "importance": 0.03551437705755234
+        },
+        {
+          "feature": "home_starter_xera_7s",
+          "importance": 0.023188035935163498
+        },
+        {
+          "feature": "home_starter_csw_pct_7s",
+          "importance": 0.020569603890180588
+        },
+        {
+          "feature": "home_team_runs_allowed_7g",
+          "importance": 0.020308522507548332
+        },
+        {
+          "feature": "away_lineup_iso_7g",
+          "importance": 0.019276181235909462
+        }
+      ],
+      "metadata_warnings": [
+        "forced_delta_feature_count does not match forced_delta_features length"
+      ]
+    },
+    {
+      "experiment_dir": "data/models/autoresearch-away-runs-fast-pearson-88f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T155229Z",
+      "artifact_path": "data/models/autoresearch-away-runs-fast-pearson-88f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T155229Z/full_game_away_runs_model_20260328T155231Z_cc10c0f6.metadata.json",
+      "artifact_modified_time_utc": "2026-03-28T16:02:07.933270+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260328T155231Z_cc10c0f6",
+      "data_version_hash": "cc10c0f691285c930a71958f258e4eaa2fe1ea198ea0227c6e40d438a8e4ebc0",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.353066862120348,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.02375547682668977,
+      "holdout_rmse": 3.3188713428735106,
+      "holdout_mae": 2.605686224340902,
+      "holdout_poisson_deviance": 2.542276966496116,
+      "selected_feature_count": 88,
+      "feature_selection_mode": "flat",
+      "blend_mode": "xgb_only",
+      "cv_aggregation_mode": "mean",
+      "forced_delta_count": null,
+      "forced_delta_feature_count": 0,
+      "weather_feature_count": 0,
+      "log5_feature_count": 0,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 28,
+      "top_5_features": [
+        {
+          "feature": "home_starter_k_pct_7s",
+          "importance": 0.02320261299610138
+        },
+        {
+          "feature": "home_starter_xera_7s",
+          "importance": 0.018951745703816414
+        },
+        {
+          "feature": "home_team_runs_allowed_7g",
+          "importance": 0.015118639916181564
+        },
+        {
+          "feature": "home_starter_csw_pct_7s",
+          "importance": 0.014653617516160011
+        },
+        {
+          "feature": "away_team_woba_7g",
+          "importance": 0.014208969660103321
+        }
+      ],
+      "metadata_warnings": [
+        "forced_delta_feature_count does not match forced_delta_features length"
+      ]
+    },
+    {
+      "experiment_dir": "data/models/autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T154503Z",
+      "artifact_path": "data/models/autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T154503Z/full_game_away_runs_model_20260328T154505Z_cc10c0f6.metadata.json",
+      "artifact_modified_time_utc": "2026-03-28T15:51:29.089571+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260328T154505Z_cc10c0f6",
+      "data_version_hash": "cc10c0f691285c930a71958f258e4eaa2fe1ea198ea0227c6e40d438a8e4ebc0",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.3526914401685857,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.023376247825425578,
+      "holdout_rmse": 3.3195158996568592,
+      "holdout_mae": 2.603257278356042,
+      "holdout_poisson_deviance": 2.543361687381095,
+      "selected_feature_count": 80,
+      "feature_selection_mode": "flat",
+      "blend_mode": "xgb_only",
+      "cv_aggregation_mode": "mean",
+      "forced_delta_count": null,
+      "forced_delta_feature_count": 0,
+      "weather_feature_count": 0,
+      "log5_feature_count": 0,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 22,
+      "top_5_features": [
+        {
+          "feature": "home_starter_k_pct_7s",
+          "importance": 0.028233233839273453
+        },
+        {
+          "feature": "home_starter_xera_7s",
+          "importance": 0.01925894059240818
+        },
+        {
+          "feature": "home_team_runs_allowed_7g",
+          "importance": 0.016955828294157982
+        },
+        {
+          "feature": "away_team_woba_7g",
+          "importance": 0.016731617972254753
+        },
+        {
+          "feature": "home_starter_csw_pct_7s",
+          "importance": 0.01636952906847
+        }
+      ],
+      "metadata_warnings": [
+        "forced_delta_feature_count does not match forced_delta_features length"
+      ]
+    },
+    {
+      "experiment_dir": "data/models/autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T153254Z",
+      "artifact_path": "data/models/autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T153254Z/full_game_away_runs_model_20260328T153256Z_cc10c0f6.metadata.json",
+      "artifact_modified_time_utc": "2026-03-28T15:44:05.771093+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260328T153256Z_cc10c0f6",
+      "data_version_hash": "cc10c0f691285c930a71958f258e4eaa2fe1ea198ea0227c6e40d438a8e4ebc0",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.3515349963387515,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.02396094142558014,
+      "holdout_rmse": 3.3185220725645483,
+      "holdout_mae": 2.604823111114188,
+      "holdout_poisson_deviance": 2.5417735324868445,
+      "selected_feature_count": 80,
+      "feature_selection_mode": "flat",
+      "blend_mode": "xgb_only",
+      "cv_aggregation_mode": "mean",
+      "forced_delta_count": null,
+      "forced_delta_feature_count": 0,
+      "weather_feature_count": 0,
+      "log5_feature_count": 0,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 22,
+      "top_5_features": [
+        {
+          "feature": "home_starter_k_pct_7s",
+          "importance": 0.02930637076497078
+        },
+        {
+          "feature": "home_starter_xera_7s",
+          "importance": 0.019985685124993324
+        },
+        {
+          "feature": "away_lineup_iso_7g",
+          "importance": 0.017699532210826874
+        },
+        {
+          "feature": "away_lineup_woba_7g",
+          "importance": 0.01747032441198826
+        },
+        {
+          "feature": "home_starter_csw_pct_7s",
+          "importance": 0.017467180266976357
+        }
+      ],
+      "metadata_warnings": [
+        "forced_delta_feature_count does not match forced_delta_features length"
+      ]
+    },
+    {
+      "experiment_dir": "data/models/autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T152444Z",
+      "artifact_path": "data/models/autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T152444Z/full_game_away_runs_model_20260328T152447Z_cc10c0f6.metadata.json",
+      "artifact_modified_time_utc": "2026-03-28T15:31:35.299880+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260328T152447Z_cc10c0f6",
+      "data_version_hash": "cc10c0f691285c930a71958f258e4eaa2fe1ea198ea0227c6e40d438a8e4ebc0",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.352133399726521,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.023311497764217037,
+      "holdout_rmse": 3.3196259396260483,
+      "holdout_mae": 2.6065683786761125,
+      "holdout_poisson_deviance": 2.543374758365812,
+      "selected_feature_count": 80,
+      "feature_selection_mode": "flat",
+      "blend_mode": "xgb_only",
+      "cv_aggregation_mode": "mean",
+      "forced_delta_count": null,
+      "forced_delta_feature_count": 0,
+      "weather_feature_count": 0,
+      "log5_feature_count": 0,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 22,
+      "top_5_features": [
+        {
+          "feature": "home_starter_k_pct_7s",
+          "importance": 0.028294971212744713
+        },
+        {
+          "feature": "home_starter_xera_7s",
+          "importance": 0.019940223544836044
+        },
+        {
+          "feature": "home_starter_csw_pct_7s",
+          "importance": 0.01888866350054741
+        },
+        {
+          "feature": "away_lineup_woba_7g",
+          "importance": 0.018075674772262573
+        },
+        {
+          "feature": "away_team_woba_7g",
+          "importance": 0.017294039949774742
+        }
+      ],
+      "metadata_warnings": [
+        "forced_delta_feature_count does not match forced_delta_features length"
+      ]
+    },
+    {
+      "experiment_dir": "data/models/autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T151401Z",
+      "artifact_path": "data/models/autoresearch-away-runs-fast-pearson-80f-120x3-7g-7s-delta-7v30g-delta-7v30s-20260328T151401Z/full_game_away_runs_model_20260328T151403Z_cc10c0f6.metadata.json",
+      "artifact_modified_time_utc": "2026-03-28T15:23:37.256321+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260328T151403Z_cc10c0f6",
+      "data_version_hash": "cc10c0f691285c930a71958f258e4eaa2fe1ea198ea0227c6e40d438a8e4ebc0",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.353344935423814,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.024468603600688477,
+      "holdout_rmse": 3.317658937407337,
+      "holdout_mae": 2.604091024300689,
+      "holdout_poisson_deviance": 2.5405436182436874,
+      "selected_feature_count": 80,
+      "feature_selection_mode": "flat",
+      "blend_mode": "xgb_only",
+      "cv_aggregation_mode": "mean",
+      "forced_delta_count": null,
+      "forced_delta_feature_count": 0,
+      "weather_feature_count": 0,
+      "log5_feature_count": 0,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 22,
+      "top_5_features": [
+        {
+          "feature": "home_starter_k_pct_7s",
+          "importance": 0.027575265616178513
+        },
+        {
+          "feature": "home_starter_xera_7s",
+          "importance": 0.019271396100521088
+        },
+        {
+          "feature": "away_team_woba_7g",
+          "importance": 0.016882022842764854
+        },
+        {
+          "feature": "home_team_runs_allowed_7g",
+          "importance": 0.016829993575811386
+        },
+        {
+          "feature": "away_team_iso_7g",
+          "importance": 0.015768684446811676
+        }
+      ],
+      "metadata_warnings": [
+        "forced_delta_feature_count does not match forced_delta_features length"
+      ]
+    },
+    {
+      "experiment_dir": "data/models/2026-away-flat-xgbonly-forceddelta8-200x5-cc10",
+      "artifact_path": "data/models/2026-away-flat-xgbonly-forceddelta8-200x5-cc10/full_game_away_runs_model_20260328T015528Z_cc10c0f6.metadata.json",
+      "artifact_modified_time_utc": "2026-03-28T02:03:13.901483+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260328T015528Z_cc10c0f6",
+      "data_version_hash": "cc10c0f691285c930a71958f258e4eaa2fe1ea198ea0227c6e40d438a8e4ebc0",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.3414287302140853,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.03479310697064619,
+      "holdout_rmse": 3.3000560734028954,
+      "holdout_mae": 2.589878207567788,
+      "holdout_poisson_deviance": 2.5172480318040926,
+      "selected_feature_count": 80,
+      "feature_selection_mode": "flat",
+      "blend_mode": "xgb_only",
+      "cv_aggregation_mode": "mean",
+      "forced_delta_count": null,
+      "forced_delta_feature_count": 8,
+      "weather_feature_count": 4,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 8,
+      "top_5_features": [
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.04458294063806534
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.040435586124658585
+        },
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.025254515931010246
+        },
+        {
+          "feature": "home_starter_k_pct_7s",
+          "importance": 0.02321443520486355
+        },
+        {
+          "feature": "away_team_pythagorean_wp_30g",
+          "importance": 0.018144948408007622
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-away-flat-xgbonly-forceddelta8-300x3-cc10",
+      "artifact_path": "data/models/2026-away-flat-xgbonly-forceddelta8-300x3-cc10/full_game_away_runs_model_20260328T014434Z_cc10c0f6.metadata.json",
+      "artifact_modified_time_utc": "2026-03-28T01:54:20.131890+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260328T014434Z_cc10c0f6",
+      "data_version_hash": "cc10c0f691285c930a71958f258e4eaa2fe1ea198ea0227c6e40d438a8e4ebc0",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.313869719515194,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.03791672060744189,
+      "holdout_rmse": 3.294711906495445,
+      "holdout_mae": 2.5830858274742408,
+      "holdout_poisson_deviance": 2.510398950400682,
+      "selected_feature_count": 80,
+      "feature_selection_mode": "flat",
+      "blend_mode": "xgb_only",
+      "cv_aggregation_mode": "mean",
+      "forced_delta_count": null,
+      "forced_delta_feature_count": 8,
+      "weather_feature_count": 4,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 8,
+      "top_5_features": [
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.04395587369799614
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.038247983902692795
+        },
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.025164032354950905
+        },
+        {
+          "feature": "home_starter_k_pct_7s",
+          "importance": 0.022748185321688652
+        },
+        {
+          "feature": "weather_air_density_factor",
+          "importance": 0.016974350437521935
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-away-flat-xgbonly-forceddelta14-fast-120x3-cc10",
+      "artifact_path": "data/models/2026-away-flat-xgbonly-forceddelta14-fast-120x3-cc10/full_game_away_runs_model_20260328T013137Z_cc10c0f6.metadata.json",
+      "artifact_modified_time_utc": "2026-03-28T01:35:52.196332+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260328T013137Z_cc10c0f6",
+      "data_version_hash": "cc10c0f691285c930a71958f258e4eaa2fe1ea198ea0227c6e40d438a8e4ebc0",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.3130813758948756,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.037717572837139834,
+      "holdout_rmse": 3.295052885594221,
+      "holdout_mae": 2.5814569799988356,
+      "holdout_poisson_deviance": 2.5112564537908595,
+      "selected_feature_count": 80,
+      "feature_selection_mode": "flat",
+      "blend_mode": "xgb_only",
+      "cv_aggregation_mode": "mean",
+      "forced_delta_count": null,
+      "forced_delta_feature_count": 14,
+      "weather_feature_count": 4,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 14,
+      "top_5_features": [
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.04431904852390289
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.03705409914255142
+        },
+        {
+          "feature": "home_starter_k_pct_7s",
+          "importance": 0.02486296370625496
+        },
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.024668702855706215
+        },
+        {
+          "feature": "weather_air_density_factor",
+          "importance": 0.01690066233277321
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-away-flat-xgbonly-forceddelta10-fast-120x3-cc10",
+      "artifact_path": "data/models/2026-away-flat-xgbonly-forceddelta10-fast-120x3-cc10/full_game_away_runs_model_20260328T012811Z_cc10c0f6.metadata.json",
+      "artifact_modified_time_utc": "2026-03-28T01:31:35.416140+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260328T012811Z_cc10c0f6",
+      "data_version_hash": "cc10c0f691285c930a71958f258e4eaa2fe1ea198ea0227c6e40d438a8e4ebc0",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.3137840372771934,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.036600079847500355,
+      "holdout_rmse": 3.296965593333437,
+      "holdout_mae": 2.5864869570045315,
+      "holdout_poisson_deviance": 2.5136577992550566,
+      "selected_feature_count": 80,
+      "feature_selection_mode": "flat",
+      "blend_mode": "xgb_only",
+      "cv_aggregation_mode": "mean",
+      "forced_delta_count": null,
+      "forced_delta_feature_count": 10,
+      "weather_feature_count": 4,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 10,
+      "top_5_features": [
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.04572342708706856
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.03543002903461456
+        },
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.025140192359685898
+        },
+        {
+          "feature": "home_starter_k_pct_7s",
+          "importance": 0.020584849640727043
+        },
+        {
+          "feature": "weather_air_density_factor",
+          "importance": 0.01767445169389248
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-away-flat-xgbonly-forceddelta8-fast-120x3-cc10",
+      "artifact_path": "data/models/2026-away-flat-xgbonly-forceddelta8-fast-120x3-cc10/full_game_away_runs_model_20260328T012328Z_cc10c0f6.metadata.json",
+      "artifact_modified_time_utc": "2026-03-28T01:28:09.495014+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260328T012328Z_cc10c0f6",
+      "data_version_hash": "cc10c0f691285c930a71958f258e4eaa2fe1ea198ea0227c6e40d438a8e4ebc0",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.313771021623278,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.03824683352672564,
+      "holdout_rmse": 3.294146612251993,
+      "holdout_mae": 2.581352596616549,
+      "holdout_poisson_deviance": 2.5095824478095023,
+      "selected_feature_count": 80,
+      "feature_selection_mode": "flat",
+      "blend_mode": "xgb_only",
+      "cv_aggregation_mode": "mean",
+      "forced_delta_count": null,
+      "forced_delta_feature_count": 8,
+      "weather_feature_count": 4,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 8,
+      "top_5_features": [
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.04425271227955818
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.03457064554095268
+        },
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.02436162531375885
+        },
+        {
+          "feature": "home_starter_k_pct_7s",
+          "importance": 0.02342795394361019
+        },
+        {
+          "feature": "weather_air_density_factor",
+          "importance": 0.01718955673277378
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-away-flat-xgbonly-forceddelta12-mid-200x3-cc10",
+      "artifact_path": "data/models/2026-away-flat-xgbonly-forceddelta12-mid-200x3-cc10/full_game_away_runs_model_20260328T011456Z_cc10c0f6.metadata.json",
+      "artifact_modified_time_utc": "2026-03-28T01:21:03.843233+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260328T011456Z_cc10c0f6",
+      "data_version_hash": "cc10c0f691285c930a71958f258e4eaa2fe1ea198ea0227c6e40d438a8e4ebc0",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.3127973881102206,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.0368514255269945,
+      "holdout_rmse": 3.2965354852877464,
+      "holdout_mae": 2.5856104697710203,
+      "holdout_poisson_deviance": 2.5128717082904397,
+      "selected_feature_count": 80,
+      "feature_selection_mode": "flat",
+      "blend_mode": "xgb_only",
+      "cv_aggregation_mode": "mean",
+      "forced_delta_count": null,
+      "forced_delta_feature_count": 12,
+      "weather_feature_count": 4,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 12,
+      "top_5_features": [
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.04294779151678085
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.04192366823554039
+        },
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.026284804567694664
+        },
+        {
+          "feature": "home_starter_k_pct_7s",
+          "importance": 0.024474451318383217
+        },
+        {
+          "feature": "away_team_f5_pythagorean_wp_30g",
+          "importance": 0.017510825768113136
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-away-flat-xgbonly-forceddelta12-fast-120x3-cc10",
+      "artifact_path": "data/models/2026-away-flat-xgbonly-forceddelta12-fast-120x3-cc10/full_game_away_runs_model_20260328T010902Z_cc10c0f6.metadata.json",
+      "artifact_modified_time_utc": "2026-03-28T01:13:46.422612+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260328T010902Z_cc10c0f6",
+      "data_version_hash": "cc10c0f691285c930a71958f258e4eaa2fe1ea198ea0227c6e40d438a8e4ebc0",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.3130518900047656,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.037297385257897275,
+      "holdout_rmse": 3.2957722114111556,
+      "holdout_mae": 2.5833202931125467,
+      "holdout_poisson_deviance": 2.5119594369173166,
+      "selected_feature_count": 80,
+      "feature_selection_mode": "flat",
+      "blend_mode": "xgb_only",
+      "cv_aggregation_mode": "mean",
+      "forced_delta_count": null,
+      "forced_delta_feature_count": 12,
+      "weather_feature_count": 4,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 12,
+      "top_5_features": [
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.04038475453853607
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.039955902844667435
+        },
+        {
+          "feature": "home_starter_k_pct_7s",
+          "importance": 0.0254714023321867
+        },
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.023504484444856644
+        },
+        {
+          "feature": "away_team_pythagorean_wp_30g",
+          "importance": 0.017351483926177025
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-away-flat-xgbonly-mid-200x3-cc10",
+      "artifact_path": "data/models/2026-away-flat-xgbonly-mid-200x3-cc10/full_game_away_runs_model_20260328T005613Z_cc10c0f6.metadata.json",
+      "artifact_modified_time_utc": "2026-03-28T01:03:10.404199+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260328T005613Z_cc10c0f6",
+      "data_version_hash": "cc10c0f691285c930a71958f258e4eaa2fe1ea198ea0227c6e40d438a8e4ebc0",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.3157457597871773,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.03658050953920233,
+      "holdout_rmse": 3.2969990801046567,
+      "holdout_mae": 2.584902503264784,
+      "holdout_poisson_deviance": 2.513240196291398,
+      "selected_feature_count": 80,
+      "feature_selection_mode": "flat",
+      "blend_mode": "xgb_only",
+      "cv_aggregation_mode": "mean",
+      "forced_delta_count": null,
+      "forced_delta_feature_count": null,
+      "weather_feature_count": 4,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 0,
+      "top_5_features": [
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.044660814106464386
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.034248098731040955
+        },
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.02462681010365486
+        },
+        {
+          "feature": "home_starter_k_pct_7s",
+          "importance": 0.02358974702656269
+        },
+        {
+          "feature": "away_team_pythagorean_wp_30g",
+          "importance": 0.016944799572229385
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-away-grouped-recentweighted-xgbonly-fast-120x3-cc10",
+      "artifact_path": "data/models/2026-away-grouped-recentweighted-xgbonly-fast-120x3-cc10/full_game_away_runs_model_20260328T004945Z_cc10c0f6.metadata.json",
+      "artifact_modified_time_utc": "2026-03-28T00:54:14.095452+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260328T004945Z_cc10c0f6",
+      "data_version_hash": "cc10c0f691285c930a71958f258e4eaa2fe1ea198ea0227c6e40d438a8e4ebc0",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.31347777237721,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.03617737032082613,
+      "holdout_rmse": 3.2976888163150937,
+      "holdout_mae": 2.5842763999852623,
+      "holdout_poisson_deviance": 2.5145052152563343,
+      "selected_feature_count": 80,
+      "feature_selection_mode": "grouped",
+      "blend_mode": "xgb_only",
+      "cv_aggregation_mode": "recent_weighted",
+      "forced_delta_count": null,
+      "forced_delta_feature_count": null,
+      "weather_feature_count": 4,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 4,
+      "framing_feature_count": 0,
+      "delta_feature_count": 0,
+      "top_5_features": [
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.03984438627958298
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.03853865712881088
+        },
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.025568878278136253
+        },
+        {
+          "feature": "away_lineup_xwoba_30g",
+          "importance": 0.017818119376897812
+        },
+        {
+          "feature": "away_team_pythagorean_wp_30g",
+          "importance": 0.017597539350390434
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-away-flat-xgbonly-fast-120x3-cc10",
+      "artifact_path": "data/models/2026-away-flat-xgbonly-fast-120x3-cc10/full_game_away_runs_model_20260328T004454Z_cc10c0f6.metadata.json",
+      "artifact_modified_time_utc": "2026-03-28T00:49:34.255965+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260328T004454Z_cc10c0f6",
+      "data_version_hash": "cc10c0f691285c930a71958f258e4eaa2fe1ea198ea0227c6e40d438a8e4ebc0",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.315670364231668,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.03658050953920233,
+      "holdout_rmse": 3.2969990801046567,
+      "holdout_mae": 2.584902503264784,
+      "holdout_poisson_deviance": 2.513240196291398,
+      "selected_feature_count": 80,
+      "feature_selection_mode": "flat",
+      "blend_mode": "xgb_only",
+      "cv_aggregation_mode": "mean",
+      "forced_delta_count": null,
+      "forced_delta_feature_count": null,
+      "weather_feature_count": 4,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 0,
+      "top_5_features": [
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.044660814106464386
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.034248098731040955
+        },
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.02462681010365486
+        },
+        {
+          "feature": "home_starter_k_pct_7s",
+          "importance": 0.02358974702656269
+        },
+        {
+          "feature": "away_team_pythagorean_wp_30g",
+          "importance": 0.016944799572229385
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-away-grouped-xgbonly-fast-120x3-cc10",
+      "artifact_path": "data/models/2026-away-grouped-xgbonly-fast-120x3-cc10/full_game_away_runs_model_20260328T003939Z_cc10c0f6.metadata.json",
+      "artifact_modified_time_utc": "2026-03-28T00:44:06.591849+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260328T003939Z_cc10c0f6",
+      "data_version_hash": "cc10c0f691285c930a71958f258e4eaa2fe1ea198ea0227c6e40d438a8e4ebc0",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.318824925163208,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.03617592756017973,
+      "holdout_rmse": 3.297691284494259,
+      "holdout_mae": 2.583426512906581,
+      "holdout_poisson_deviance": 2.5148121431614006,
+      "selected_feature_count": 80,
+      "feature_selection_mode": "grouped",
+      "blend_mode": "xgb_only",
+      "cv_aggregation_mode": "mean",
+      "forced_delta_count": null,
+      "forced_delta_feature_count": null,
+      "weather_feature_count": 4,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 4,
+      "framing_feature_count": 0,
+      "delta_feature_count": 0,
+      "top_5_features": [
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.04441693425178528
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.036277953535318375
+        },
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.024702848866581917
+        },
+        {
+          "feature": "weather_air_density_factor",
+          "importance": 0.017719227820634842
+        },
+        {
+          "feature": "away_lineup_xwoba_30g",
+          "importance": 0.016810135915875435
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-away-fast-deltas-poisson-parallel-120x3",
+      "artifact_path": "data/models/2026-away-fast-deltas-poisson-parallel-120x3/full_game_away_runs_model_20260328T003100Z_cc10c0f6.metadata.json",
+      "artifact_modified_time_utc": "2026-03-28T00:36:16.330257+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260328T003100Z_cc10c0f6",
+      "data_version_hash": "cc10c0f691285c930a71958f258e4eaa2fe1ea198ea0227c6e40d438a8e4ebc0",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.3198097906175197,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.03586768777645977,
+      "holdout_rmse": 3.2982185583093067,
+      "holdout_mae": 2.5860816213819717,
+      "holdout_poisson_deviance": 2.5151261167879193,
+      "selected_feature_count": 80,
+      "feature_selection_mode": "grouped",
+      "blend_mode": "learned",
+      "cv_aggregation_mode": "mean",
+      "forced_delta_count": null,
+      "forced_delta_feature_count": null,
+      "weather_feature_count": 4,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 4,
+      "framing_feature_count": 0,
+      "delta_feature_count": 0,
+      "top_5_features": [
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.03923684358596802
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.03570475056767464
+        },
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.025791693478822708
+        },
+        {
+          "feature": "away_team_pythagorean_wp_30g",
+          "importance": 0.018421992659568787
+        },
+        {
+          "feature": "away_lineup_xwoba_30g",
+          "importance": 0.01777489110827446
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-run12.5-away-deltas-poisson-parallel-500x5",
+      "artifact_path": "data/models/2026-run12.5-away-deltas-poisson-parallel-500x5/full_game_away_runs_model_20260327T184654Z_89a8a834.metadata.json",
+      "artifact_modified_time_utc": "2026-03-27T19:03:44.629662+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260327T184654Z_89a8a834",
+      "data_version_hash": "89a8a834f1f6c750d6f48b9826b035b9057868db3ac868d2f6452d14608ae217",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.3429277149392025,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.03329805031059885,
+      "holdout_rmse": 3.302610894438965,
+      "holdout_mae": 2.593728847069606,
+      "holdout_poisson_deviance": 2.520916778313888,
+      "selected_feature_count": 80,
+      "feature_selection_mode": null,
+      "blend_mode": null,
+      "cv_aggregation_mode": null,
+      "forced_delta_count": null,
+      "forced_delta_feature_count": null,
+      "weather_feature_count": 4,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 0,
+      "top_5_features": [
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.04240698355950977
+        },
+        {
+          "feature": "weather_air_density_factor",
+          "importance": 0.0402663042421705
+        },
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.035383432462224425
+        },
+        {
+          "feature": "home_team_bullpen_xfip",
+          "importance": 0.033234680171696285
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.03278403920506453
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-away-fast-deltas-poisson-parallel-120x3",
+      "artifact_path": "data/models/2026-away-fast-deltas-poisson-parallel-120x3/full_game_away_runs_model_20260327T183834Z_89a8a834.metadata.json",
+      "artifact_modified_time_utc": "2026-03-27T18:42:57.128767+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260327T183834Z_89a8a834",
+      "data_version_hash": "89a8a834f1f6c750d6f48b9826b035b9057868db3ac868d2f6452d14608ae217",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.3157835353256115,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.03704115428690968,
+      "holdout_rmse": 3.296210780247072,
+      "holdout_mae": 2.5866411669400735,
+      "holdout_poisson_deviance": 2.511950111499137,
+      "selected_feature_count": 80,
+      "feature_selection_mode": null,
+      "blend_mode": null,
+      "cv_aggregation_mode": null,
+      "forced_delta_count": null,
+      "forced_delta_feature_count": null,
+      "weather_feature_count": 4,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 0,
+      "top_5_features": [
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.03496206765909752
+        },
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.03474572651628026
+        },
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.034175485393618726
+        },
+        {
+          "feature": "weather_air_density_factor",
+          "importance": 0.033012007127144596
+        },
+        {
+          "feature": "home_team_bullpen_xfip",
+          "importance": 0.029609290377189457
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-away-smoke-deltas-poisson-parallel-12x2",
+      "artifact_path": "data/models/2026-away-smoke-deltas-poisson-parallel-12x2/full_game_away_runs_model_20260327T183049Z_89a8a834.metadata.json",
+      "artifact_modified_time_utc": "2026-03-27T18:31:00.233007+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260327T183049Z_89a8a834",
+      "data_version_hash": "89a8a834f1f6c750d6f48b9826b035b9057868db3ac868d2f6452d14608ae217",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.305104929823187,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.03636090234137146,
+      "holdout_rmse": 3.2973748268486283,
+      "holdout_mae": 2.588308508727092,
+      "holdout_poisson_deviance": 2.5129465464491507,
+      "selected_feature_count": 80,
+      "feature_selection_mode": null,
+      "blend_mode": null,
+      "cv_aggregation_mode": null,
+      "forced_delta_count": null,
+      "forced_delta_feature_count": null,
+      "weather_feature_count": 4,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 0,
+      "top_5_features": [
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.03542971959419637
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.034458142346077296
+        },
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.028043249491967924
+        },
+        {
+          "feature": "weather_air_density_factor",
+          "importance": 0.027501628674104134
+        },
+        {
+          "feature": "home_team_bullpen_xfip",
+          "importance": 0.024977380894262897
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-run11-away-poisson-deviance-500x5",
+      "artifact_path": "data/models/2026-run11-away-poisson-deviance-500x5/full_game_away_runs_model_20260327T181628Z_89a8a834.metadata.json",
+      "artifact_modified_time_utc": "2026-03-27T18:16:31.461767+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260327T181628Z_89a8a834",
+      "data_version_hash": "89a8a834f1f6c750d6f48b9826b035b9057868db3ac868d2f6452d14608ae217",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.342294479655579,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.03614693954794712,
+      "holdout_rmse": 3.2977408748703816,
+      "holdout_mae": 2.5894621911498508,
+      "holdout_poisson_deviance": 2.513763833751541,
+      "selected_feature_count": 80,
+      "feature_selection_mode": null,
+      "blend_mode": null,
+      "cv_aggregation_mode": null,
+      "forced_delta_count": null,
+      "forced_delta_feature_count": null,
+      "weather_feature_count": 4,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 0,
+      "top_5_features": [
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.032954617724379624
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.031412495988865315
+        },
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.03051367390283114
+        },
+        {
+          "feature": "weather_air_density_factor",
+          "importance": 0.0294414157401625
+        },
+        {
+          "feature": "home_team_bullpen_xfip",
+          "importance": 0.026413219659351395
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-run11-away-poisson-deviance-500x5",
+      "artifact_path": "data/models/2026-run11-away-poisson-deviance-500x5/full_game_away_runs_model_20260327T155302Z_89a8a834.metadata.json",
+      "artifact_modified_time_utc": "2026-03-27T16:17:39.787112+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260327T155302Z_89a8a834",
+      "data_version_hash": "89a8a834f1f6c750d6f48b9826b035b9057868db3ac868d2f6452d14608ae217",
+      "holdout_season": 2025,
+      "cv_metric_name": "poisson_deviance",
+      "cv_best_score": 2.342294479655579,
+      "cv_best_rmse": null,
+      "holdout_r2": 0.03499186770356855,
+      "holdout_rmse": 3.29971627302445,
+      "holdout_mae": 2.5912584885261425,
+      "holdout_poisson_deviance": 2.5163130127257927,
+      "selected_feature_count": 80,
+      "feature_selection_mode": null,
+      "blend_mode": null,
+      "cv_aggregation_mode": null,
+      "forced_delta_count": null,
+      "forced_delta_feature_count": null,
+      "weather_feature_count": 4,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 0,
+      "top_5_features": [
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.03601363687272939
+        },
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.030235565708360737
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.029981872755546986
+        },
+        {
+          "feature": "weather_air_density_factor",
+          "importance": 0.029259830189854272
+        },
+        {
+          "feature": "home_team_bullpen_xfip",
+          "importance": 0.026733199371718454
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-run10-away-only-250x5",
+      "artifact_path": "data/models/2026-run10-away-only-250x5/full_game_away_runs_model_20260327T151845Z_89a8a834.metadata.json",
+      "artifact_modified_time_utc": "2026-03-27T15:26:08.554728+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260327T151845Z_89a8a834",
+      "data_version_hash": "89a8a834f1f6c750d6f48b9826b035b9057868db3ac868d2f6452d14608ae217",
+      "holdout_season": 2025,
+      "cv_metric_name": null,
+      "cv_best_score": null,
+      "cv_best_rmse": 3.2065246183177143,
+      "holdout_r2": 0.03342636309046576,
+      "holdout_rmse": 3.302391705242298,
+      "holdout_mae": 2.5916757457654858,
+      "holdout_poisson_deviance": null,
+      "selected_feature_count": 80,
+      "feature_selection_mode": null,
+      "blend_mode": null,
+      "cv_aggregation_mode": null,
+      "forced_delta_count": null,
+      "forced_delta_feature_count": null,
+      "weather_feature_count": 4,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 0,
+      "top_5_features": [
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.042758460232341325
+        },
+        {
+          "feature": "weather_air_density_factor",
+          "importance": 0.041411605008631856
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.034561237467325756
+        },
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.032514944871561466
+        },
+        {
+          "feature": "home_team_bullpen_xfip",
+          "importance": 0.032110714862670316
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-run9-away-only-500x5",
+      "artifact_path": "data/models/2026-run9-away-only-500x5/full_game_away_runs_model_20260327T134432Z_7392cf20.metadata.json",
+      "artifact_modified_time_utc": "2026-03-27T13:59:33.159004+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260327T134432Z_7392cf20",
+      "data_version_hash": "7392cf204cfb772e46cfdf6d8bd167fa43421aceb656df86b6fe561e117536f8",
+      "holdout_season": 2025,
+      "cv_metric_name": null,
+      "cv_best_score": null,
+      "cv_best_rmse": 3.2045764188901003,
+      "holdout_r2": 0.035857773295457585,
+      "holdout_rmse": 3.2982355165839943,
+      "holdout_mae": 2.5899328773513752,
+      "holdout_poisson_deviance": null,
+      "selected_feature_count": 80,
+      "feature_selection_mode": null,
+      "blend_mode": null,
+      "cv_aggregation_mode": null,
+      "forced_delta_count": null,
+      "forced_delta_feature_count": null,
+      "weather_feature_count": 4,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 0,
+      "top_5_features": [
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.03887654936317999
+        },
+        {
+          "feature": "weather_air_density_factor",
+          "importance": 0.0362666035316819
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.03485685680880924
+        },
+        {
+          "feature": "home_team_bullpen_xfip",
+          "importance": 0.03220082896097926
+        },
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.028795727722543428
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/temp-run-count-smoke",
+      "artifact_path": "data/models/temp-run-count-smoke/full_game_away_runs_model_20260327T133300Z_7392cf20.metadata.json",
+      "artifact_modified_time_utc": "2026-03-27T13:33:09.030282+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260327T133300Z_7392cf20",
+      "data_version_hash": "7392cf204cfb772e46cfdf6d8bd167fa43421aceb656df86b6fe561e117536f8",
+      "holdout_season": 2025,
+      "cv_metric_name": null,
+      "cv_best_score": null,
+      "cv_best_rmse": 3.204743942761799,
+      "holdout_r2": 0.03528653123214287,
+      "holdout_rmse": 3.2992124532937774,
+      "holdout_mae": 2.591362476316453,
+      "holdout_poisson_deviance": null,
+      "selected_feature_count": 80,
+      "feature_selection_mode": null,
+      "blend_mode": null,
+      "cv_aggregation_mode": null,
+      "forced_delta_count": null,
+      "forced_delta_feature_count": null,
+      "weather_feature_count": 4,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 0,
+      "top_5_features": [
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.031123527892608287
+        },
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.029167037593726894
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.028437298432301278
+        },
+        {
+          "feature": "weather_air_density_factor",
+          "importance": 0.026789206374871304
+        },
+        {
+          "feature": "home_team_bullpen_xfip",
+          "importance": 0.026758825803336037
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-run8-100feats-250x5",
+      "artifact_path": "data/models/2026-run8-100feats-250x5/full_game_away_runs_model_20260327T120706Z_7392cf20.metadata.json",
+      "artifact_modified_time_utc": "2026-03-27T13:18:57.199771+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260327T120706Z_7392cf20",
+      "data_version_hash": "7392cf204cfb772e46cfdf6d8bd167fa43421aceb656df86b6fe561e117536f8",
+      "holdout_season": 2025,
+      "cv_metric_name": null,
+      "cv_best_score": null,
+      "cv_best_rmse": 3.2012989569580257,
+      "holdout_r2": 0.033964924808008945,
+      "holdout_rmse": 3.301471553122103,
+      "holdout_mae": 2.5898382869215277,
+      "holdout_poisson_deviance": null,
+      "selected_feature_count": 100,
+      "feature_selection_mode": null,
+      "blend_mode": null,
+      "cv_aggregation_mode": null,
+      "forced_delta_count": null,
+      "forced_delta_feature_count": null,
+      "weather_feature_count": 4,
+      "log5_feature_count": 4,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 0,
+      "top_5_features": [
+        {
+          "feature": "weather_air_density_factor",
+          "importance": 0.03768984444947039
+        },
+        {
+          "feature": "home_team_log5_60g",
+          "importance": 0.03400489185609745
+        },
+        {
+          "feature": "away_team_log5_60g",
+          "importance": 0.03337348902728288
+        },
+        {
+          "feature": "home_starter_k_pct_60s",
+          "importance": 0.028775397705877094
+        },
+        {
+          "feature": "home_team_bullpen_xfip",
+          "importance": 0.025870644639057486
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-run7-poisson-250x5",
+      "artifact_path": "data/models/2026-run7-poisson-250x5/full_game_away_runs_model_20260327T105338Z_7392cf20.metadata.json",
+      "artifact_modified_time_utc": "2026-03-27T11:37:54.012262+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260327T105338Z_7392cf20",
+      "data_version_hash": "7392cf204cfb772e46cfdf6d8bd167fa43421aceb656df86b6fe561e117536f8",
+      "holdout_season": 2025,
+      "cv_metric_name": null,
+      "cv_best_score": null,
+      "cv_best_rmse": 3.2002401741861535,
+      "holdout_r2": 0.03306367684496392,
+      "holdout_rmse": 3.3030112233360103,
+      "holdout_mae": 2.591956780369019,
+      "holdout_poisson_deviance": null,
+      "selected_feature_count": 80,
+      "feature_selection_mode": null,
+      "blend_mode": null,
+      "cv_aggregation_mode": null,
+      "forced_delta_count": null,
+      "forced_delta_feature_count": null,
+      "weather_feature_count": 4,
+      "log5_feature_count": 4,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 0,
+      "top_5_features": [
+        {
+          "feature": "weather_air_density_factor",
+          "importance": 0.041287591542910645
+        },
+        {
+          "feature": "home_team_log5_60g",
+          "importance": 0.04042578350614619
+        },
+        {
+          "feature": "away_team_log5_60g",
+          "importance": 0.03981691665119595
+        },
+        {
+          "feature": "home_starter_k_pct_60s",
+          "importance": 0.03393850180285948
+        },
+        {
+          "feature": "park_runs_factor",
+          "importance": 0.032793530180222456
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-run6-platoon-fix-500x10",
+      "artifact_path": "data/models/2026-run6-platoon-fix-500x10/full_game_away_runs_model_20260327T103647Z_7392cf20.metadata.json",
+      "artifact_modified_time_utc": "2026-03-27T10:36:56.181084+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260327T103647Z_7392cf20",
+      "data_version_hash": "7392cf204cfb772e46cfdf6d8bd167fa43421aceb656df86b6fe561e117536f8",
+      "holdout_season": 2025,
+      "cv_metric_name": null,
+      "cv_best_score": null,
+      "cv_best_rmse": 3.1850898432484924,
+      "holdout_r2": 0.028313967528713846,
+      "holdout_rmse": 3.3111136827289434,
+      "holdout_mae": 2.6026119328701958,
+      "holdout_poisson_deviance": null,
+      "selected_feature_count": 80,
+      "feature_selection_mode": null,
+      "blend_mode": null,
+      "cv_aggregation_mode": null,
+      "forced_delta_count": null,
+      "forced_delta_feature_count": null,
+      "weather_feature_count": 4,
+      "log5_feature_count": 4,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 0,
+      "top_5_features": [
+        {
+          "feature": "home_team_log5_60g",
+          "importance": 0.045654821711778634
+        },
+        {
+          "feature": "home_starter_k_pct_60s",
+          "importance": 0.03959887466898986
+        },
+        {
+          "feature": "weather_air_density_factor",
+          "importance": 0.03893618409633636
+        },
+        {
+          "feature": "away_team_log5_60g",
+          "importance": 0.03713718889951706
+        },
+        {
+          "feature": "park_runs_factor",
+          "importance": 0.03242986441659076
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-run6-platoon-fix-500x10",
+      "artifact_path": "data/models/2026-run6-platoon-fix-500x10/full_game_away_runs_model_20260327T020521Z_7392cf20.metadata.json",
+      "artifact_modified_time_utc": "2026-03-27T06:23:36.807416+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260327T020521Z_7392cf20",
+      "data_version_hash": "7392cf204cfb772e46cfdf6d8bd167fa43421aceb656df86b6fe561e117536f8",
+      "holdout_season": 2025,
+      "cv_metric_name": null,
+      "cv_best_score": null,
+      "cv_best_rmse": 3.1850898432484924,
+      "holdout_r2": 0.03472072907949597,
+      "holdout_rmse": 3.300179801602251,
+      "holdout_mae": 2.584965717587709,
+      "holdout_poisson_deviance": null,
+      "selected_feature_count": 80,
+      "feature_selection_mode": null,
+      "blend_mode": null,
+      "cv_aggregation_mode": null,
+      "forced_delta_count": null,
+      "forced_delta_feature_count": null,
+      "weather_feature_count": 4,
+      "log5_feature_count": 4,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 0,
+      "top_5_features": [
+        {
+          "feature": "home_team_log5_60g",
+          "importance": 0.03967112954940115
+        },
+        {
+          "feature": "away_team_log5_60g",
+          "importance": 0.03888908652578081
+        },
+        {
+          "feature": "weather_air_density_factor",
+          "importance": 0.031926059484907565
+        },
+        {
+          "feature": "park_runs_factor",
+          "importance": 0.029324605058346477
+        },
+        {
+          "feature": "home_starter_k_pct_60s",
+          "importance": 0.028809328634398324
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-run5-features-fixed-150x5",
+      "artifact_path": "data/models/2026-run5-features-fixed-150x5/full_game_away_runs_model_20260327T005219Z_ef9fead1.metadata.json",
+      "artifact_modified_time_utc": "2026-03-27T01:19:21.257927+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260327T005219Z_ef9fead1",
+      "data_version_hash": "ef9fead12cc3f65f0ac47faf1243cc6d251d960e79e0601838b972594bd22f06",
+      "holdout_season": 2025,
+      "cv_metric_name": null,
+      "cv_best_score": null,
+      "cv_best_rmse": 3.2039349828156523,
+      "holdout_r2": 0.0341151288391216,
+      "holdout_rmse": 3.3012148783769732,
+      "holdout_mae": 2.5860616701150465,
+      "holdout_poisson_deviance": null,
+      "selected_feature_count": 80,
+      "feature_selection_mode": null,
+      "blend_mode": null,
+      "cv_aggregation_mode": null,
+      "forced_delta_count": null,
+      "forced_delta_feature_count": null,
+      "weather_feature_count": 4,
+      "log5_feature_count": 4,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 0,
+      "top_5_features": [
+        {
+          "feature": "home_team_log5_60g",
+          "importance": 0.04449210281038367
+        },
+        {
+          "feature": "weather_air_density_factor",
+          "importance": 0.03975729683339768
+        },
+        {
+          "feature": "away_team_log5_60g",
+          "importance": 0.03869993366546683
+        },
+        {
+          "feature": "home_starter_k_pct_60s",
+          "importance": 0.0319906900697719
+        },
+        {
+          "feature": "park_runs_factor",
+          "importance": 0.029213369504143008
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-run-count-bugfix-250x7",
+      "artifact_path": "data/models/2026-run-count-bugfix-250x7/full_game_away_runs_model_20260326T195504Z_ccb975d0.metadata.json",
+      "artifact_modified_time_utc": "2026-03-26T21:28:09.449237+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260326T195504Z_ccb975d0",
+      "data_version_hash": "ccb975d09d2d0938d5c506332d72e0e67fce4ff58929d991fbac10aa12dcdd91",
+      "holdout_season": 2025,
+      "cv_metric_name": null,
+      "cv_best_score": null,
+      "cv_best_rmse": 3.189752246071808,
+      "holdout_r2": 0.03220814008305817,
+      "holdout_rmse": 3.304472137909187,
+      "holdout_mae": 2.59819184707435,
+      "holdout_poisson_deviance": null,
+      "selected_feature_count": 80,
+      "feature_selection_mode": null,
+      "blend_mode": null,
+      "cv_aggregation_mode": null,
+      "forced_delta_count": null,
+      "forced_delta_feature_count": null,
+      "weather_feature_count": 1,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 0,
+      "top_5_features": [
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.041116600914427835
+        },
+        {
+          "feature": "home_team_bullpen_xfip",
+          "importance": 0.03444354363851032
+        },
+        {
+          "feature": "park_runs_factor",
+          "importance": 0.033349287842471986
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.032858134075451226
+        },
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.031619960563949785
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-run-count-newfeatures-150x5",
+      "artifact_path": "data/models/2026-run-count-newfeatures-150x5/full_game_away_runs_model_20260326T035331Z_03921579.metadata.json",
+      "artifact_modified_time_utc": "2026-03-26T05:28:56.311513+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260326T035331Z_03921579",
+      "data_version_hash": "0392157987c040cc0ad5670a170540e86c43936469a2ee766e6bc6f07b2aa1c6",
+      "holdout_season": 2025,
+      "cv_metric_name": null,
+      "cv_best_score": null,
+      "cv_best_rmse": 3.1788172347180104,
+      "holdout_r2": 0.051563316734072995,
+      "holdout_rmse": 3.2688385959577673,
+      "holdout_mae": 2.5604660442281806,
+      "holdout_poisson_deviance": null,
+      "selected_feature_count": 80,
+      "feature_selection_mode": null,
+      "blend_mode": null,
+      "cv_aggregation_mode": null,
+      "forced_delta_count": null,
+      "forced_delta_feature_count": null,
+      "weather_feature_count": 1,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 0,
+      "top_5_features": [
+        {
+          "feature": "away_lineup_xwoba_7g",
+          "importance": 0.042084004760498096
+        },
+        {
+          "feature": "away_lineup_woba_7g",
+          "importance": 0.033707250842026304
+        },
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.0302135622749726
+        },
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.02894156816601753
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.027596694130273092
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-run-count-full-refresh-150x5",
+      "artifact_path": "data/models/2026-run-count-full-refresh-150x5/full_game_away_runs_model_20260325T212951Z_2f59491c.metadata.json",
+      "artifact_modified_time_utc": "2026-03-25T22:43:26.980324+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260325T212951Z_2f59491c",
+      "data_version_hash": "2f59491cc736dc7c283c813b8d31c8827fd2e1503244e7e39906f16792fddef0",
+      "holdout_season": 2025,
+      "cv_metric_name": null,
+      "cv_best_score": null,
+      "cv_best_rmse": 3.184166783459306,
+      "holdout_r2": 0.047892562953416484,
+      "holdout_rmse": 3.275158213369978,
+      "holdout_mae": 2.5670690175097928,
+      "holdout_poisson_deviance": null,
+      "selected_feature_count": 80,
+      "feature_selection_mode": null,
+      "blend_mode": null,
+      "cv_aggregation_mode": null,
+      "forced_delta_count": null,
+      "forced_delta_feature_count": null,
+      "weather_feature_count": 1,
+      "log5_feature_count": 2,
+      "plate_umpire_feature_count": 2,
+      "framing_feature_count": 0,
+      "delta_feature_count": 0,
+      "top_5_features": [
+        {
+          "feature": "away_lineup_woba_7g",
+          "importance": 0.03991828859012655
+        },
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.033881814945001296
+        },
+        {
+          "feature": "home_starter_k_pct_30s",
+          "importance": 0.033626648785286456
+        },
+        {
+          "feature": "home_team_bullpen_pitch_count_3d",
+          "importance": 0.027552428929879743
+        },
+        {
+          "feature": "away_team_log5_30g",
+          "importance": 0.027137085379931078
+        }
+      ],
+      "metadata_warnings": []
+    },
+    {
+      "experiment_dir": "data/models/2026-run-count-100x5",
+      "artifact_path": "data/models/2026-run-count-100x5/full_game_away_runs_model_20260325T190858Z_4c611698.metadata.json",
+      "artifact_modified_time_utc": "2026-03-25T20:10:12.613716+00:00",
+      "model_name": "full_game_away_runs_model",
+      "target_column": "final_away_score",
+      "model_version": "20260325T190858Z_4c611698",
+      "data_version_hash": "4c611698509f6108baca4da4111b531fdb35c76f030362493abc2e08f0435bf4",
+      "holdout_season": 2025,
+      "cv_metric_name": null,
+      "cv_best_score": null,
+      "cv_best_rmse": 3.181331747397758,
+      "holdout_r2": 0.04499147601551945,
+      "holdout_rmse": 3.280144148532394,
+      "holdout_mae": 2.564623058576905,
+      "holdout_poisson_deviance": null,
+      "selected_feature_count": 210,
+      "feature_selection_mode": null,
+      "blend_mode": null,
+      "cv_aggregation_mode": null,
+      "forced_delta_count": null,
+      "forced_delta_feature_count": null,
+      "weather_feature_count": 1,
+      "log5_feature_count": 4,
+      "plate_umpire_feature_count": 0,
+      "framing_feature_count": 0,
+      "delta_feature_count": 0,
+      "top_5_features": [
+        {
+          "feature": "away_team_log5_60g",
+          "importance": 0.02251814678311348
+        },
+        {
+          "feature": "home_team_log5_60g",
+          "importance": 0.019992249086499214
+        },
+        {
+          "feature": "home_team_log5_30g",
+          "importance": 0.011880609206855297
+        },
+        {
+          "feature": "away_lineup_woba_7g",
+          "importance": 0.011357411742210388
+        },
+        {
+          "feature": "away_team_woba_7g",
+          "importance": 0.010978623293340206
+        }
+      ],
+      "metadata_warnings": []
+    }
+  ]
+}

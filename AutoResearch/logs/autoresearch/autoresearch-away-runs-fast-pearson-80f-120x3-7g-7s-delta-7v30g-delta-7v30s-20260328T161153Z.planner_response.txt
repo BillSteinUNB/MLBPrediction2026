@@ -1,0 +1,16 @@
+```json
+{
+  "hypothesis": "Complete the lower end of the Stage 1 forced-delta curve by testing forced_delta_count=4 at max_features=80; the monotonic decline from delta=8→6 (2.45%→2.40%) suggests the peak is at 8, but testing 4 confirms whether the curve continues downward or rebounds.",
+  "reasoning": "Stage 1 has tested delta=6,8,10,12 at mf=80, showing a clear peak at delta=8. The remaining untested Stage 1 points are 4, 14, and 16. Delta=4 is the most informative because it brackets the lower side of the peak nearest to the winner; delta=14/16 are far from the optimum and likely noisier. Stage 2 for delta=8 is already complete (72/80/88 all tested, confirming mf=80 as optimal), so the highest-value fast experiment is finishing the Stage 1 curve at the low end before moving to Stage 2 for the second-best delta=6 or considering Stage 3 confirmation.",
+  "config": {
+    "max_features": 80,
+    "selector_type": "pearson",
+    "bucket_quotas": [80, 0, 0, 0],
+    "exclude_patterns": [],
+    "force_include_patterns": ["*_7g", "*_7s", "*_delta_7v30g", "*_delta_7v30s"],
+    "forced_delta_count": 4,
+    "trials": 120,
+    "folds": 3
+  }
+}
+```

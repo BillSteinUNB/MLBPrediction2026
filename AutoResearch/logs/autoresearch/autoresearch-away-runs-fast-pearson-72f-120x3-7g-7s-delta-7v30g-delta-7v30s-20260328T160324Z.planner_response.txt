@@ -1,0 +1,16 @@
+```json
+{
+  "hypothesis": "Stage 1 established forced_delta_count=8 as the peak; Stage 2 showed max_features=88 degraded R² (2.45%→2.38%), so test max_features=72 with the winning delta=8 to determine whether the optimum lies below 80 and whether tighter feature budgets reduce noise from weak marginal features.",
+  "reasoning": "The forced-delta curve is fully mapped at max_features=80 with a clear peak at 8 (R²=2.45% vs 2.40% at 6 and 2.33% at 10/12). Moving to max_features=88 with delta=8 hurt (2.38%), suggesting the extra 8 features added noise. Testing max_features=72 with delta=8 completes the local neighborhood around the anchor and determines if pruning the weakest 8 of the top-80 features improves signal-to-noise ratio. This is the only remaining untried config in the {delta=8} × {72,80,88} Stage 2 grid.",
+  "config": {
+    "max_features": 72,
+    "selector_type": "pearson",
+    "bucket_quotas": [72, 0, 0, 0],
+    "exclude_patterns": [],
+    "force_include_patterns": ["*_7g", "*_7s", "*_delta_7v30g", "*_delta_7v30s"],
+    "forced_delta_count": 8,
+    "trials": 120,
+    "folds": 3
+  }
+}
+```

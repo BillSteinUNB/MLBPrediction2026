@@ -1,0 +1,777 @@
+{
+  "generated_at": "2026-03-28T19:00:00.551491+00:00",
+  "artifact_path": "data/models/2026-away-dist-zanb-v1-controlmu-flat-3f-cc10/full_game_away_runs_distribution_model_20260328T190000Z_cc10c0f6.metadata.json",
+  "model_path": "data/models/2026-away-dist-zanb-v1-controlmu-flat-3f-cc10/full_game_away_runs_distribution_model_20260328T190000Z_cc10c0f6.joblib",
+  "training_data_path": null,
+  "model_name": "full_game_away_runs_distribution_model",
+  "model_version": "20260328T190000Z_cc10c0f6",
+  "target_column": "final_away_score",
+  "holdout_season": 2025,
+  "distribution_family": "zero_adjusted_negative_binomial",
+  "mean_metrics": {
+    "mae": 2.581352596616549,
+    "rmse": 3.294146612251993,
+    "poisson_deviance": 2.5095824478095023,
+    "r2": 0.03824683352672564,
+    "actual_mean": 4.404938271604938,
+    "predicted_mean": 4.409951366514826,
+    "naive_mean_prediction": 4.493962678375412,
+    "naive_mae": 2.6691728440234352,
+    "naive_rmse": 3.3601880782833202,
+    "naive_poisson_deviance": 2.6045327593436958,
+    "mae_improvement_vs_naive_pct": 3.290167124378074,
+    "rmse_improvement_vs_naive_pct": 1.965409807211354,
+    "poisson_deviance_improvement_vs_naive_pct": 3.645579468853351
+  },
+  "holdout_metrics": {
+    "mean_crps": 1.7873631732489887,
+    "mean_log_score": -2.476755901619325,
+    "mean_negative_log_score": 2.476755901619325,
+    "zero_calibration": {
+      "p_0": {
+        "event": "p_0",
+        "mean_predicted_probability": 0.05699549813234181,
+        "predicted_probability_std": 0.014610194831436924,
+        "empirical_rate": 0.07901234567901234,
+        "absolute_error": 0.022016847546670534,
+        "brier_score": 0.0727993990377432,
+        "bin_count": 10,
+        "bins": [
+          {
+            "bin_index": 0,
+            "count": 243,
+            "mean_predicted_probability": 0.033546611590459206,
+            "empirical_rate": 0.0411522633744856,
+            "absolute_error": 0.00760565178402639
+          },
+          {
+            "bin_index": 1,
+            "count": 243,
+            "mean_predicted_probability": 0.04149679095588778,
+            "empirical_rate": 0.04938271604938271,
+            "absolute_error": 0.007885925093494936
+          },
+          {
+            "bin_index": 2,
+            "count": 243,
+            "mean_predicted_probability": 0.046256955061956685,
+            "empirical_rate": 0.06584362139917696,
+            "absolute_error": 0.019586666337220275
+          },
+          {
+            "bin_index": 3,
+            "count": 243,
+            "mean_predicted_probability": 0.05046469050898875,
+            "empirical_rate": 0.07407407407407407,
+            "absolute_error": 0.023609383565085323
+          },
+          {
+            "bin_index": 4,
+            "count": 243,
+            "mean_predicted_probability": 0.054325620857769014,
+            "empirical_rate": 0.0823045267489712,
+            "absolute_error": 0.02797890589120218
+          },
+          {
+            "bin_index": 5,
+            "count": 243,
+            "mean_predicted_probability": 0.05814772396232058,
+            "empirical_rate": 0.06995884773662552,
+            "absolute_error": 0.011811123774304932
+          },
+          {
+            "bin_index": 6,
+            "count": 243,
+            "mean_predicted_probability": 0.06198807759501259,
+            "empirical_rate": 0.10699588477366255,
+            "absolute_error": 0.04500780717864996
+          },
+          {
+            "bin_index": 7,
+            "count": 243,
+            "mean_predicted_probability": 0.06677971310612361,
+            "empirical_rate": 0.09053497942386832,
+            "absolute_error": 0.023755266317744703
+          },
+          {
+            "bin_index": 8,
+            "count": 243,
+            "mean_predicted_probability": 0.07273618357935883,
+            "empirical_rate": 0.09053497942386832,
+            "absolute_error": 0.017798795844509482
+          },
+          {
+            "bin_index": 9,
+            "count": 243,
+            "mean_predicted_probability": 0.08421261410554101,
+            "empirical_rate": 0.11934156378600823,
+            "absolute_error": 0.03512894968046722
+          }
+        ]
+      },
+      "p_ge_1": {
+        "event": "p_ge_1",
+        "mean_predicted_probability": 0.9430045018676583,
+        "predicted_probability_std": 0.014610194831436928,
+        "empirical_rate": 0.9209876543209876,
+        "absolute_error": 0.02201684754667066,
+        "brier_score": 0.07279939903774321,
+        "bin_count": 10,
+        "bins": [
+          {
+            "bin_index": 0,
+            "count": 243,
+            "mean_predicted_probability": 0.9157873858944591,
+            "empirical_rate": 0.8806584362139918,
+            "absolute_error": 0.035128949680467314
+          },
+          {
+            "bin_index": 1,
+            "count": 243,
+            "mean_predicted_probability": 0.9272638164206412,
+            "empirical_rate": 0.9094650205761317,
+            "absolute_error": 0.017798795844509496
+          },
+          {
+            "bin_index": 2,
+            "count": 243,
+            "mean_predicted_probability": 0.9332202868938764,
+            "empirical_rate": 0.9094650205761317,
+            "absolute_error": 0.023755266317744717
+          },
+          {
+            "bin_index": 3,
+            "count": 243,
+            "mean_predicted_probability": 0.9380119224049874,
+            "empirical_rate": 0.8930041152263375,
+            "absolute_error": 0.04500780717864994
+          },
+          {
+            "bin_index": 4,
+            "count": 243,
+            "mean_predicted_probability": 0.9418522760376794,
+            "empirical_rate": 0.9300411522633745,
+            "absolute_error": 0.011811123774304932
+          },
+          {
+            "bin_index": 5,
+            "count": 243,
+            "mean_predicted_probability": 0.9456743791422311,
+            "empirical_rate": 0.9176954732510288,
+            "absolute_error": 0.02797890589120222
+          },
+          {
+            "bin_index": 6,
+            "count": 243,
+            "mean_predicted_probability": 0.9495353094910113,
+            "empirical_rate": 0.9259259259259259,
+            "absolute_error": 0.02360938356508535
+          },
+          {
+            "bin_index": 7,
+            "count": 243,
+            "mean_predicted_probability": 0.9537430449380434,
+            "empirical_rate": 0.934156378600823,
+            "absolute_error": 0.019586666337220393
+          },
+          {
+            "bin_index": 8,
+            "count": 243,
+            "mean_predicted_probability": 0.9585032090441121,
+            "empirical_rate": 0.9506172839506173,
+            "absolute_error": 0.007885925093494839
+          },
+          {
+            "bin_index": 9,
+            "count": 243,
+            "mean_predicted_probability": 0.9664533884095409,
+            "empirical_rate": 0.9588477366255144,
+            "absolute_error": 0.0076056517840265014
+          }
+        ]
+      }
+    },
+    "tail_calibration": {
+      "p_ge_3": {
+        "event": "p_ge_3",
+        "mean_predicted_probability": 0.6882980065565821,
+        "predicted_probability_std": 0.0565255727420373,
+        "empirical_rate": 0.6679012345679012,
+        "absolute_error": 0.02039677198868095,
+        "brier_score": 0.21877400228120364,
+        "bin_count": 10,
+        "bins": [
+          {
+            "bin_index": 0,
+            "count": 243,
+            "mean_predicted_probability": 0.5900097791475055,
+            "empirical_rate": 0.551440329218107,
+            "absolute_error": 0.03856944992939848
+          },
+          {
+            "bin_index": 1,
+            "count": 243,
+            "mean_predicted_probability": 0.6276738877599113,
+            "empirical_rate": 0.6296296296296297,
+            "absolute_error": 0.0019557418697183637
+          },
+          {
+            "bin_index": 2,
+            "count": 243,
+            "mean_predicted_probability": 0.6485336588291899,
+            "empirical_rate": 0.6008230452674898,
+            "absolute_error": 0.047710613561700144
+          },
+          {
+            "bin_index": 3,
+            "count": 243,
+            "mean_predicted_probability": 0.6660939961878648,
+            "empirical_rate": 0.6790123456790124,
+            "absolute_error": 0.012918349491147563
+          },
+          {
+            "bin_index": 4,
+            "count": 243,
+            "mean_predicted_probability": 0.6805909652652674,
+            "empirical_rate": 0.7119341563786008,
+            "absolute_error": 0.03134319111333339
+          },
+          {
+            "bin_index": 5,
+            "count": 243,
+            "mean_predicted_probability": 0.6955268537711307,
+            "empirical_rate": 0.6790123456790124,
+            "absolute_error": 0.016514508092118296
+          },
+          {
+            "bin_index": 6,
+            "count": 243,
+            "mean_predicted_probability": 0.710971121842103,
+            "empirical_rate": 0.654320987654321,
+            "absolute_error": 0.056650134187781975
+          },
+          {
+            "bin_index": 7,
+            "count": 243,
+            "mean_predicted_probability": 0.7284943803410848,
+            "empirical_rate": 0.6872427983539094,
+            "absolute_error": 0.04125158198717538
+          },
+          {
+            "bin_index": 8,
+            "count": 243,
+            "mean_predicted_probability": 0.7490381790683233,
+            "empirical_rate": 0.6831275720164609,
+            "absolute_error": 0.06591060705186236
+          },
+          {
+            "bin_index": 9,
+            "count": 243,
+            "mean_predicted_probability": 0.7860472433534408,
+            "empirical_rate": 0.8024691358024691,
+            "absolute_error": 0.016421892449028364
+          }
+        ]
+      },
+      "p_ge_5": {
+        "event": "p_ge_5",
+        "mean_predicted_probability": 0.4123432932646541,
+        "predicted_probability_std": 0.07150289322086859,
+        "empirical_rate": 0.4008230452674897,
+        "absolute_error": 0.01152024799716439,
+        "brier_score": 0.23338904269478997,
+        "bin_count": 10,
+        "bins": [
+          {
+            "bin_index": 0,
+            "count": 243,
+            "mean_predicted_probability": 0.29717792533832615,
+            "empirical_rate": 0.2551440329218107,
+            "absolute_error": 0.04203389241651545
+          },
+          {
+            "bin_index": 1,
+            "count": 243,
+            "mean_predicted_probability": 0.33695687587473194,
+            "empirical_rate": 0.3374485596707819,
+            "absolute_error": 0.0004916837960499687
+          },
+          {
+            "bin_index": 2,
+            "count": 243,
+            "mean_predicted_probability": 0.3604215658655264,
+            "empirical_rate": 0.32098765432098764,
+            "absolute_error": 0.03943391154453879
+          },
+          {
+            "bin_index": 3,
+            "count": 243,
+            "mean_predicted_probability": 0.3810923182259036,
+            "empirical_rate": 0.37448559670781895,
+            "absolute_error": 0.006606721518084668
+          },
+          {
+            "bin_index": 4,
+            "count": 243,
+            "mean_predicted_probability": 0.3986535464588834,
+            "empirical_rate": 0.42386831275720166,
+            "absolute_error": 0.02521476629831826
+          },
+          {
+            "bin_index": 5,
+            "count": 243,
+            "mean_predicted_probability": 0.4174188588343385,
+            "empirical_rate": 0.43209876543209874,
+            "absolute_error": 0.01467990659776025
+          },
+          {
+            "bin_index": 6,
+            "count": 243,
+            "mean_predicted_probability": 0.437273217573103,
+            "empirical_rate": 0.3950617283950617,
+            "absolute_error": 0.042211489178041295
+          },
+          {
+            "bin_index": 7,
+            "count": 243,
+            "mean_predicted_probability": 0.460707330737477,
+            "empirical_rate": 0.4156378600823045,
+            "absolute_error": 0.04506947065517247
+          },
+          {
+            "bin_index": 8,
+            "count": 243,
+            "mean_predicted_probability": 0.48917570382613884,
+            "empirical_rate": 0.4691358024691358,
+            "absolute_error": 0.020039901357003065
+          },
+          {
+            "bin_index": 9,
+            "count": 243,
+            "mean_predicted_probability": 0.5445555899121115,
+            "empirical_rate": 0.5843621399176955,
+            "absolute_error": 0.039806550005583974
+          }
+        ]
+      },
+      "p_ge_10": {
+        "event": "p_ge_10",
+        "mean_predicted_probability": 0.0718662998611933,
+        "predicted_probability_std": 0.03226975871770806,
+        "empirical_rate": 0.0897119341563786,
+        "absolute_error": 0.017845634295185292,
+        "brier_score": 0.08037079513744,
+        "bin_count": 10,
+        "bins": [
+          {
+            "bin_index": 0,
+            "count": 243,
+            "mean_predicted_probability": 0.0302564967247737,
+            "empirical_rate": 0.03292181069958848,
+            "absolute_error": 0.00266531397481478
+          },
+          {
+            "bin_index": 1,
+            "count": 243,
+            "mean_predicted_probability": 0.040885069188707955,
+            "empirical_rate": 0.07818930041152264,
+            "absolute_error": 0.037304231222814684
+          },
+          {
+            "bin_index": 2,
+            "count": 243,
+            "mean_predicted_probability": 0.048226608662277876,
+            "empirical_rate": 0.04938271604938271,
+            "absolute_error": 0.0011561073871048377
+          },
+          {
+            "bin_index": 3,
+            "count": 243,
+            "mean_predicted_probability": 0.05540811921311226,
+            "empirical_rate": 0.053497942386831275,
+            "absolute_error": 0.0019101768262809876
+          },
+          {
+            "bin_index": 4,
+            "count": 243,
+            "mean_predicted_probability": 0.06199736527976106,
+            "empirical_rate": 0.0823045267489712,
+            "absolute_error": 0.020307161469210133
+          },
+          {
+            "bin_index": 5,
+            "count": 243,
+            "mean_predicted_probability": 0.06965911494945758,
+            "empirical_rate": 0.11934156378600823,
+            "absolute_error": 0.04968244883655065
+          },
+          {
+            "bin_index": 6,
+            "count": 243,
+            "mean_predicted_probability": 0.07831979121552277,
+            "empirical_rate": 0.08641975308641975,
+            "absolute_error": 0.008099961870896982
+          },
+          {
+            "bin_index": 7,
+            "count": 243,
+            "mean_predicted_probability": 0.08953885634509749,
+            "empirical_rate": 0.10699588477366255,
+            "absolute_error": 0.017457028428565058
+          },
+          {
+            "bin_index": 8,
+            "count": 243,
+            "mean_predicted_probability": 0.10450169565793516,
+            "empirical_rate": 0.09465020576131687,
+            "absolute_error": 0.009851489896618285
+          },
+          {
+            "bin_index": 9,
+            "count": 243,
+            "mean_predicted_probability": 0.1398698813752873,
+            "empirical_rate": 0.1934156378600823,
+            "absolute_error": 0.05354575648479501
+          }
+        ]
+      }
+    },
+    "interval_coverage": {
+      "central_50": {
+        "nominal_coverage": 0.5,
+        "empirical_coverage": 0.5699588477366255,
+        "coverage_error": 0.06995884773662553,
+        "mean_width": 3.9617283950617286
+      },
+      "central_80": {
+        "nominal_coverage": 0.8,
+        "empirical_coverage": 0.8238683127572016,
+        "coverage_error": 0.023868312757201582,
+        "mean_width": 7.5551440329218105
+      },
+      "central_95": {
+        "nominal_coverage": 0.95,
+        "empirical_coverage": 0.9765432098765432,
+        "coverage_error": 0.02654320987654324,
+        "mean_width": 11.874074074074073
+      }
+    },
+    "prediction_summary": {
+      "mean_predicted_runs": 4.409950955709416,
+      "mean_predicted_p_0": 0.05699549813234181,
+      "mean_predicted_p_ge_3": 0.6882980065565821,
+      "mean_predicted_p_ge_5": 0.4123432932646541,
+      "mean_predicted_p_ge_10": 0.0718662998611933
+    }
+  },
+  "head_summaries": {
+    "mu": {
+      "feature_count": 80,
+      "feature_columns": [
+        "away_lineup_barrel_pct_30g",
+        "away_lineup_barrel_pct_7g",
+        "away_lineup_bb_pct_30g",
+        "away_lineup_bb_pct_7g",
+        "away_lineup_bb_pct_delta_7v30g",
+        "away_lineup_iso_30g",
+        "away_lineup_iso_7g",
+        "away_lineup_k_pct_30g",
+        "away_lineup_k_pct_7g",
+        "away_lineup_k_pct_delta_7v30g",
+        "away_lineup_woba_30g",
+        "away_lineup_woba_7g",
+        "away_lineup_wrc_plus_30g",
+        "away_lineup_wrc_plus_7g",
+        "away_lineup_xwoba_30g",
+        "away_lineup_xwoba_7g",
+        "away_lineup_xwoba_delta_7v30g",
+        "away_offense_vs_home_starter_woba_gap",
+        "away_starter_xera_30s",
+        "away_starter_xera_7s",
+        "away_team_barrel_pct_30g",
+        "away_team_barrel_pct_7g",
+        "away_team_defensive_efficiency_30g",
+        "away_team_defensive_efficiency_season",
+        "away_team_f5_pythagorean_wp_30g",
+        "away_team_log5_30g",
+        "away_team_oaa_30g",
+        "away_team_oaa_season",
+        "away_team_pythagorean_wp_30g",
+        "away_team_runs_scored_7g",
+        "away_team_woba_vs_LHP",
+        "away_team_woba_vs_RHP",
+        "away_team_woba_vs_opposing_hand",
+        "home_lineup_barrel_pct_7g",
+        "home_lineup_barrel_pct_delta_7v30g",
+        "home_lineup_bb_pct_30g",
+        "home_lineup_bb_pct_7g",
+        "home_lineup_iso_30g",
+        "home_lineup_woba_30g",
+        "home_lineup_woba_7g",
+        "home_lineup_wrc_plus_30g",
+        "home_lineup_wrc_plus_7g",
+        "home_lineup_xwoba_30g",
+        "home_lineup_xwoba_7g",
+        "home_lineup_xwoba_delta_7v30g",
+        "home_starter_avg_fastball_velocity_30s",
+        "home_starter_avg_fastball_velocity_7s",
+        "home_starter_bb_pct_7s",
+        "home_starter_csw_pct_30s",
+        "home_starter_csw_pct_7s",
+        "home_starter_csw_pct_delta_7v30s",
+        "home_starter_cumulative_pitch_load_5s",
+        "home_starter_k_pct_30s",
+        "home_starter_k_pct_7s",
+        "home_starter_siera_30s",
+        "home_starter_siera_7s",
+        "home_starter_xera_30s",
+        "home_starter_xera_7s",
+        "home_starter_xera_delta_7v30s",
+        "home_starter_xfip_30s",
+        "home_starter_xfip_7s",
+        "home_starter_xfip_delta_7v30s",
+        "home_team_bullpen_xfip",
+        "home_team_defensive_efficiency_30g",
+        "home_team_defensive_efficiency_season",
+        "home_team_f5_pythagorean_wp_30g",
+        "home_team_log5_30g",
+        "home_team_oaa_30g",
+        "home_team_oaa_season",
+        "home_team_pythagorean_wp_30g",
+        "home_team_runs_allowed_7g",
+        "home_team_woba_vs_LHP",
+        "home_team_woba_vs_RHP",
+        "home_team_woba_vs_opposing_hand",
+        "park_hr_factor",
+        "park_runs_factor",
+        "weather_air_density_factor",
+        "weather_composite",
+        "weather_humidity_factor",
+        "weather_temp_factor"
+      ],
+      "source_artifact_path": "data/models/2026-away-flat-xgbonly-forceddelta8-fast-120x3-cc10/full_game_away_runs_model_20260328T012328Z_cc10c0f6.metadata.json"
+    },
+    "dispersion": {
+      "feature_count": 80,
+      "feature_columns": [
+        "away_lineup_barrel_pct_30g",
+        "away_lineup_barrel_pct_7g",
+        "away_lineup_iso_30g",
+        "away_lineup_iso_7g",
+        "away_lineup_shb_pct",
+        "away_lineup_woba_30g",
+        "away_lineup_woba_7g",
+        "away_lineup_wrc_plus_30g",
+        "away_lineup_wrc_plus_7g",
+        "away_lineup_xwoba_30g",
+        "away_lineup_xwoba_7g",
+        "away_offense_vs_home_starter_woba_gap",
+        "away_starter_avg_fastball_velocity_30s",
+        "away_starter_avg_fastball_velocity_7s",
+        "away_starter_csw_pct_30s",
+        "away_starter_csw_pct_7s",
+        "away_starter_hr_fb_pct_7s",
+        "away_starter_k_pct_30s",
+        "away_starter_k_pct_7s",
+        "away_starter_siera_30s",
+        "away_starter_siera_7s",
+        "away_starter_siera_delta_7v30s",
+        "away_starter_xera_delta_7v30s",
+        "away_team_barrel_pct_30g",
+        "away_team_barrel_pct_7g",
+        "away_team_bullpen_high_leverage_available_count",
+        "away_team_bullpen_xfip",
+        "away_team_log5_30g",
+        "away_team_pythagorean_wp_30g",
+        "away_timezone_crossings_east",
+        "home_lineup_babip_7g",
+        "home_lineup_barrel_pct_30g",
+        "home_lineup_barrel_pct_7g",
+        "home_lineup_bb_pct_30g",
+        "home_lineup_bb_pct_7g",
+        "home_lineup_iso_30g",
+        "home_lineup_shb_pct",
+        "home_lineup_woba_30g",
+        "home_lineup_wrc_plus_30g",
+        "home_lineup_xwoba_30g",
+        "home_lineup_xwoba_7g",
+        "home_starter_avg_fastball_velocity_30s",
+        "home_starter_avg_fastball_velocity_7s",
+        "home_starter_csw_pct_30s",
+        "home_starter_csw_pct_7s",
+        "home_starter_is_opener",
+        "home_starter_k_pct_30s",
+        "home_starter_k_pct_7s",
+        "home_starter_pitch_mix_entropy_30s",
+        "home_starter_pitch_mix_entropy_7s",
+        "home_starter_siera_30s",
+        "home_starter_siera_7s",
+        "home_starter_uses_team_composite",
+        "home_starter_xera_30s",
+        "home_starter_xera_7s",
+        "home_starter_xfip_30s",
+        "home_starter_xfip_7s",
+        "home_team_barrel_pct_30g",
+        "home_team_bullpen_avg_rest_days_top5",
+        "home_team_bullpen_high_leverage_available_count",
+        "home_team_bullpen_xfip",
+        "home_team_defensive_efficiency_30g",
+        "home_team_defensive_efficiency_season",
+        "home_team_drs_30g",
+        "home_team_drs_season",
+        "home_team_f5_pythagorean_wp_30g",
+        "home_team_log5_30g",
+        "home_team_pythagorean_wp_30g",
+        "home_team_runs_allowed_7g",
+        "home_team_runs_scored_7g",
+        "home_team_woba_vs_LHP",
+        "park_runs_factor",
+        "plate_umpire_f5_total_runs_avg_30g",
+        "plate_umpire_f5_total_runs_avg_90g",
+        "plate_umpire_home_win_pct_30g",
+        "plate_umpire_home_win_pct_90g",
+        "weather_air_density_factor",
+        "weather_composite",
+        "weather_precipitation_mm",
+        "weather_temp_factor"
+      ]
+    },
+    "p_zero_extra": {
+      "feature_count": 80,
+      "feature_columns": [
+        "away_lineup_barrel_pct_30g",
+        "away_lineup_barrel_pct_7g",
+        "away_lineup_bb_pct_30g",
+        "away_lineup_iso_30g",
+        "away_lineup_iso_7g",
+        "away_lineup_shb_pct",
+        "away_lineup_woba_30g",
+        "away_lineup_woba_7g",
+        "away_lineup_wrc_plus_30g",
+        "away_lineup_wrc_plus_7g",
+        "away_lineup_xwoba_30g",
+        "away_lineup_xwoba_7g",
+        "away_starter_cumulative_pitch_load_5s",
+        "away_starter_k_pct_30s",
+        "away_starter_k_pct_7s",
+        "away_starter_last_start_pitch_count",
+        "away_starter_siera_30s",
+        "away_starter_xera_30s",
+        "away_starter_xera_7s",
+        "away_team_barrel_pct_30g",
+        "away_team_barrel_pct_7g",
+        "away_team_bullpen_xfip",
+        "away_team_defensive_efficiency_season",
+        "away_team_f5_pythagorean_wp_30g",
+        "away_team_log5_30g",
+        "away_team_oaa_30g",
+        "away_team_oaa_season",
+        "away_team_pythagorean_wp_30g",
+        "away_team_runs_scored_7g",
+        "away_team_woba_vs_LHP",
+        "away_team_woba_vs_RHP",
+        "away_team_woba_vs_opposing_hand",
+        "home_lineup_barrel_pct_30g",
+        "home_lineup_barrel_pct_7g",
+        "home_lineup_bb_pct_30g",
+        "home_lineup_bb_pct_7g",
+        "home_lineup_iso_30g",
+        "home_lineup_shb_pct",
+        "home_lineup_woba_30g",
+        "home_lineup_woba_7g",
+        "home_lineup_wrc_plus_30g",
+        "home_lineup_wrc_plus_7g",
+        "home_lineup_xwoba_30g",
+        "home_lineup_xwoba_7g",
+        "home_starter_avg_fastball_velocity_30s",
+        "home_starter_avg_fastball_velocity_7s",
+        "home_starter_csw_pct_30s",
+        "home_starter_csw_pct_7s",
+        "home_starter_cumulative_pitch_load_5s",
+        "home_starter_days_rest",
+        "home_starter_k_pct_30s",
+        "home_starter_k_pct_7s",
+        "home_starter_last_start_pitch_count",
+        "home_starter_siera_30s",
+        "home_starter_siera_7s",
+        "home_starter_xera_30s",
+        "home_starter_xera_7s",
+        "home_starter_xfip_30s",
+        "home_starter_xfip_7s",
+        "home_team_barrel_pct_30g",
+        "home_team_barrel_pct_7g",
+        "home_team_bullpen_avg_rest_days_top5",
+        "home_team_bullpen_high_leverage_available_count",
+        "home_team_bullpen_xfip",
+        "home_team_defensive_efficiency_30g",
+        "home_team_defensive_efficiency_season",
+        "home_team_f5_pythagorean_wp_30g",
+        "home_team_log5_30g",
+        "home_team_oaa_30g",
+        "home_team_oaa_season",
+        "home_team_pythagorean_wp_30g",
+        "home_team_runs_allowed_7g",
+        "home_team_woba_vs_LHP",
+        "home_team_woba_vs_RHP",
+        "home_team_woba_vs_opposing_hand",
+        "park_runs_factor",
+        "weather_air_density_factor",
+        "weather_composite",
+        "weather_temp_factor",
+        "weather_wind_factor"
+      ]
+    }
+  },
+  "holdout_component_summary": {
+    "dispersion": {
+      "name": "dispersion_size",
+      "mean": 3.718831035123835,
+      "std": 0.03699094300083373,
+      "min": 3.567769464153049,
+      "p25": 3.696261862796852,
+      "median": 3.7176277669577824,
+      "p75": 3.7396613995167156,
+      "max": 3.8755607247616126
+    },
+    "overdispersion_alpha": {
+      "name": "overdispersion_alpha",
+      "mean": 0.2689282468554691,
+      "std": 0.002668940107029212,
+      "min": 0.25802717877979076,
+      "p25": 0.26740388853395236,
+      "median": 0.26898873762694037,
+      "p75": 0.27054360246157516,
+      "max": 0.28028716822862026
+    },
+    "baseline_zero_probability": {
+      "name": "baseline_zero_probability",
+      "mean": 0.05699540621491651,
+      "std": 0.014610152390058067,
+      "min": 0.020591388659688393,
+      "p25": 0.04642502771225265,
+      "median": 0.05618844814715494,
+      "p75": 0.0666928420614798,
+      "max": 0.103527100598821
+    },
+    "adjusted_zero_probability": {
+      "name": "adjusted_zero_probability",
+      "mean": 0.05699549813234181,
+      "std": 0.014610194831436924,
+      "min": 0.020591430800842057,
+      "p25": 0.04642507770682307,
+      "median": 0.05618860169993739,
+      "p75": 0.06669293692618196,
+      "max": 0.10352722508427717
+    },
+    "p_zero_extra": {
+      "name": "p_zero_extra",
+      "mean": 9.19174252984501e-08,
+      "std": 9.329234008037048e-08,
+      "min": -1.934330741137913e-07,
+      "p25": 2.627517323855466e-08,
+      "median": 8.561383991675942e-08,
+      "p75": 1.4888970917802113e-07,
+      "max": 5.972489808825365e-07
+    }
+  }
+}

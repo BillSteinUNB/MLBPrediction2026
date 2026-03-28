@@ -1,0 +1,16 @@
+```json
+{
+  "hypothesis": "Continue Stage 1 forced-delta mapping at forced_delta_count=12 to confirm the downward trend observed from 8→10 (R² dropped from 2.45% to 2.33%), establishing whether the peak is firmly at 8 before moving to Stage 2 local refinement.",
+  "reasoning": "Three runs completed in Stage 1 at delta counts {6, 8, 10}. The holdout R² curve shows 8 as the clear peak (2.447%), with 6 at 2.396% and 10 at 2.331%. The asymmetric drop—steeper going up from 8→10 than down from 8→6—suggests the optimum is at or very near 8. Testing 12 confirms the downward trend on the upper side and completes enough of the curve to justify moving to Stage 2 (max_features variation around the winner) if the degradation continues as expected.",
+  "config": {
+    "max_features": 80,
+    "selector_type": "pearson",
+    "bucket_quotas": [80, 0, 0, 0],
+    "exclude_patterns": [],
+    "force_include_patterns": ["*_7g", "*_7s", "*_delta_7v30g", "*_delta_7v30s"],
+    "forced_delta_count": 12,
+    "trials": 120,
+    "folds": 3
+  }
+}
+```

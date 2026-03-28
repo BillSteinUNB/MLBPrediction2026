@@ -31,6 +31,18 @@ DEFAULT_LOG_DIR = AUTORESEARCH_ROOT / "logs" / "autoresearch"
 DEFAULT_REPORTS_DIR = AUTORESEARCH_ROOT / "reports"
 DEFAULT_DEBUG_LOG_PATH = DEFAULT_REPORTS_DIR / "debug_trace.jsonl"
 _FORCE_7G_PATTERNS = ["*_7g", "*_7s", "*_delta_7v30g", "*_delta_7v30s"]
+VALIDATION_PLANNER_TYPES = {"validation_fix", "validation_improvement"}
+VALIDATION_RIGOR_SEQUENCE: tuple[tuple[int, int], ...] = (
+    (300, 3),
+    (120, 5),
+    (300, 5),
+)
+CLEAR_R2_GAIN = 0.0015
+CLEAR_RMSE_GAIN = 0.03
+CLEAR_POISSON_GAIN = 0.02
+VALIDATION_R2_TOLERANCE = 0.0010
+VALIDATION_RMSE_TOLERANCE = 0.05
+VALIDATION_POISSON_TOLERANCE = 0.03
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +84,7 @@ class PreparedExperimentRun:
     planner_decision: PlannerDecision
     experiment_name: str
     prior_session_best: dict[str, Any] | None
+    parent_experiment_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -507,6 +520,31 @@ def pending_suspected_issues(
     session_id: int,
 ) -> list[SuspectedIssue]:
     issues = identify_suspected_issues(db_path=db_path, session_id=session_id)
+    if not issues:
+        return []
+    with _connect(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT issue_note_id
+            FROM issue_validations
+            WHERE session_id = ?
+            """,
+            (int(session_id),),
+        ).fetchall()
+    validated_note_ids = {int(row["issue_note_id"]) for row in rows}
+    return [issue for issue in issues if issue.note_id not in validated_note_ids]
+
+
+def pending_fix_validation_issues(
+    *,
+    db_path: str | Path = DEFAULT_DB_PATH,
+    session_id: int,
+) -> list[SuspectedIssue]:
+    issues = [
+        issue
+        for issue in identify_suspected_issues(db_path=db_path, session_id=session_id)
+        if issue.metadata.get("config") and issue.metadata.get("suspicious") and issue.title == "Experiment failed"
+    ]
     if not issues:
         return []
     with _connect(db_path) as connection:
@@ -1196,6 +1234,116 @@ def best_fast_experiment(
             parameters,
         ).fetchone()
     return row
+
+
+def _metrics_from_experiment_row(row: sqlite3.Row) -> dict[str, float]:
+    metrics = json.loads(str(row["metrics_json"] or "{}"))
+    return {
+        "holdout_r2": float(metrics.get("holdout_r2", row["holdout_r2"] or 0.0)),
+        "holdout_rmse": float(metrics.get("holdout_rmse", row["holdout_rmse"] or float("inf"))),
+        "holdout_poisson_deviance": float(
+            metrics.get("holdout_poisson_deviance", float("inf"))
+        ),
+        "cv_rmse": float(metrics.get("cv_rmse", row["cv_rmse"] or float("inf"))),
+    }
+
+
+def _is_validation_planner_type(planner_type: str | None) -> bool:
+    return str(planner_type or "") in VALIDATION_PLANNER_TYPES
+
+
+def _experiment_rank_key(row: sqlite3.Row) -> tuple[float, float, float, str]:
+    metrics = _metrics_from_experiment_row(row)
+    return (
+        metrics["holdout_r2"],
+        -metrics["holdout_poisson_deviance"],
+        -metrics["holdout_rmse"],
+        str(row["started_at"]),
+    )
+
+
+def _is_clearly_better(candidate_row: sqlite3.Row, comparison_row: sqlite3.Row) -> bool:
+    candidate_metrics = _metrics_from_experiment_row(candidate_row)
+    comparison_metrics = _metrics_from_experiment_row(comparison_row)
+    r2_gain = candidate_metrics["holdout_r2"] - comparison_metrics["holdout_r2"]
+    rmse_gain = comparison_metrics["holdout_rmse"] - candidate_metrics["holdout_rmse"]
+    poisson_gain = (
+        comparison_metrics["holdout_poisson_deviance"]
+        - candidate_metrics["holdout_poisson_deviance"]
+    )
+    if r2_gain < CLEAR_R2_GAIN:
+        return False
+    if rmse_gain < -CLEAR_RMSE_GAIN:
+        return False
+    if poisson_gain < -CLEAR_POISSON_GAIN:
+        return False
+    return True
+
+
+def _supports_additional_improvement_validation(
+    *,
+    anchor_row: sqlite3.Row,
+    validation_row: sqlite3.Row,
+) -> bool:
+    anchor_metrics = _metrics_from_experiment_row(anchor_row)
+    validation_metrics = _metrics_from_experiment_row(validation_row)
+    if validation_metrics["holdout_r2"] + VALIDATION_R2_TOLERANCE < anchor_metrics["holdout_r2"]:
+        return False
+    if validation_metrics["holdout_rmse"] - VALIDATION_RMSE_TOLERANCE > anchor_metrics["holdout_rmse"]:
+        return False
+    if (
+        validation_metrics["holdout_poisson_deviance"] - VALIDATION_POISSON_TOLERANCE
+        > anchor_metrics["holdout_poisson_deviance"]
+    ):
+        return False
+    return True
+
+
+def _proposal_from_experiment_row(row: sqlite3.Row) -> ExperimentProposal:
+    config = json.loads(str(row["config_json"]))
+    bucket_quotas = list(config.get("bucket_quotas") or [])
+    if not bucket_quotas:
+        bucket_targets = dict(config.get("bucket_targets") or config.get("feature_selection_bucket_targets") or {})
+        bucket_quotas = [
+            int(bucket_targets.get("short_form", 0)),
+            int(bucket_targets.get("medium_form", 0)),
+            int(bucket_targets.get("delta", 0)),
+            int(bucket_targets.get("context", 0)),
+        ]
+    return ExperimentProposal(
+        max_features=int(config["max_features"]),
+        selector_type=str(config["selector_type"]),
+        bucket_quotas=[int(value) for value in bucket_quotas],
+        exclude_patterns=[str(value) for value in config.get("exclude_patterns", [])],
+        force_include_patterns=[str(value) for value in config.get("force_include_patterns", [])],
+        forced_delta_count=int(config.get("forced_delta_count", 0)),
+        trials=int(config.get("search_iterations", train_module.TRIALS)),
+        folds=int(config.get("time_series_splits", train_module.FOLDS)),
+        rationale=f"Derived from experiment `{row['experiment_name']}`.",
+    )
+
+
+def select_promising_fast_candidate(
+    *,
+    db_path: str | Path = DEFAULT_DB_PATH,
+    session_id: int,
+    recent_success_count: int = 3,
+) -> sqlite3.Row | None:
+    session_history = load_history(db_path=db_path, mode="fast", session_id=session_id)
+    successful_exploration_runs = [
+        row
+        for row in session_history
+        if row["status"] == "succeeded" and not _is_validation_planner_type(row["planner_type"])
+    ]
+    if len(successful_exploration_runs) < recent_success_count:
+        return None
+    recent_runs = successful_exploration_runs[-recent_success_count:]
+    ranked = sorted(recent_runs, key=_experiment_rank_key, reverse=True)
+    if len(ranked) < 2:
+        return ranked[0]
+    if _is_clearly_better(ranked[0], ranked[1]):
+        return ranked[0]
+    return None
 
 
 def _successful_history(rows: Sequence[sqlite3.Row]) -> list[sqlite3.Row]:
@@ -2253,7 +2401,7 @@ def _run_validation_retest(
     planner_decision = PlannerDecision(
         proposal=proposal,
         hypothesis=f"Retest suspicious issue note {issue.note_id}: {issue.title}",
-        planner_type="issue_validation",
+        planner_type="validation_fix",
         planner_model=None,
         reasoning=issue.body,
     )
@@ -2364,6 +2512,93 @@ def run_planner_self_check() -> dict[str, Any]:
     }
 
 
+def prepare_improvement_validation(
+    *,
+    anchor_experiment_id: int,
+    db_path: str | Path = DEFAULT_DB_PATH,
+    train_path: str | Path = DEFAULT_TRAIN_PATH,
+    session_id: int | None = None,
+) -> PreparedExperimentRun | None:
+    anchor_row = load_experiment(anchor_experiment_id, db_path=db_path)
+    if anchor_row["status"] != "succeeded":
+        return None
+    validation_rows = [
+        row
+        for row in load_history(db_path=db_path, mode="fast", session_id=session_id)
+        if row["parent_experiment_id"] == anchor_experiment_id
+        and str(row["planner_type"]) == "validation_improvement"
+    ]
+    if validation_rows:
+        latest_validation = validation_rows[-1]
+        if latest_validation["status"] != "succeeded":
+            return None
+        if not _supports_additional_improvement_validation(
+            anchor_row=anchor_row,
+            validation_row=latest_validation,
+        ):
+            return None
+
+    used_pairs = {
+        (
+            int(json.loads(str(row["config_json"])).get("search_iterations", 0)),
+            int(json.loads(str(row["config_json"])).get("time_series_splits", 0)),
+        )
+        for row in validation_rows
+        if row["config_json"]
+    }
+    next_pair = next(
+        (
+            (trials, folds)
+            for trials, folds in VALIDATION_RIGOR_SEQUENCE
+            if (trials, folds) not in used_pairs
+        ),
+        None,
+    )
+    if next_pair is None:
+        return None
+
+    anchor_proposal = _proposal_from_experiment_row(anchor_row)
+    proposal = ExperimentProposal(
+        max_features=anchor_proposal.max_features,
+        selector_type=anchor_proposal.selector_type,
+        bucket_quotas=list(anchor_proposal.bucket_quotas),
+        exclude_patterns=list(anchor_proposal.exclude_patterns),
+        force_include_patterns=list(anchor_proposal.force_include_patterns),
+        forced_delta_count=anchor_proposal.forced_delta_count,
+        trials=int(next_pair[0]),
+        folds=int(next_pair[1]),
+        rationale=(
+            f"Validate whether `{anchor_row['experiment_name']}` holds up at "
+            f"{next_pair[0]} trials and {next_pair[1]} folds."
+        ),
+    )
+    planner_decision = PlannerDecision(
+        proposal=proposal,
+        hypothesis=(
+            f"Validate promising run `{anchor_row['experiment_name']}` at "
+            f"{next_pair[0]}x{next_pair[1]} to see if the gain survives higher rigor."
+        ),
+        planner_type="validation_improvement",
+        planner_model=None,
+        reasoning=proposal.rationale,
+    )
+    update_train_config(train_path=train_path, proposal=proposal)
+    train_api = _reload_train_module()
+    effective_config = train_api.resolve_effective_config("fast")
+    experiment_name = train_api.build_experiment_name("fast", effective_config)
+    return PreparedExperimentRun(
+        mode="fast",
+        session_id=session_id,
+        planner_decision=planner_decision,
+        experiment_name=experiment_name,
+        prior_session_best={
+            "holdout_r2": _metrics_from_experiment_row(anchor_row)["holdout_r2"],
+            "cv_rmse": _metrics_from_experiment_row(anchor_row)["cv_rmse"],
+        },
+        parent_experiment_id=anchor_experiment_id,
+    )
+
+
 def prepare_fast_once(
     *,
     db_path: str | Path = DEFAULT_DB_PATH,
@@ -2394,6 +2629,7 @@ def prepare_fast_once(
         planner_decision=planner_decision,
         experiment_name=experiment_name,
         prior_session_best=prior_session_best,
+        parent_experiment_id=None,
     )
 
 
@@ -2419,6 +2655,7 @@ def execute_prepared_fast_once(
         proposal=proposal,
         experiment_name=prepared_run.experiment_name,
         session_id=prepared_run.session_id,
+        parent_experiment_id=prepared_run.parent_experiment_id,
     )
     completed = _run_train_process(
         mode=prepared_run.mode,

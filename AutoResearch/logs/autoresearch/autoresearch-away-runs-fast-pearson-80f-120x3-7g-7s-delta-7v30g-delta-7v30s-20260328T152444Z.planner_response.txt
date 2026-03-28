@@ -1,0 +1,16 @@
+```json
+{
+  "hypothesis": "Map the forced-delta curve upward from the anchor at 8 by testing forced_delta_count=10 with all other levers frozen, to see if adding two more delta features improves holdout R² beyond the current 2.45%.",
+  "reasoning": "Only one run exists (forced_delta_count=8, R²=2.45%). Stage 1 discovery requires sweeping forced_delta_count across {4,6,8,10,12,14,16} at max_features=80. Testing 10 next follows the 'anchor plus neighbor' rule and moves the search upward; if 10 beats 8 we continue upward, if not we pivot to 6 and below. All other knobs stay frozen to keep comparisons apples-to-apples.",
+  "config": {
+    "max_features": 80,
+    "selector_type": "pearson",
+    "bucket_quotas": [80, 0, 0, 0],
+    "exclude_patterns": [],
+    "force_include_patterns": ["*_7g", "*_7s", "*_delta_7v30g", "*_delta_7v30s"],
+    "forced_delta_count": 10,
+    "trials": 120,
+    "folds": 3
+  }
+}
+```
