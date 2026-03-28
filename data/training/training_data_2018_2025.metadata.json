@@ -22,9 +22,9 @@
     2020
   ],
   "scheduled_start_before": null,
-  "row_count": 17035,
-  "feature_column_count": 306,
-  "feature_build_workers": 6,
-  "data_version_hash": "0392157987c040cc0ad5670a170540e86c43936469a2ee766e6bc6f07b2aa1c6",
-  "build_timestamp": "2026-03-26T01:43:34.713366+00:00"
+  "row_count": 17006,
+  "feature_column_count": 344,
+  "feature_build_workers": 15,
+  "data_version_hash": "89a8a834f1f6c750d6f48b9826b035b9057868db3ac868d2f6452d14608ae217",
+  "build_timestamp": "2026-03-27T15:01:25.745362+00:00"
 }

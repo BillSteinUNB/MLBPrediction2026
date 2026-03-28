@@ -11,6 +11,7 @@ from typing import Any, Iterable, Sequence
 
 from src.db import DEFAULT_DB_PATH, init_db
 from src.engine.edge_calculator import payout_for_american_odds
+from src.model.data_builder import _normalize_game_status, _normalize_team_code
 from src.pipeline.daily import (
     DailyPipelineResult,
     GameProcessingResult,
@@ -23,6 +24,7 @@ from src.pipeline.daily import (
 UTC_TZ = timezone.utc
 _LOG_LOSS_EPSILON = 1e-15
 DEFAULT_PLAY_OF_DAY_MIN_EDGE = 0.06
+DEFAULT_LIVE_GAME_STATE_PATH = Path("OddsScraper") / "data" / "live_game_state.json"
 
 
 LIVE_SEASON_TRACKING_TABLE_SQL = """
@@ -87,6 +89,28 @@ CREATE TABLE IF NOT EXISTS live_season_tracking (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (season, game_pk)
+)
+"""
+
+
+LIVE_GAME_STATE_SNAPSHOTS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS live_game_state_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT,
+    game_pk INTEGER,
+    game_date TEXT NOT NULL,
+    away_team TEXT NOT NULL,
+    home_team TEXT NOT NULL,
+    away_team_score INTEGER,
+    home_team_score INTEGER,
+    game_status_text TEXT,
+    status TEXT,
+    inning INTEGER,
+    outs INTEGER,
+    is_final INTEGER NOT NULL DEFAULT 0 CHECK (is_final IN (0, 1)),
+    fetched_at TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'mac_scraper',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 )
 """
 
@@ -282,6 +306,28 @@ def _ensure_live_season_tracking_table(connection: sqlite3.Connection) -> None:
     )
 
 
+def _ensure_live_game_state_table(connection: sqlite3.Connection) -> None:
+    connection.execute(LIVE_GAME_STATE_SNAPSHOTS_TABLE_SQL)
+    connection.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_live_game_state_unique
+        ON live_game_state_snapshots (
+            COALESCE(event_id, ''),
+            game_date,
+            away_team,
+            home_team,
+            fetched_at
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_live_game_state_date
+        ON live_game_state_snapshots (game_date, fetched_at)
+        """
+    )
+
+
 def _ensure_column(
     connection: sqlite3.Connection,
     *,
@@ -301,6 +347,49 @@ def _normalize_timestamp(value: datetime | None) -> datetime:
     if resolved.tzinfo is None or resolved.tzinfo.utcoffset(resolved) is None:
         raise ValueError("timestamp must be timezone-aware")
     return resolved.astimezone(UTC)
+
+
+def _coerce_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _load_live_game_state_payload(path: str | Path) -> list[dict[str, Any]]:
+    source_path = Path(path)
+    if not source_path.exists():
+        return []
+    payload = json.loads(source_path.read_text(encoding="utf-8"))
+    if isinstance(payload, list):
+        return [row for row in payload if isinstance(row, dict)]
+    if isinstance(payload, dict):
+        games = payload.get("games")
+        if isinstance(games, list):
+            return [row for row in games if isinstance(row, dict)]
+        return [row for row in payload.values() if isinstance(row, dict)]
+    return []
+
+
+def _resolve_live_game_state_game_pk(
+    *,
+    row: dict[str, Any],
+    game_lookup: dict[tuple[str, str, str], int],
+) -> int | None:
+    raw_game_pk = row.get("game_pk")
+    if raw_game_pk is not None:
+        try:
+            return int(raw_game_pk)
+        except (TypeError, ValueError):
+            pass
+    game_date = str(row.get("game_date") or row.get("date") or "").strip()
+    away_team = _normalize_team_code(row.get("away_team"))
+    home_team = _normalize_team_code(row.get("home_team"))
+    if not game_date or away_team is None or home_team is None:
+        return None
+    return game_lookup.get((game_date, away_team, home_team))
 
 
 def _actual_outcomes(
@@ -615,6 +704,151 @@ def capture_live_slate(
     return result
 
 
+def sync_live_game_state(
+    *,
+    input_path: str | Path = DEFAULT_LIVE_GAME_STATE_PATH,
+    db_path: str | Path = DEFAULT_DB_PATH,
+    settle: bool = True,
+) -> dict[str, Any]:
+    database_path = init_db(db_path)
+    rows = _load_live_game_state_payload(input_path)
+    if not rows:
+        return {
+            "imported_rows": 0,
+            "affected_dates": [],
+            "updated_games": 0,
+            "settled_rows": 0,
+        }
+
+    with sqlite3.connect(database_path) as connection:
+        connection.row_factory = sqlite3.Row
+        _ensure_live_season_tracking_table(connection)
+        _ensure_live_game_state_table(connection)
+
+        game_rows = connection.execute(
+            "SELECT game_pk, date, away_team, home_team FROM games"
+        ).fetchall()
+        game_lookup = {
+            (str(row["date"]), str(row["away_team"]), str(row["home_team"])): int(row["game_pk"])
+            for row in game_rows
+        }
+
+        imported_rows: list[tuple[Any, ...]] = []
+        latest_by_game_pk: dict[int, dict[str, Any]] = {}
+        affected_dates: set[str] = set()
+
+        for row in rows:
+            game_date = str(row.get("game_date") or row.get("date") or "").strip()
+            away_team = _normalize_team_code(row.get("away_team"))
+            home_team = _normalize_team_code(row.get("home_team"))
+            fetched_at_raw = row.get("fetched_at")
+            if not game_date or away_team is None or home_team is None or not fetched_at_raw:
+                continue
+            fetched_at = _normalize_timestamp(datetime.fromisoformat(str(fetched_at_raw).replace("Z", "+00:00")))
+            game_pk = _resolve_live_game_state_game_pk(row=row, game_lookup=game_lookup)
+            normalized_status = _normalize_game_status(
+                row.get("game_status_text") or row.get("status")
+            )
+            is_final = normalized_status == "final" or bool(row.get("is_final"))
+            imported_rows.append(
+                (
+                    str(row.get("event_id")) if row.get("event_id") is not None else None,
+                    int(game_pk) if game_pk is not None else None,
+                    game_date,
+                    away_team,
+                    home_team,
+                    _coerce_int(row.get("away_team_score")),
+                    _coerce_int(row.get("home_team_score")),
+                    str(row.get("game_status_text")) if row.get("game_status_text") is not None else None,
+                    str(row.get("status")) if row.get("status") is not None else None,
+                    _coerce_int(row.get("inning")),
+                    _coerce_int(row.get("outs")),
+                    int(is_final),
+                    fetched_at.isoformat(),
+                )
+            )
+            affected_dates.add(game_date)
+            if game_pk is not None:
+                latest = latest_by_game_pk.get(int(game_pk))
+                if latest is None or str(latest["fetched_at"]) < fetched_at.isoformat():
+                    latest_by_game_pk[int(game_pk)] = {
+                        "game_pk": int(game_pk),
+                        "status": normalized_status,
+                        "home_score": _coerce_int(row.get("home_team_score")),
+                        "away_score": _coerce_int(row.get("away_team_score")),
+                        "fetched_at": fetched_at.isoformat(),
+                    }
+
+        connection.executemany(
+            """
+            INSERT OR IGNORE INTO live_game_state_snapshots (
+                event_id,
+                game_pk,
+                game_date,
+                away_team,
+                home_team,
+                away_team_score,
+                home_team_score,
+                game_status_text,
+                status,
+                inning,
+                outs,
+                is_final,
+                fetched_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            imported_rows,
+        )
+
+        updated_games = 0
+        for latest in latest_by_game_pk.values():
+            connection.execute(
+                """
+                UPDATE games
+                SET status = ?,
+                    final_home_score = COALESCE(?, final_home_score),
+                    final_away_score = COALESCE(?, final_away_score)
+                WHERE game_pk = ?
+                """,
+                (
+                    latest["status"],
+                    latest["home_score"],
+                    latest["away_score"],
+                    latest["game_pk"],
+                ),
+            )
+            updated_games += int(connection.total_changes > 0)
+
+        connection.commit()
+
+    refreshed_dates: list[str] = []
+    with sqlite3.connect(database_path) as connection:
+        for tracked_date in sorted(affected_dates):
+            try:
+                refreshed_schedule = _default_schedule_fetcher(date.fromisoformat(tracked_date), "prod")
+                if not refreshed_schedule.empty:
+                    _upsert_games(database_path, refreshed_schedule)
+                    refreshed_dates.append(tracked_date)
+            except Exception:
+                continue
+
+    settled_rows = 0
+    if settle:
+        for tracked_date in sorted(affected_dates):
+            settled_rows += settle_tracked_games(
+                pipeline_date=tracked_date,
+                db_path=database_path,
+            )
+
+    return {
+        "imported_rows": len(imported_rows),
+        "affected_dates": sorted(affected_dates),
+        "refreshed_dates": refreshed_dates,
+        "updated_games": len(latest_by_game_pk),
+        "settled_rows": settled_rows,
+    }
+
+
 def settle_tracked_games(
     *,
     pipeline_date: str | date | None = None,
@@ -893,6 +1127,22 @@ def _build_parser() -> argparse.ArgumentParser:
     settle_parser.add_argument("--season", type=int, default=2026)
     settle_parser.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
 
+    sync_parser = subparsers.add_parser(
+        "sync-game-state",
+        help="Import pulled live game-state snapshots and settle affected tracked games.",
+    )
+    sync_parser.add_argument(
+        "--input-path",
+        default=str(DEFAULT_LIVE_GAME_STATE_PATH),
+        help="Path to live_game_state.json pulled from the Mac scraper host.",
+    )
+    sync_parser.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
+    sync_parser.add_argument(
+        "--no-settle",
+        action="store_true",
+        help="Import game-state snapshots without running settlement.",
+    )
+
     report_parser = subparsers.add_parser(
         "report", help="Emit a 2026 live-season summary JSON report."
     )
@@ -918,6 +1168,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             db_path=args.db_path,
         )
         print(json.dumps({"updated_rows": updated}, indent=2))
+        return 0
+
+    if args.command == "sync-game-state":
+        summary = sync_live_game_state(
+            input_path=args.input_path,
+            db_path=args.db_path,
+            settle=not args.no_settle,
+        )
+        print(json.dumps(summary, indent=2))
         return 0
 
     if args.command == "report":

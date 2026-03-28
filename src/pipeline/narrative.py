@@ -48,6 +48,13 @@ def _fmt_odds(value: int | float | None) -> str:
     return f"+{v}" if v > 0 else str(v)
 
 
+def _fmt_line(value: float | int | None) -> str:
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return "—"
+    numeric = float(value)
+    return f"{numeric:.0f}" if numeric.is_integer() else f"{numeric:.1f}"
+
+
 def _safe_float(mapping: Mapping[str, Any], key: str, default: float | None = None) -> float | None:
     """Extract a float from *mapping* returning *default* on miss or NaN."""
     raw = mapping.get(key)
@@ -70,6 +77,37 @@ def _team_label(side: str, matchup: str) -> str:
 
 def _opponent_side(side: str) -> str:
     return "away" if side == "home" else "home"
+
+
+def _market_label(market_type: str) -> str:
+    labels = {
+        "f5_ml": "First 5 Moneyline",
+        "f5_rl": "First 5 Run Line",
+        "f5_total": "First 5 Total",
+        "full_game_ml": "Full Game Moneyline",
+        "full_game_rl": "Full Game Run Line",
+        "full_game_total": "Full Game Total",
+    }
+    return labels.get(market_type, market_type.upper())
+
+
+def _selection_label(
+    *,
+    matchup: str,
+    side: str,
+    market_type: str,
+    line_at_bet: float | None,
+) -> str:
+    if market_type in {"f5_total", "full_game_total"}:
+        direction = "Under" if side == "under" else "Over"
+        return f"{direction} {_fmt_line(line_at_bet)}" if line_at_bet is not None else direction
+    if side in {"home", "away"}:
+        team_name = _team_label(side, matchup)
+        if market_type in {"f5_rl", "full_game_rl"} and line_at_bet is not None:
+            sign = "+" if line_at_bet > 0 else ""
+            return f"{team_name} {sign}{line_at_bet:g}"
+        return team_name
+    return side.upper()
 
 
 # ---------------------------------------------------------------------------
@@ -219,40 +257,79 @@ def _edge_sentence(
     edge_pct: float,
     model_prob: float,
     market_prob: float | None,
+    matchup: str,
+    side: str,
     market_type: str,
-    pick_team: str,
+    line_at_bet: float | None,
     odds: int | float | None,
 ) -> str:
     """Opening sentence describing the edge and recommended bet."""
-    market_label = "First 5 Moneyline" if market_type == "f5_ml" else "First 5 Run Line"
+    selection_label = _selection_label(
+        matchup=matchup,
+        side=side,
+        market_type=market_type,
+        line_at_bet=line_at_bet,
+    )
+    market_label = _market_label(market_type)
     edge_descriptor = "strong" if edge_pct >= _DOMINANT_EDGE_THRESHOLD else "solid"
     sentence = (
-        f"{edge_descriptor.capitalize()} {_pct(edge_pct)} edge on {pick_team} "
-        f"{market_label} at {_fmt_odds(odds)}."
+        f"{edge_descriptor.capitalize()} {_pct(edge_pct)} edge on {selection_label} "
+        f"in the {market_label} at {_fmt_odds(odds)}."
     )
     if market_prob is not None:
         sentence += (
-            f" Model sees a {_pct(model_prob)} win probability "
+            f" Model sees a {_pct(model_prob)} probability "
             f"vs the market's implied {_pct(market_prob)}."
         )
     return sentence
 
 
-def _projected_score_sentence(
+def _projection_sentence(
     prediction: Mapping[str, Any],
     matchup: str,
+    market_type: str,
+    line_at_bet: float | None,
 ) -> str | None:
-    """Sentence about projected F5 score."""
-    home_runs = _safe_float(prediction, "projected_f5_home_runs")
-    away_runs = _safe_float(prediction, "projected_f5_away_runs")
-    if home_runs is None or away_runs is None:
-        return None
+    """Sentence about projected score or total for the current market."""
     parts = matchup.split(" @ ")
     if len(parts) == 2:
         away, home = parts[0].strip(), parts[1].strip()
     else:
         away, home = "Away", "Home"
-    return f"Model projects a {away_runs:.1f}–{home_runs:.1f} F5 score ({away}–{home})."
+
+    if market_type in {"f5_ml", "f5_rl"}:
+        home_runs = _safe_float(prediction, "projected_f5_home_runs")
+        away_runs = _safe_float(prediction, "projected_f5_away_runs")
+        if home_runs is None or away_runs is None:
+            return None
+        return f"Model projects a {away_runs:.1f}–{home_runs:.1f} F5 score ({away}–{home})."
+
+    if market_type in {"full_game_ml", "full_game_rl"}:
+        home_runs = _safe_float(prediction, "projected_full_game_home_runs")
+        away_runs = _safe_float(prediction, "projected_full_game_away_runs")
+        if home_runs is None or away_runs is None:
+            return None
+        return f"Model projects a {away_runs:.1f}–{home_runs:.1f} full-game score ({away}–{home})."
+
+    if market_type == "f5_total":
+        total_runs = _safe_float(prediction, "projected_f5_total_runs")
+        if total_runs is None:
+            return None
+        if line_at_bet is None:
+            return f"Model projects {total_runs:.1f} total F5 runs."
+        direction = "above" if total_runs >= line_at_bet else "below"
+        return f"Model projects {total_runs:.1f} total F5 runs, {direction} the posted {_fmt_line(line_at_bet)}."
+
+    if market_type == "full_game_total":
+        total_runs = _safe_float(prediction, "projected_full_game_total_runs")
+        if total_runs is None:
+            return None
+        if line_at_bet is None:
+            return f"Model projects {total_runs:.1f} full-game runs."
+        direction = "above" if total_runs >= line_at_bet else "below"
+        return f"Model projects {total_runs:.1f} full-game runs, {direction} the posted {_fmt_line(line_at_bet)}."
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +343,7 @@ def generate_pick_narrative(
     side: str,
     market_type: str,
     odds: int | float | None,
+    line_at_bet: float | None,
     edge_pct: float,
     model_probability: float,
     fair_probability: float | None,
@@ -278,28 +356,41 @@ def generate_pick_narrative(
     *is_play_of_day* controls verbosity — True yields a multi-sentence
     write-up, False yields a concise one-liner.
     """
-    pick_team = _team_label(side, matchup)
-    opp_team = _team_label(_opponent_side(side), matchup)
+    side_is_team = side in {"home", "away"}
+    pick_team = _team_label(side, matchup) if side_is_team else _team_label("home", matchup)
+    opp_team = _team_label(_opponent_side(side), matchup) if side_is_team else _team_label("away", matchup)
 
     # Always build the edge sentence first
     edge_sent = _edge_sentence(
         edge_pct=edge_pct,
         model_prob=model_probability,
         market_prob=fair_probability,
+        matchup=matchup,
+        side=side,
         market_type=market_type,
-        pick_team=pick_team,
+        line_at_bet=line_at_bet,
         odds=odds,
     )
 
     if not is_play_of_day:
         # --- Value bet one-liner ---
         # Grab the single most impactful insight for colour
-        for insight_fn in (
-            lambda: _pitching_matchup_insight(features, side, pick_team, opp_team),
-            lambda: _offense_insight(features, side, pick_team),
-            lambda: _pitching_insight(features, _opponent_side(side), opp_team),
-            lambda: _baseline_insight(features, side, pick_team, opp_team),
-        ):
+        if market_type in {"f5_total", "full_game_total"}:
+            insight_functions = (
+                lambda: _weather_park_insight(features),
+                lambda: _offense_insight(features, "home", _team_label("home", matchup)),
+                lambda: _offense_insight(features, "away", _team_label("away", matchup)),
+                lambda: _pitching_insight(features, "home", _team_label("home", matchup)),
+                lambda: _pitching_insight(features, "away", _team_label("away", matchup)),
+            )
+        else:
+            insight_functions = (
+                lambda: _pitching_matchup_insight(features, side, pick_team, opp_team),
+                lambda: _offense_insight(features, side, pick_team),
+                lambda: _pitching_insight(features, _opponent_side(side), opp_team),
+                lambda: _baseline_insight(features, side, pick_team, opp_team),
+            )
+        for insight_fn in insight_functions:
             insight = insight_fn()
             if insight:
                 return f"{edge_sent} {insight}."
@@ -308,22 +399,33 @@ def generate_pick_narrative(
     # --- POTD detailed narrative ---
     sentences: list[str] = [edge_sent]
 
-    score_sent = _projected_score_sentence(prediction, matchup)
+    score_sent = _projection_sentence(prediction, matchup, market_type, line_at_bet)
     if score_sent:
         sentences.append(score_sent)
 
     # Collect up to 4 supporting insights, ordered by relevance
-    insight_candidates: list[str | None] = [
-        _pitching_matchup_insight(features, side, pick_team, opp_team),
-        _offense_insight(features, side, pick_team),
-        _offense_insight(features, _opponent_side(side), opp_team),
-        _pitching_insight(features, side, pick_team),
-        _pitching_insight(features, _opponent_side(side), opp_team),
-        _bullpen_insight(features, _opponent_side(side), opp_team),
-        _defense_insight(features, side, pick_team),
-        _baseline_insight(features, side, pick_team, opp_team),
-        _weather_park_insight(features),
-    ]
+    if market_type in {"f5_total", "full_game_total"}:
+        insight_candidates: list[str | None] = [
+            _offense_insight(features, "home", _team_label("home", matchup)),
+            _offense_insight(features, "away", _team_label("away", matchup)),
+            _pitching_insight(features, "home", _team_label("home", matchup)),
+            _pitching_insight(features, "away", _team_label("away", matchup)),
+            _bullpen_insight(features, "home", _team_label("home", matchup)),
+            _bullpen_insight(features, "away", _team_label("away", matchup)),
+            _weather_park_insight(features),
+        ]
+    else:
+        insight_candidates = [
+            _pitching_matchup_insight(features, side, pick_team, opp_team),
+            _offense_insight(features, side, pick_team),
+            _offense_insight(features, _opponent_side(side), opp_team),
+            _pitching_insight(features, side, pick_team),
+            _pitching_insight(features, _opponent_side(side), opp_team),
+            _bullpen_insight(features, _opponent_side(side), opp_team),
+            _defense_insight(features, side, pick_team),
+            _baseline_insight(features, side, pick_team, opp_team),
+            _weather_park_insight(features),
+        ]
     added = 0
     for candidate in insight_candidates:
         if candidate and added < 4:
@@ -362,6 +464,7 @@ def generate_game_narrative(
         side=str(decision.get("side", "")),
         market_type=str(decision.get("market_type", "")),
         odds=decision.get("odds_at_bet"),
+        line_at_bet=_safe_float(decision, "line_at_bet"),
         edge_pct=float(decision.get("edge_pct", 0)),
         model_probability=float(decision.get("model_probability", 0.5)),
         fair_probability=_safe_float(decision, "fair_probability"),

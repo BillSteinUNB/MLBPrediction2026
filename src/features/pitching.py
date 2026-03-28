@@ -29,8 +29,9 @@ FASTBALL_PITCH_TYPES = {"FA", "FC", "FF", "FI", "FO", "FS", "FT", "SI", "SF"}
 FASTBALL_NAME_TOKENS = ("FASTBALL", "SINKER", "CUTTER", "SPLITTER")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DERIVED_CACHE_ROOT = REPO_ROOT / "data" / "raw" / "derived" / "pitching"
-START_METRICS_CACHE_VERSION = 2
+START_METRICS_CACHE_VERSION = 3
 METRIC_CANDIDATES: dict[str, tuple[str, ...]] = {
+    "siera": ("siera", "SIERA"),
     "xfip": ("xfip", "xFIP"),
     "xera": ("xera", "xERA"),
     "k_pct": ("k_pct", "K%", "k%"),
@@ -53,6 +54,7 @@ METRICS: tuple[str, ...] = tuple(
     metric for metric in METRIC_CANDIDATES if metric not in {"innings_pitched", "pitch_count"}
 )
 DEFAULT_METRIC_BASELINES = {
+    "siera": 4.20,
     "xfip": 4.20,
     "xera": 4.10,
     "k_pct": 22.0,
@@ -706,6 +708,15 @@ def _compute_start_metrics(pitches: pd.DataFrame, league_hr_fb_rate: float) -> d
     avg_fastball_velocity = _average_fastball_velocity(pitches)
     pitch_mix_entropy = _pitch_mix_entropy(pitches)
     csw_pct = _csw_pct(pitches)
+    siera = _estimate_siera(
+        strikeouts=strikeouts,
+        walks=walks,
+        batters_faced=batters_faced,
+        ground_balls=ground_balls,
+        fly_balls=fly_balls,
+        line_drives=bb_types.eq("line_drive").sum(),
+        infield_fly_balls=bb_types.eq("popup").sum(),
+    )
     xera = _estimate_xera(terminal)
     xfip = _estimate_xfip(
         strikeouts=strikeouts,
@@ -716,6 +727,7 @@ def _compute_start_metrics(pitches: pd.DataFrame, league_hr_fb_rate: float) -> d
     )
 
     return {
+        "siera": siera,
         "xfip": xfip,
         "xera": xera,
         "k_pct": k_pct,
@@ -864,6 +876,40 @@ def _estimate_xera(terminal: pd.DataFrame) -> float:
     return float(3.2 + ((mean_xwoba - 0.320) * 15.0))
 
 
+def _estimate_siera(
+    *,
+    strikeouts: int,
+    walks: int,
+    batters_faced: int,
+    ground_balls: int,
+    fly_balls: int,
+    line_drives: int,
+    infield_fly_balls: int,
+) -> float:
+    if batters_faced <= 0:
+        return DEFAULT_METRIC_BASELINES["siera"]
+
+    balls_in_play = ground_balls + fly_balls + line_drives + infield_fly_balls
+    strikeout_rate = _safe_rate(strikeouts, batters_faced)
+    walk_rate = _safe_rate(walks, batters_faced)
+    if balls_in_play > 0:
+        ground_ball_rate = _safe_rate(ground_balls, balls_in_play)
+    else:
+        ground_ball_rate = DEFAULT_METRIC_BASELINES["gb_pct"] / 100.0
+
+    value = (
+        6.145
+        - (16.986 * strikeout_rate)
+        + (11.434 * walk_rate)
+        - (1.858 * ground_ball_rate)
+        + (7.653 * (strikeout_rate**2))
+        + (6.664 * (ground_ball_rate**2))
+        + (10.130 * strikeout_rate * ground_ball_rate)
+        - (5.195 * walk_rate * ground_ball_rate)
+    )
+    return float(value)
+
+
 def _estimate_xfip(
     *,
     strikeouts: int,
@@ -969,6 +1015,12 @@ def _safe_pct(numerator: int | float, denominator: int | float) -> float:
     if denominator <= 0:
         return 0.0
     return float((numerator / denominator) * 100.0)
+
+
+def _safe_rate(numerator: int | float, denominator: int | float) -> float:
+    if denominator <= 0:
+        return 0.0
+    return float(numerator / denominator)
 
 
 def _coerce_int(value: Any) -> int | None:

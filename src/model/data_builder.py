@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 import hashlib
 import json
 import logging
+from functools import partial
+from multiprocessing import current_process
 import os
+import re
 import tempfile
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -15,6 +18,8 @@ from typing import Any, Callable, Mapping, Sequence
 import httpx
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 from rich.console import Console
 from rich.progress import (
     BarColumn,
@@ -24,8 +29,6 @@ from rich.progress import (
     TextColumn,
     TimeElapsedColumn,
 )
-
-_console = Console()
 
 from src.clients.statcast_client import (
     TEAM_GAME_LOG_CODES,
@@ -38,6 +41,7 @@ from src.clients.statcast_client import (
     fetch_team_game_logs,
 )
 from src.clients.chadwick_client import fetch_chadwick_register
+from src.clients.retrosheet_client import fetch_retrosheet_allplayers
 from src.clients.retrosheet_client import fetch_retrosheet_starting_lineups
 from src.clients.retrosheet_client import fetch_retrosheet_umpires
 from src.clients.weather_client import _get_default_weather, fetch_game_weather
@@ -73,9 +77,12 @@ from src.features.defense import (
     compute_defense_features_for_schedule,
 )
 from src.features.offense import (
+    DEFAULT_MIN_PERIODS as DEFAULT_OFFENSE_MIN_PERIODS,
+    DEFAULT_REGRESSION_WEIGHT as DEFAULT_OFFENSE_REGRESSION_WEIGHT,
     LEAGUE_WOBA_BASELINE,
     LEAGUE_WRC_PLUS_BASELINE,
     compute_offensive_features,
+    compute_offensive_features_for_schedule,
     _fetch_season_offense_statcast_metrics,
 )
 from src.features.pitching import (
@@ -88,8 +95,11 @@ from src.models.features import GameFeatures
 from src.models.lineup import Lineup, LineupPlayer
 from src.models.weather import WeatherData
 
+_ = (compute_baseline_features, compute_bullpen_features, compute_defense_features)
+_console = Console()
 
-DEFAULT_OUTPUT_PATH = Path("data") / "training" / "training_data_2019_2025.parquet"
+
+DEFAULT_OUTPUT_PATH = Path("data") / "training" / "training_data_2018_2025.parquet"
 DEFAULT_WINDOWS: tuple[int, ...] = (7, 14, 30, 60)
 DEFAULT_PYTHAGOREAN_WINDOWS: tuple[int, ...] = (30, 60)
 DEFAULT_FULL_REGULAR_SEASONS_TARGET = 7
@@ -242,6 +252,55 @@ _MATCHUP_INTERACTION_FEATURE_DEFAULTS = {
     "home_offense_vs_away_starter_woba_gap": 0.0,
     "away_offense_vs_home_starter_woba_gap": 0.0,
 }
+_LINEUP_TEMPORAL_DELTA_METRICS: tuple[str, ...] = (
+    "woba",
+    "xwoba",
+    "wrc_plus",
+    "iso",
+    "barrel_pct",
+    "bb_pct",
+    "k_pct",
+)
+_STARTER_TEMPORAL_DELTA_METRICS: tuple[str, ...] = (
+    "xera",
+    "xfip",
+    "siera",
+    "k_pct",
+    "bb_pct",
+    "csw_pct",
+    "avg_fastball_velocity",
+)
+RUN_COUNT_TRAINING_SCHEMA_NAME = "run_count_training_data"
+RUN_COUNT_TRAINING_SCHEMA_VERSION = 2
+_RUN_COUNT_TRAINING_PARQUET_METADATA_KEY = b"mlbprediction2026.run_count_training_schema"
+_RUN_COUNT_REQUIRED_BASE_COLUMNS: tuple[str, ...] = (
+    "game_pk",
+    "season",
+    "scheduled_start",
+    "f5_home_score",
+    "f5_away_score",
+    "final_home_score",
+    "final_away_score",
+)
+RUN_COUNT_REQUIRED_TEMPORAL_DELTA_COLUMNS: tuple[str, ...] = tuple(
+    sorted(
+        [
+            *[
+                f"{side_name}_lineup_{metric}_delta_7v30g"
+                for side_name in ("home", "away")
+                for metric in _LINEUP_TEMPORAL_DELTA_METRICS
+            ],
+            *[
+                f"{side_name}_starter_{metric}_delta_7v30s"
+                for side_name in ("home", "away")
+                for metric in _STARTER_TEMPORAL_DELTA_METRICS
+            ],
+        ]
+    )
+)
+RUN_COUNT_REQUIRED_TRAINING_COLUMNS: tuple[str, ...] = tuple(
+    sorted((*_RUN_COUNT_REQUIRED_BASE_COLUMNS, *RUN_COUNT_REQUIRED_TEMPORAL_DELTA_COLUMNS))
+)
 
 
 ScheduleFetcher = Callable[[int], pd.DataFrame]
@@ -294,6 +353,40 @@ def _resolve_feature_build_workers() -> int:
 DEFAULT_FEATURE_BUILD_WORKERS = _resolve_feature_build_workers()
 
 
+def _resolve_feature_build_stall_timeout_seconds() -> int:
+    configured = os.getenv("MLB_FEATURE_BUILD_STALL_TIMEOUT_SECONDS", "").strip()
+    if not configured:
+        return 900
+    try:
+        seconds = int(configured)
+    except ValueError:
+        logger.warning(
+            "Ignoring invalid MLB_FEATURE_BUILD_STALL_TIMEOUT_SECONDS value: %s",
+            configured,
+        )
+        return 900
+    return max(0, seconds)
+
+
+def _resolve_feature_build_poll_seconds() -> int:
+    configured = os.getenv("MLB_FEATURE_BUILD_STALL_POLL_SECONDS", "").strip()
+    if not configured:
+        return 5
+    try:
+        seconds = int(configured)
+    except ValueError:
+        logger.warning(
+            "Ignoring invalid MLB_FEATURE_BUILD_STALL_POLL_SECONDS value: %s",
+            configured,
+        )
+        return 5
+    return max(1, seconds)
+
+
+DEFAULT_FEATURE_BUILD_STALL_TIMEOUT_SECONDS = _resolve_feature_build_stall_timeout_seconds()
+DEFAULT_FEATURE_BUILD_STALL_POLL_SECONDS = _resolve_feature_build_poll_seconds()
+
+
 @dataclass(frozen=True, slots=True)
 class TrainingDataBuildResult:
     dataframe: pd.DataFrame
@@ -317,6 +410,26 @@ class TrainingDataCompletenessSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class TrainingDataSourceCoverageSummary:
+    total_rows: int
+    total_days: int
+    categories: dict[str, dict[str, float | int]]
+
+
+@dataclass(frozen=True, slots=True)
+class TrainingDataInspectionSummary:
+    parquet_path: Path | None
+    metadata_path: Path | None
+    row_count: int
+    feature_column_count: int
+    data_version_hash: str
+    schema_name: str
+    schema_version: str
+    has_temporal_delta_features: bool
+    missing_temporal_delta_columns: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class FeatureBuildTimingSummary:
     module_seconds: dict[str, float]
     total_seconds: float
@@ -327,6 +440,15 @@ class FeatureBuildTimingSummary:
 class _FeatureChunkResult:
     feature_rows: pd.DataFrame
     timing_summary: FeatureBuildTimingSummary
+
+
+@dataclass(frozen=True, slots=True)
+class _FeatureChunkExecutionContext:
+    chunk_index: int
+    chunk_total: int
+    chunk_dates: tuple[str, ...]
+    heartbeat_path: Path
+    submitted_at: float
 
 
 def resolve_training_years(
@@ -399,6 +521,7 @@ def build_training_dataset(
     """Build historical training data using the same feature modules as inference."""
 
     _ = pitching_stats_fetcher
+    effective_refresh_raw_data = bool(refresh_raw_data or refresh)
 
     resolved_schedule_fetcher = schedule_fetcher or _fetch_regular_season_schedule
     requested_years = tuple(range(start_year, end_year + 1))
@@ -465,7 +588,7 @@ def build_training_dataset(
     build_timestamp = datetime.now(UTC)
     resolved_lineup_fetcher = lineup_fetcher or _build_historical_lineup_fetcher(
         schedule=schedule,
-        refresh=refresh_raw_data,
+        refresh=effective_refresh_raw_data,
     )
     resolved_umpire_fetcher = umpire_fetcher or (
         fetch_retrosheet_umpires if schedule_fetcher is None else _empty_umpires_fetcher
@@ -475,12 +598,12 @@ def build_training_dataset(
         if lineup_player_ids_by_date is not None
         else _load_historical_lineup_player_ids_by_date(
             schedule,
-            refresh=refresh_raw_data,
+            refresh=effective_refresh_raw_data,
         )
     )
     resolved_weather_fetcher = weather_fetcher or fetch_game_weather
     feature_build_workers = _resolve_effective_feature_build_workers(
-        refresh_raw_data=refresh_raw_data,
+        refresh_raw_data=effective_refresh_raw_data,
         batting_stats_fetcher=batting_stats_fetcher,
         fielding_stats_fetcher=fielding_stats_fetcher,
         framing_stats_fetcher=framing_stats_fetcher,
@@ -491,6 +614,13 @@ def build_training_dataset(
         start_metrics_fetcher=start_metrics_fetcher,
         bullpen_metrics_fetcher=bullpen_metrics_fetcher,
         lineup_player_ids_by_date=lineup_player_ids_by_date,
+    )
+    _prewarm_derived_feature_caches(
+        schedule,
+        refresh=effective_refresh_raw_data,
+        offense_statcast_fetcher=offense_statcast_fetcher,
+        bullpen_metrics_fetcher=bullpen_metrics_fetcher,
+        team_logs_fetcher=team_logs_fetcher,
     )
 
     if feature_build_workers > 1:
@@ -503,7 +633,7 @@ def build_training_dataset(
         )
         chunk_result = _compute_feature_modules_parallel(
             schedule,
-            refresh=refresh_raw_data,
+            refresh=effective_refresh_raw_data,
             umpire_fetcher=resolved_umpire_fetcher,
             lineup_player_ids_by_date=resolved_lineup_player_ids_by_date,
             offense_statcast_fetcher=offense_statcast_fetcher,
@@ -524,10 +654,15 @@ def build_training_dataset(
         try:
             working_db_path = init_db(working_db_path)
             _seed_games_table(working_db_path, schedule)
-            timing_summary = _compute_feature_modules(
+            _console.print(
+                f"\n[bold green]► Phase 1/3 — Building features[/bold green] ({len(schedule)} games · serial)"
+            )
+            timing_summary = _compute_feature_modules_with_chunk_progress(
                 schedule,
+                progress_description="Building features",
                 database_path=working_db_path,
-                refresh=refresh_raw_data,
+                bulk_offense=True,
+                refresh=effective_refresh_raw_data,
                 batting_stats_fetcher=batting_stats_fetcher,
                 fielding_stats_fetcher=fielding_stats_fetcher,
                 framing_stats_fetcher=framing_stats_fetcher,
@@ -543,7 +678,10 @@ def build_training_dataset(
             feature_frame = _feature_rows_to_frame(feature_rows)
             _log_feature_build_timing_summary(timing_summary, label="serial")
             logger.info("[build] Loaded %s feature rows from sqlite cache", len(feature_rows))
-            dataset = _assemble_training_rows(
+            _console.print(
+                f"[bold green]► Phase 2/3 — Assembling training rows[/bold green] ({len(feature_rows):,} feature rows)"
+            )
+            dataset = _assemble_training_rows_with_progress(
                 schedule,
                 feature_frame=feature_frame,
                 database_path=working_db_path,
@@ -565,7 +703,7 @@ def build_training_dataset(
             logger.info(
                 "[build] Loaded %s feature rows from parallel cache", len(chunk_result.feature_rows)
             )
-            dataset = _assemble_training_rows(
+            dataset = _assemble_training_rows_with_progress(
                 schedule,
                 feature_frame=feature_frame,
                 database_path=weather_db_path,
@@ -581,11 +719,15 @@ def build_training_dataset(
 
     assert_training_data_is_leakage_free(dataset)
     _assert_targets_present(dataset)
+    source_coverage_summary = summarize_training_data_source_coverage(dataset)
 
     data_version_hash = _compute_data_version_hash(dataset)
     dataset = dataset.copy()
     dataset["data_version_hash"] = data_version_hash
     dataset["build_timestamp"] = build_timestamp.isoformat()
+    schema_metadata = _run_count_training_schema_metadata()
+    dataset.attrs.update(schema_metadata)
+    dataset.attrs["run_count_training_schema"] = schema_metadata
     logger.info("[build] Assembled dataset with %s rows", len(dataset))
     _console.print(
         f"[bold green]► Phase 3/3 — Saving parquet[/bold green] ({len(dataset):,} rows → {output_path})"
@@ -593,7 +735,11 @@ def build_training_dataset(
 
     resolved_output_path = Path(output_path)
     resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
-    dataset.to_parquet(resolved_output_path, index=False)
+    _write_parquet_with_metadata(
+        dataset,
+        resolved_output_path,
+        parquet_metadata={_RUN_COUNT_TRAINING_PARQUET_METADATA_KEY: _json_bytes(schema_metadata)},
+    )
 
     metadata_path = resolved_output_path.with_suffix(".metadata.json")
     metadata_path.write_text(
@@ -613,12 +759,18 @@ def build_training_dataset(
                 "feature_column_count": int(len(_feature_columns(dataset))),
                 "feature_build_workers": int(feature_build_workers),
                 "data_version_hash": data_version_hash,
+                "source_coverage": source_coverage_summary.categories,
                 "build_timestamp": build_timestamp.isoformat(),
+                "refresh": bool(refresh),
+                "refresh_raw_data": bool(refresh_raw_data),
+                "effective_refresh_raw_data": effective_refresh_raw_data,
+                "run_count_training_schema": schema_metadata,
             },
             indent=2,
         ),
         encoding="utf-8",
     )
+    _print_training_data_source_coverage_summary(source_coverage_summary)
 
     return TrainingDataBuildResult(
         dataframe=dataset,
@@ -681,6 +833,7 @@ def build_live_feature_frame(
         _compute_feature_modules(
             prepared_schedule,
             database_path=working_db_path,
+            bulk_offense=False,
             refresh=refresh,
             batting_stats_fetcher=batting_stats_fetcher,
             fielding_stats_fetcher=fielding_stats_fetcher,
@@ -797,6 +950,135 @@ def assert_training_data_is_complete(
         raise AssertionError("; ".join(errors))
 
     return summary
+
+
+def summarize_training_data_source_coverage(
+    source: pd.DataFrame | str | Path,
+) -> TrainingDataSourceCoverageSummary:
+    dataframe = _coerce_training_data_source(source)
+    if dataframe.empty:
+        return TrainingDataSourceCoverageSummary(total_rows=0, total_days=0, categories={})
+
+    total_rows = int(len(dataframe))
+    total_days = int(dataframe["game_date"].astype(str).nunique()) if "game_date" in dataframe.columns else 0
+
+    def _numeric_series(column: str) -> pd.Series:
+        if column not in dataframe.columns:
+            return pd.Series(0.0, index=dataframe.index, dtype="float64")
+        return pd.to_numeric(dataframe[column], errors="coerce")
+
+    def _distinct_counts(mask: pd.Series) -> dict[str, float | int]:
+        normalized = mask.fillna(False).astype(bool)
+        covered_rows = int(normalized.sum())
+        if covered_rows <= 0 or "game_date" not in dataframe.columns:
+            covered_days = 0
+        else:
+            covered_days = int(dataframe.loc[normalized, "game_date"].astype(str).nunique())
+        return {
+            "rows_covered": covered_rows,
+            "rows_total": total_rows,
+            "row_coverage_pct": round((covered_rows / total_rows) * 100.0, 1) if total_rows else 0.0,
+            "days_covered": covered_days,
+            "days_total": total_days,
+            "day_coverage_pct": round((covered_days / total_days) * 100.0, 1) if total_days else 0.0,
+        }
+
+    def _mask_from_non_default_columns(prefixes: tuple[str, ...]) -> pd.Series:
+        matching_columns = [
+            column
+            for column in dataframe.columns
+            if any(column.startswith(prefix) for prefix in prefixes)
+        ]
+        if not matching_columns:
+            return pd.Series(False, index=dataframe.index)
+
+        mask = pd.Series(False, index=dataframe.index)
+        for column in matching_columns:
+            series = pd.to_numeric(dataframe[column], errors="coerce")
+            default_value = resolve_feature_fill_value(column)
+            if default_value is None or pd.isna(default_value):
+                column_mask = series.notna()
+            else:
+                column_mask = series.notna() & ((series - float(default_value)).abs() > 1e-9)
+            mask = mask | column_mask
+        return mask
+
+    categories = {
+        "weather": _distinct_counts(
+            _numeric_series("weather_data_missing").eq(0.0)
+            if "weather_data_missing" in dataframe.columns
+            else _mask_from_non_default_columns(("weather_",))
+        ),
+        "lineups": _distinct_counts(
+            (
+                _numeric_series("home_lineup_confirmed").fillna(0.0) > 0.0
+            )
+            | (
+                _numeric_series("away_lineup_confirmed").fillna(0.0) > 0.0
+            )
+            | (
+                _numeric_series("home_lineup_known_bats_pct").fillna(0.0) > 0.0
+            )
+            | (
+                _numeric_series("away_lineup_known_bats_pct").fillna(0.0) > 0.0
+            )
+        ),
+        "starters": _distinct_counts(_mask_from_non_default_columns(("home_starter_", "away_starter_"))),
+        "bullpen": _distinct_counts(
+            _mask_from_non_default_columns(("home_team_bullpen_", "away_team_bullpen_"))
+        ),
+        "baselines": _distinct_counts(
+            _mask_from_non_default_columns(
+                (
+                    "home_team_log5_",
+                    "away_team_log5_",
+                    "home_team_pythagorean_wp_",
+                    "away_team_pythagorean_wp_",
+                    "home_team_f5_pythagorean_wp_",
+                    "away_team_f5_pythagorean_wp_",
+                    "home_team_runs_scored_",
+                    "away_team_runs_scored_",
+                    "home_team_runs_allowed_",
+                    "away_team_runs_allowed_",
+                )
+            )
+        ),
+        "umpires": _distinct_counts(
+            (
+                _numeric_series("plate_umpire_known").fillna(0.0) > 0.0
+            )
+            | (
+                _numeric_series("plate_umpire_sample_size_30g").fillna(0.0) > 0.0
+            )
+        ),
+    }
+    return TrainingDataSourceCoverageSummary(
+        total_rows=total_rows,
+        total_days=total_days,
+        categories=categories,
+    )
+
+
+def _print_training_data_source_coverage_summary(summary: TrainingDataSourceCoverageSummary) -> None:
+    if summary.total_rows <= 0:
+        _console.print("[bold yellow]Source coverage[/bold yellow] no rows")
+        return
+
+    _console.print(
+        f"[bold yellow]Source coverage[/bold yellow] rows={summary.total_rows:,} days={summary.total_days:,}"
+    )
+    display_order = ("weather", "lineups", "starters", "bullpen", "baselines", "umpires")
+    for category in display_order:
+        metrics = summary.categories.get(category)
+        if metrics is None:
+            continue
+        _console.print(
+            f"  {category.title():<10} "
+            f"{int(metrics['days_covered'])}/{int(metrics['days_total'])} days "
+            f"({float(metrics['day_coverage_pct']):>5.1f}%) • "
+            f"{int(metrics['rows_covered'])}/{int(metrics['rows_total'])} games "
+            f"({float(metrics['row_coverage_pct']):>5.1f}%)"
+        )
 
 
 def assert_training_data_is_leakage_free(dataframe: pd.DataFrame) -> None:
@@ -1032,6 +1314,7 @@ def _compute_feature_modules(
     schedule: pd.DataFrame,
     *,
     database_path: Path,
+    bulk_offense: bool = False,
     refresh: bool,
     batting_stats_fetcher: SeasonStatsFetcher,
     fielding_stats_fetcher: SeasonStatsFetcher,
@@ -1043,6 +1326,7 @@ def _compute_feature_modules(
     start_metrics_fetcher: StartMetricsFetcher | None,
     bullpen_metrics_fetcher: BullpenMetricsFetcher | None,
     lineup_player_ids_by_date: LineupPlayerIdsByDate | None,
+    heartbeat_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> FeatureBuildTimingSummary:
     normalized_lineup_player_ids = _normalize_lineup_player_ids_by_date(lineup_player_ids_by_date)
     cached_team_logs_fetcher = _memoize_dataframe_fetcher(team_logs_fetcher)
@@ -1073,30 +1357,15 @@ def _compute_feature_modules(
         "umpires": 0.0,
     }
     build_started_at = perf_counter()
-    logger.info("[build] bullpen bulk %s dates", total_days)
-    stage_started_at = perf_counter()
-    compute_bullpen_features_for_schedule(
-        schedule,
-        db_path=database_path,
-        refresh=refresh,
-        bullpen_metrics_fetcher=cached_bullpen_metrics_fetcher,
-        team_logs_fetcher=cached_team_logs_fetcher,
-    )
-    stage_elapsed = perf_counter() - stage_started_at
-    module_seconds["bullpen"] = stage_elapsed
-    logger.info("[build] baselines bulk %s dates", total_days)
-    stage_started_at = perf_counter()
-    compute_baseline_features_for_schedule(
-        schedule,
-        db_path=database_path,
-        windows=DEFAULT_PYTHAGOREAN_WINDOWS,
-    )
-    stage_elapsed = perf_counter() - stage_started_at
-    module_seconds["baselines"] = stage_elapsed
-    logger.info("[build] defense bulk %s dates", total_days)
-    stage_started_at = perf_counter()
-    defense_roster_turnover_lookup: dict[tuple[str, str], float] = {}
+    roster_turnover_lookup: dict[tuple[str, str], float] = {}
     for game_date in game_dates:
+        _emit_feature_build_heartbeat(
+            heartbeat_callback,
+            status="running",
+            stage="roster_turnover_bulk",
+            game_date=game_date,
+            total_days=total_days,
+        )
         day_lineups = list(cached_lineup_fetcher(game_date))
         day_roster_turnover = _build_roster_turnover_by_team(
             game_date=game_date,
@@ -1109,7 +1378,73 @@ def _compute_feature_modules(
             refresh=refresh,
         )
         for team, turnover_pct in day_roster_turnover.items():
-            defense_roster_turnover_lookup[(game_date, team)] = float(turnover_pct)
+            roster_turnover_lookup[(game_date, team)] = float(turnover_pct)
+
+    if bulk_offense:
+        _emit_feature_build_heartbeat(
+            heartbeat_callback,
+            status="running",
+            stage="offense_bulk",
+            total_days=total_days,
+        )
+        logger.info("[build] offense bulk %s dates", total_days)
+        stage_started_at = perf_counter()
+        compute_offensive_features_for_schedule(
+            schedule,
+            db_path=database_path,
+            windows=DEFAULT_WINDOWS,
+            regression_weight=DEFAULT_OFFENSE_REGRESSION_WEIGHT,
+            min_periods=DEFAULT_OFFENSE_MIN_PERIODS,
+            refresh=refresh,
+            lineup_player_ids_by_date=normalized_lineup_player_ids,
+            roster_turnover_lookup=roster_turnover_lookup or None,
+            team_logs_fetcher=cached_team_logs_fetcher,
+            batting_stats_fetcher=cached_batting_stats_fetcher,
+            offense_statcast_fetcher=cached_offense_statcast_fetcher,
+        )
+        stage_elapsed = perf_counter() - stage_started_at
+        module_seconds["offense"] = stage_elapsed
+
+    _emit_feature_build_heartbeat(
+        heartbeat_callback,
+        status="running",
+        stage="bullpen_bulk",
+        total_days=total_days,
+    )
+    logger.info("[build] bullpen bulk %s dates", total_days)
+    stage_started_at = perf_counter()
+    compute_bullpen_features_for_schedule(
+        schedule,
+        db_path=database_path,
+        refresh=refresh,
+        bullpen_metrics_fetcher=cached_bullpen_metrics_fetcher,
+        team_logs_fetcher=cached_team_logs_fetcher,
+    )
+    stage_elapsed = perf_counter() - stage_started_at
+    module_seconds["bullpen"] = stage_elapsed
+    _emit_feature_build_heartbeat(
+        heartbeat_callback,
+        status="running",
+        stage="baselines_bulk",
+        total_days=total_days,
+    )
+    logger.info("[build] baselines bulk %s dates", total_days)
+    stage_started_at = perf_counter()
+    compute_baseline_features_for_schedule(
+        schedule,
+        db_path=database_path,
+        windows=DEFAULT_PYTHAGOREAN_WINDOWS,
+    )
+    stage_elapsed = perf_counter() - stage_started_at
+    module_seconds["baselines"] = stage_elapsed
+    _emit_feature_build_heartbeat(
+        heartbeat_callback,
+        status="running",
+        stage="defense_bulk",
+        total_days=total_days,
+    )
+    logger.info("[build] defense bulk %s dates", total_days)
+    stage_started_at = perf_counter()
     compute_defense_features_for_schedule(
         schedule,
         db_path=database_path,
@@ -1117,7 +1452,7 @@ def _compute_feature_modules(
         regression_weight=DEFAULT_DEFENSE_REGRESSION_WEIGHT,
         abs_retention_factor=DEFAULT_DEFENSE_ABS_RETENTION_FACTOR,
         refresh=refresh,
-        roster_turnover_lookup=defense_roster_turnover_lookup or None,
+        roster_turnover_lookup=roster_turnover_lookup or None,
         fielding_fetcher=cached_fielding_stats_fetcher,
         framing_fetcher=cached_framing_stats_fetcher,
         team_logs_fetcher=cached_team_logs_fetcher,
@@ -1125,6 +1460,14 @@ def _compute_feature_modules(
     stage_elapsed = perf_counter() - stage_started_at
     module_seconds["defense"] = stage_elapsed
     for index, game_date in enumerate(game_dates, start=1):
+        _emit_feature_build_heartbeat(
+            heartbeat_callback,
+            status="running",
+            stage="prepare",
+            game_date=game_date,
+            day_index=index,
+            total_days=total_days,
+        )
         day_started_at = perf_counter()
         day_seconds = {
             "prepare": 0.0,
@@ -1135,19 +1478,14 @@ def _compute_feature_modules(
             "baselines": 0.0,
             "umpires": 0.0,
         }
-        logger.info("[build %s/%s] Preparing %s", index, total_days, game_date)
+        logger.debug("[build %s/%s] Preparing %s", index, total_days, game_date)
         stage_started_at = perf_counter()
         day_lineups = list(cached_lineup_fetcher(game_date))
-        roster_turnover_by_team = _build_roster_turnover_by_team(
-            game_date=game_date,
-            schedule=schedule,
-            lineups=day_lineups,
-            lineup_player_ids=normalized_lineup_player_ids.get(game_date, {}),
-            batting_stats_fetcher=cached_batting_stats_fetcher,
-            start_metrics_fetcher=cached_start_metrics_fetcher,
-            database_path=database_path,
-            refresh=refresh,
-        )
+        roster_turnover_by_team = {
+            team: turnover_pct
+            for (lookup_game_date, team), turnover_pct in roster_turnover_lookup.items()
+            if lookup_game_date == game_date
+        }
         stage_elapsed = perf_counter() - stage_started_at
         module_seconds["prepare"] += stage_elapsed
         day_seconds["prepare"] = stage_elapsed
@@ -1168,23 +1506,44 @@ def _compute_feature_modules(
             lineups=day_lineups,
             batting_splits_lookup=team_batting_splits_lookup,
         )
-        logger.info("[build %s/%s] offense %s", index, total_days, game_date)
-        stage_started_at = perf_counter()
-        compute_offensive_features(
-            game_date,
-            db_path=database_path,
-            windows=DEFAULT_WINDOWS,
-            refresh=refresh,
-            lineup_player_ids=normalized_lineup_player_ids.get(game_date),
-            roster_turnover_by_team=roster_turnover_by_team or None,
-            team_logs_fetcher=cached_team_logs_fetcher,
-            batting_stats_fetcher=cached_batting_stats_fetcher,
-            offense_statcast_fetcher=cached_offense_statcast_fetcher,
+        if bulk_offense:
+            day_seconds["offense"] = 0.0
+        else:
+            _emit_feature_build_heartbeat(
+                heartbeat_callback,
+                status="running",
+                stage="offense",
+                game_date=game_date,
+                day_index=index,
+                total_days=total_days,
+            )
+            logger.debug("[build %s/%s] offense %s", index, total_days, game_date)
+            stage_started_at = perf_counter()
+            compute_offensive_features(
+                game_date,
+                db_path=database_path,
+                windows=DEFAULT_WINDOWS,
+                regression_weight=DEFAULT_OFFENSE_REGRESSION_WEIGHT,
+                min_periods=DEFAULT_OFFENSE_MIN_PERIODS,
+                refresh=refresh,
+                lineup_player_ids=normalized_lineup_player_ids.get(game_date, {}),
+                roster_turnover_by_team=roster_turnover_by_team or None,
+                team_logs_fetcher=cached_team_logs_fetcher,
+                batting_stats_fetcher=cached_batting_stats_fetcher,
+                offense_statcast_fetcher=cached_offense_statcast_fetcher,
+            )
+            stage_elapsed = perf_counter() - stage_started_at
+            module_seconds["offense"] += stage_elapsed
+            day_seconds["offense"] = stage_elapsed
+        _emit_feature_build_heartbeat(
+            heartbeat_callback,
+            status="running",
+            stage="pitching",
+            game_date=game_date,
+            day_index=index,
+            total_days=total_days,
         )
-        stage_elapsed = perf_counter() - stage_started_at
-        module_seconds["offense"] += stage_elapsed
-        day_seconds["offense"] = stage_elapsed
-        logger.info("[build %s/%s] pitching %s", index, total_days, game_date)
+        logger.debug("[build %s/%s] pitching %s", index, total_days, game_date)
         stage_started_at = perf_counter()
         compute_pitching_features(
             game_date,
@@ -1201,7 +1560,15 @@ def _compute_feature_modules(
         day_seconds["defense"] = 0.0
         day_seconds["bullpen"] = 0.0
         day_seconds["baselines"] = 0.0
-        logger.info("[build %s/%s] umpires %s", index, total_days, game_date)
+        _emit_feature_build_heartbeat(
+            heartbeat_callback,
+            status="running",
+            stage="umpires",
+            game_date=game_date,
+            day_index=index,
+            total_days=total_days,
+        )
+        logger.debug("[build %s/%s] umpires %s", index, total_days, game_date)
         stage_started_at = perf_counter()
         compute_umpire_features(
             game_date,
@@ -1212,7 +1579,7 @@ def _compute_feature_modules(
         stage_elapsed = perf_counter() - stage_started_at
         module_seconds["umpires"] += stage_elapsed
         day_seconds["umpires"] = stage_elapsed
-        logger.info(
+        logger.debug(
             "[build %s/%s] complete %s timings prepare=%.2fs offense=%.2fs pitching=%.2fs defense=%.2fs bullpen=%.2fs baselines=%.2fs umpires=%.2fs total=%.2fs",
             index,
             total_days,
@@ -1226,7 +1593,21 @@ def _compute_feature_modules(
             day_seconds["umpires"],
             perf_counter() - day_started_at,
         )
+        _emit_feature_build_heartbeat(
+            heartbeat_callback,
+            status="running",
+            stage="day_complete",
+            game_date=game_date,
+            day_index=index,
+            total_days=total_days,
+        )
 
+    _emit_feature_build_heartbeat(
+        heartbeat_callback,
+        status="complete",
+        stage="complete",
+        total_days=total_days,
+    )
     return FeatureBuildTimingSummary(
         module_seconds={name: float(seconds) for name, seconds in module_seconds.items()},
         total_seconds=float(perf_counter() - build_started_at),
@@ -1248,6 +1629,12 @@ def _resolve_effective_feature_build_workers(
     bullpen_metrics_fetcher: BullpenMetricsFetcher | None,
     lineup_player_ids_by_date: LineupPlayerIdsByDate | None,
 ) -> int:
+    def _unwrap_callable(value: Any) -> Any:
+        current = value
+        while isinstance(current, partial):
+            current = current.func
+        return current
+
     if refresh_raw_data:
         return 1
     if lineup_fetcher is not None:
@@ -1258,17 +1645,96 @@ def _resolve_effective_feature_build_workers(
         return 1
     if lineup_player_ids_by_date is not None:
         return 1
-    if umpire_fetcher is not fetch_retrosheet_umpires:
+    if _unwrap_callable(umpire_fetcher) is not fetch_retrosheet_umpires:
         return 1
-    if batting_stats_fetcher is not fetch_batting_stats:
+    if _unwrap_callable(batting_stats_fetcher) is not fetch_batting_stats:
         return 1
-    if fielding_stats_fetcher is not fetch_fielding_stats:
+    if _unwrap_callable(fielding_stats_fetcher) is not fetch_fielding_stats:
         return 1
-    if framing_stats_fetcher is not fetch_catcher_framing:
+    if _unwrap_callable(framing_stats_fetcher) is not fetch_catcher_framing:
         return 1
-    if team_logs_fetcher is not fetch_team_game_logs:
+    if _unwrap_callable(team_logs_fetcher) is not fetch_team_game_logs:
         return 1
     return DEFAULT_FEATURE_BUILD_WORKERS
+
+
+def _prewarm_derived_feature_caches(
+    schedule: pd.DataFrame,
+    *,
+    refresh: bool,
+    offense_statcast_fetcher: OffenseStatcastFetcher | None,
+    bullpen_metrics_fetcher: BullpenMetricsFetcher | None,
+    team_logs_fetcher: TeamLogsFetcher,
+) -> None:
+    if refresh or schedule.empty:
+        return
+
+    prepared_schedule = _prepare_schedule_frame(schedule, require_final_scores=False)
+    if prepared_schedule.empty:
+        return
+
+    season_source = (
+        prepared_schedule["game_date"]
+        if "game_date" in prepared_schedule.columns
+        else prepared_schedule["scheduled_start"]
+        if "scheduled_start" in prepared_schedule.columns
+        else pd.Series(dtype="object")
+    )
+    season_values = (
+        pd.to_datetime(season_source, errors="coerce")
+        .dropna()
+        .dt.year.astype(int)
+        .unique()
+        .tolist()
+    )
+    seasons = sorted({int(season) for season in season_values})
+    if not seasons:
+        return
+
+    should_prewarm_offense = offense_statcast_fetcher is None
+    should_prewarm_bullpen = (
+        bullpen_metrics_fetcher is None and team_logs_fetcher is fetch_team_game_logs
+    )
+    if not should_prewarm_offense and not should_prewarm_bullpen:
+        return
+
+    logger.info(
+        "[build] Prewarming derived feature caches for seasons %s",
+        ", ".join(str(season) for season in seasons),
+    )
+    temp_fd, temp_db_name = tempfile.mkstemp(prefix="feature_cache_prewarm_", suffix=".db")
+    os.close(temp_fd)
+    working_db_path = Path(temp_db_name)
+    try:
+        working_db_path = init_db(working_db_path)
+        _seed_games_table(working_db_path, prepared_schedule)
+        if should_prewarm_offense:
+            offense_seasons = sorted(
+                {season for season in seasons} | {season - 1 for season in seasons}
+            )
+            for season in offense_seasons:
+                if season <= 0:
+                    continue
+                _fetch_season_offense_statcast_metrics(
+                    season,
+                    db_path=working_db_path,
+                    end_date=None,
+                    refresh=False,
+                )
+        if should_prewarm_bullpen:
+            for season in seasons:
+                _fetch_season_bullpen_metrics(
+                    season,
+                    db_path=working_db_path,
+                    end_date=date(season, 12, 31),
+                    refresh=False,
+                    team_logs_fetcher=team_logs_fetcher,
+                )
+    finally:
+        try:
+            working_db_path.unlink(missing_ok=True)
+        except PermissionError:
+            pass
 
 
 def _compute_feature_modules_parallel(
@@ -1282,6 +1748,10 @@ def _compute_feature_modules_parallel(
 ) -> _FeatureChunkResult:
     wall_started_at = perf_counter()
     game_dates = sorted(schedule["game_date"].astype(str).unique().tolist())
+    historical_lineup_fetcher = _build_historical_lineup_fetcher(
+        schedule=schedule,
+        refresh=refresh,
+    )
     if len(game_dates) <= 1 or worker_count <= 1:
         temp_fd, temp_db_name = tempfile.mkstemp(prefix="training_builder_serial_", suffix=".db")
         os.close(temp_fd)
@@ -1289,15 +1759,17 @@ def _compute_feature_modules_parallel(
         try:
             working_db_path = init_db(working_db_path)
             _seed_games_table(working_db_path, schedule)
-            timing_summary = _compute_feature_modules(
+            timing_summary = _compute_feature_modules_with_chunk_progress(
                 schedule,
+                progress_description="Building features",
                 database_path=working_db_path,
+                bulk_offense=True,
                 refresh=refresh,
                 batting_stats_fetcher=fetch_batting_stats,
                 fielding_stats_fetcher=fetch_fielding_stats,
                 framing_stats_fetcher=fetch_catcher_framing,
                 team_logs_fetcher=fetch_team_game_logs,
-                lineup_fetcher=_empty_lineups_fetcher,
+                lineup_fetcher=historical_lineup_fetcher,
                 umpire_fetcher=umpire_fetcher,
                 offense_statcast_fetcher=offense_statcast_fetcher,
                 start_metrics_fetcher=None,
@@ -1316,6 +1788,10 @@ def _compute_feature_modules_parallel(
     requested_workers = min(worker_count, len(chunked_dates))
     results: list[_FeatureChunkResult] = []
     normalized_lineup_ids = _normalize_lineup_player_ids_by_date(lineup_player_ids_by_date)
+    stall_timeout_seconds = DEFAULT_FEATURE_BUILD_STALL_TIMEOUT_SECONDS
+    poll_seconds = DEFAULT_FEATURE_BUILD_STALL_POLL_SECONDS
+    worker_log_dir = _create_feature_build_run_log_dir()
+    logger.info("[build] Worker activity logs: %s", worker_log_dir)
     with Progress(
         SpinnerColumn(),
         TextColumn("[bold cyan]{task.description}"),
@@ -1334,9 +1810,13 @@ def _compute_feature_modules_parallel(
             days_total=len(game_dates),
         )
         completed_days = 0
-        with ProcessPoolExecutor(max_workers=requested_workers) as executor:
-            future_to_chunk_size = {
-                executor.submit(
+        executor = ProcessPoolExecutor(max_workers=requested_workers)
+        future_to_context: dict[Any, _FeatureChunkExecutionContext] = {}
+        force_terminate_executor = False
+        try:
+            for chunk_index, chunk_dates in enumerate(chunked_dates, start=1):
+                heartbeat_path = _create_feature_chunk_heartbeat_path(chunk_index=chunk_index)
+                future = executor.submit(
                     _build_feature_chunk,
                     schedule,
                     tuple(chunk_dates),
@@ -1344,13 +1824,65 @@ def _compute_feature_modules_parallel(
                     umpire_fetcher,
                     normalized_lineup_ids,
                     offense_statcast_fetcher,
-                ): len(chunk_dates)
-                for chunk_dates in chunked_dates
-            }
-            for future in as_completed(future_to_chunk_size):
-                results.append(future.result())
-                completed_days += future_to_chunk_size[future]
-                progress.update(task_id, advance=1, days_done=completed_days)
+                    chunk_index,
+                    len(chunked_dates),
+                    str(heartbeat_path),
+                    str(worker_log_dir),
+                )
+                future_to_context[future] = _FeatureChunkExecutionContext(
+                    chunk_index=chunk_index,
+                    chunk_total=len(chunked_dates),
+                    chunk_dates=tuple(chunk_dates),
+                    heartbeat_path=heartbeat_path,
+                    submitted_at=perf_counter(),
+                )
+
+            pending = set(future_to_context)
+            while pending:
+                done, pending = wait(
+                    pending,
+                    timeout=float(poll_seconds),
+                    return_when=FIRST_COMPLETED,
+                )
+                if done:
+                    for future in done:
+                        context = future_to_context[future]
+                        try:
+                            results.append(future.result())
+                        except Exception as exc:
+                            force_terminate_executor = True
+                            _terminate_feature_build_executor(executor)
+                            heartbeat_status = _format_feature_chunk_status(context)
+                            raise RuntimeError(
+                                f"Feature build chunk {context.chunk_index}/{context.chunk_total} failed. {heartbeat_status}"
+                            ) from exc
+                        completed_days += len(context.chunk_dates)
+                        progress.update(task_id, advance=1, days_done=completed_days)
+                        _cleanup_feature_chunk_heartbeat(context.heartbeat_path)
+                    continue
+
+                stale_contexts = _collect_stalled_feature_chunks(
+                    pending,
+                    future_to_context=future_to_context,
+                    stall_timeout_seconds=stall_timeout_seconds,
+                )
+                if stale_contexts:
+                    force_terminate_executor = True
+                    _terminate_feature_build_executor(executor)
+                    details = " | ".join(
+                        _format_feature_chunk_status(context) for context in stale_contexts
+                    )
+                    raise TimeoutError(
+                        "Parallel feature build stalled while waiting for worker chunks. "
+                        f"Timed out after {stall_timeout_seconds}s without a heartbeat update. {details}"
+                    )
+        finally:
+            _terminate_feature_build_executor(
+                executor,
+                wait=not force_terminate_executor,
+            )
+            for context in future_to_context.values():
+                _cleanup_feature_chunk_heartbeat(context.heartbeat_path)
 
     feature_rows = pd.concat([result.feature_rows for result in results], ignore_index=True)
     timing_summary = _combine_timing_summaries([result.timing_summary for result in results])
@@ -1362,6 +1894,89 @@ def _compute_feature_modules_parallel(
     return _FeatureChunkResult(feature_rows=feature_rows, timing_summary=timing_summary)
 
 
+def _compute_feature_modules_with_chunk_progress(
+    schedule: pd.DataFrame,
+    *,
+    progress_description: str,
+    database_path: Path,
+    bulk_offense: bool,
+    refresh: bool,
+    batting_stats_fetcher: SeasonStatsFetcher,
+    fielding_stats_fetcher: SeasonStatsFetcher,
+    framing_stats_fetcher: SeasonStatsFetcher,
+    team_logs_fetcher: TeamLogsFetcher,
+    lineup_fetcher: LineupFetcher | None,
+    umpire_fetcher: UmpireFetcher,
+    offense_statcast_fetcher: OffenseStatcastFetcher | None,
+    start_metrics_fetcher: StartMetricsFetcher | None,
+    bullpen_metrics_fetcher: BullpenMetricsFetcher | None,
+    lineup_player_ids_by_date: LineupPlayerIdsByDate | None,
+) -> FeatureBuildTimingSummary:
+    game_dates = sorted(schedule["game_date"].astype(str).unique().tolist())
+    chunked_dates = _chunk_values(game_dates, DEFAULT_FEATURE_BUILD_CHUNK_DAYS)
+    total_chunks = max(1, len(chunked_dates))
+    completed_days = 0
+    last_completed_chunk = 0
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold cyan]{task.description}"),
+        BarColumn(bar_width=40),
+        MofNCompleteColumn(),
+        TextColumn(
+            "[dim]chunks •[/dim] [bold]{task.fields[days_done]}/{task.fields[days_total]}[/bold] days •"
+        ),
+        TimeElapsedColumn(),
+        refresh_per_second=4,
+    ) as progress:
+        task_id = progress.add_task(
+            progress_description,
+            total=total_chunks,
+            days_done=0,
+            days_total=len(game_dates),
+        )
+
+        def heartbeat_callback(payload: dict[str, Any]) -> None:
+            nonlocal completed_days, last_completed_chunk
+            if str(payload.get("stage")) != "day_complete":
+                return
+            day_index = payload.get("day_index")
+            if not isinstance(day_index, int):
+                return
+            completed_days = max(completed_days, min(day_index, len(game_dates)))
+            completed_chunk = min(
+                total_chunks,
+                max(1, (completed_days + DEFAULT_FEATURE_BUILD_CHUNK_DAYS - 1) // DEFAULT_FEATURE_BUILD_CHUNK_DAYS),
+            )
+            if completed_chunk > last_completed_chunk:
+                progress.update(
+                    task_id,
+                    completed=completed_chunk,
+                    days_done=completed_days,
+                )
+                last_completed_chunk = completed_chunk
+
+        timing_summary = _compute_feature_modules(
+            schedule,
+            database_path=database_path,
+            bulk_offense=bulk_offense,
+            refresh=refresh,
+            batting_stats_fetcher=batting_stats_fetcher,
+            fielding_stats_fetcher=fielding_stats_fetcher,
+            framing_stats_fetcher=framing_stats_fetcher,
+            team_logs_fetcher=team_logs_fetcher,
+            lineup_fetcher=lineup_fetcher,
+            umpire_fetcher=umpire_fetcher,
+            offense_statcast_fetcher=offense_statcast_fetcher,
+            start_metrics_fetcher=start_metrics_fetcher,
+            bullpen_metrics_fetcher=bullpen_metrics_fetcher,
+            lineup_player_ids_by_date=lineup_player_ids_by_date,
+            heartbeat_callback=heartbeat_callback,
+        )
+        progress.update(task_id, completed=total_chunks, days_done=len(game_dates))
+        return timing_summary
+
+
 def _build_feature_chunk(
     schedule: pd.DataFrame,
     chunk_dates: tuple[str, ...],
@@ -1369,33 +1984,93 @@ def _build_feature_chunk(
     umpire_fetcher: UmpireFetcher,
     lineup_player_ids_by_date: dict[str, Mapping[tuple[int, str], Sequence[int]]],
     offense_statcast_fetcher: OffenseStatcastFetcher | None,
+    chunk_index: int,
+    chunk_total: int,
+    heartbeat_path: str,
+    worker_log_dir: str,
 ) -> _FeatureChunkResult:
     chunk_schedule = schedule.loc[schedule["game_date"].astype(str).isin(chunk_dates)].copy()
+    historical_lineup_fetcher = _build_historical_lineup_fetcher(
+        schedule=chunk_schedule,
+        refresh=refresh,
+    )
     temp_fd, temp_db_name = tempfile.mkstemp(prefix="training_builder_chunk_", suffix=".db")
     os.close(temp_fd)
     working_db_path = Path(temp_db_name)
+    resolved_heartbeat_path = Path(heartbeat_path)
+    resolved_worker_log_dir = Path(worker_log_dir)
+    worker_log_path = _resolve_feature_build_worker_log_path(resolved_worker_log_dir)
+    chunk_started_at = perf_counter()
+    last_logged_signature: tuple[Any, ...] | None = None
+
+    def heartbeat_callback(payload: dict[str, Any]) -> None:
+        nonlocal last_logged_signature
+        _write_feature_chunk_heartbeat(
+            resolved_heartbeat_path,
+            chunk_index=chunk_index,
+            chunk_total=chunk_total,
+            chunk_dates=chunk_dates,
+            payload={"db_path": str(working_db_path), **payload},
+        )
+        log_signature = (
+            payload.get("status"),
+            payload.get("stage"),
+            payload.get("game_date"),
+            payload.get("day_index"),
+            payload.get("total_days"),
+            payload.get("error_type"),
+            payload.get("error_message"),
+        )
+        if log_signature == last_logged_signature:
+            return
+        last_logged_signature = log_signature
+        _append_feature_build_worker_log(
+            worker_log_path,
+            chunk_index=chunk_index,
+            chunk_total=chunk_total,
+            chunk_dates=chunk_dates,
+            payload=payload,
+            elapsed_seconds=perf_counter() - chunk_started_at,
+        )
+
     try:
+        heartbeat_callback({"status": "starting", "stage": "chunk_start"})
         working_db_path = init_db(working_db_path)
         _seed_games_table(working_db_path, schedule)
         timing_summary = _compute_feature_modules(
             chunk_schedule,
             database_path=working_db_path,
+            bulk_offense=True,
             refresh=refresh,
             batting_stats_fetcher=fetch_batting_stats,
             fielding_stats_fetcher=fetch_fielding_stats,
             framing_stats_fetcher=fetch_catcher_framing,
             team_logs_fetcher=fetch_team_game_logs,
-            lineup_fetcher=_empty_lineups_fetcher,
+            lineup_fetcher=historical_lineup_fetcher,
             umpire_fetcher=umpire_fetcher,
             offense_statcast_fetcher=offense_statcast_fetcher,
             start_metrics_fetcher=None,
             bullpen_metrics_fetcher=None,
             lineup_player_ids_by_date=lineup_player_ids_by_date,
+            heartbeat_callback=heartbeat_callback,
         )
+        heartbeat_callback({"status": "loading_rows", "stage": "chunk_finalize"})
+        feature_rows = _load_feature_rows(working_db_path)
+        heartbeat_callback({"status": "complete", "stage": "chunk_complete"})
         return _FeatureChunkResult(
-            feature_rows=_load_feature_rows(working_db_path),
+            feature_rows=feature_rows,
             timing_summary=timing_summary,
         )
+    except Exception as exc:
+        heartbeat_callback(
+            {
+                "status": "error",
+                "stage": "chunk_error",
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+            }
+        )
+        raise
     finally:
         try:
             working_db_path.unlink(missing_ok=True)
@@ -1407,6 +2082,260 @@ def _chunk_values(values: Sequence[str], chunk_size: int) -> list[list[str]]:
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive")
     return [list(values[index : index + chunk_size]) for index in range(0, len(values), chunk_size)]
+
+
+def _emit_feature_build_heartbeat(
+    callback: Callable[[dict[str, Any]], None] | None,
+    **payload: Any,
+) -> None:
+    if callback is None:
+        return
+    callback(payload)
+
+
+def _create_feature_chunk_heartbeat_path(*, chunk_index: int) -> Path:
+    temp_fd, heartbeat_name = tempfile.mkstemp(
+        prefix=f"training_builder_chunk_{chunk_index:03d}_",
+        suffix=".heartbeat.json",
+    )
+    os.close(temp_fd)
+    return Path(heartbeat_name)
+
+
+def _write_feature_chunk_heartbeat(
+    heartbeat_path: Path,
+    *,
+    chunk_index: int,
+    chunk_total: int,
+    chunk_dates: tuple[str, ...],
+    payload: Mapping[str, Any],
+) -> None:
+    heartbeat_payload = {
+        "chunk_index": chunk_index,
+        "chunk_total": chunk_total,
+        "chunk_dates": list(chunk_dates),
+        "updated_at": datetime.now(UTC).isoformat(),
+        **dict(payload),
+    }
+    try:
+        heartbeat_path.write_text(json.dumps(heartbeat_payload), encoding="utf-8")
+    except OSError:
+        return
+
+
+def _read_feature_chunk_heartbeat(heartbeat_path: Path) -> dict[str, Any]:
+    try:
+        raw = heartbeat_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return {}
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _collect_stalled_feature_chunks(
+    pending: set[Any],
+    *,
+    future_to_context: Mapping[Any, _FeatureChunkExecutionContext],
+    stall_timeout_seconds: int,
+) -> list[_FeatureChunkExecutionContext]:
+    if stall_timeout_seconds <= 0:
+        return []
+
+    now = datetime.now(UTC)
+    stale_contexts: list[_FeatureChunkExecutionContext] = []
+    for future in pending:
+        context = future_to_context[future]
+        payload = _read_feature_chunk_heartbeat(context.heartbeat_path)
+        if not payload:
+            continue
+        updated_at = payload.get("updated_at")
+        if updated_at:
+            try:
+                heartbeat_timestamp = datetime.fromisoformat(str(updated_at))
+            except ValueError:
+                heartbeat_timestamp = None
+        else:
+            heartbeat_timestamp = None
+        if heartbeat_timestamp is None:
+            continue
+        else:
+            age_seconds = (now - heartbeat_timestamp).total_seconds()
+        if age_seconds >= stall_timeout_seconds:
+            stale_contexts.append(context)
+    return stale_contexts
+
+
+def _format_feature_chunk_status(context: _FeatureChunkExecutionContext) -> str:
+    payload = _read_feature_chunk_heartbeat(context.heartbeat_path)
+    if not payload:
+        return (
+            f"chunk={context.chunk_index}/{context.chunk_total} "
+            f"dates={context.chunk_dates[0]}..{context.chunk_dates[-1]} "
+            "stage=queued updated_at=unavailable"
+        )
+    stage = payload.get("stage", "unknown")
+    game_date = payload.get("game_date")
+    updated_at = payload.get("updated_at", "unknown")
+    error_type = payload.get("error_type")
+    error_message = payload.get("error_message")
+    details = (
+        f"chunk={context.chunk_index}/{context.chunk_total} "
+        f"dates={context.chunk_dates[0]}..{context.chunk_dates[-1]} "
+        f"stage={stage}"
+    )
+    if game_date:
+        details += f" game_date={game_date}"
+    details += f" updated_at={updated_at}"
+    if error_type:
+        details += f" error={error_type}: {error_message}"
+    return details
+
+
+def _cleanup_feature_chunk_heartbeat(heartbeat_path: Path) -> None:
+    try:
+        heartbeat_path.unlink(missing_ok=True)
+    except OSError:
+        return
+
+
+def _format_feature_build_worker_stage(stage: Any) -> str:
+    if not stage:
+        return "starting..."
+
+    normalized = str(stage).strip().lower()
+    aliases = {
+        "chunk_start": "prepare",
+        "chunk_finalize": "finalize",
+        "chunk_complete": "complete",
+        "day_complete": "complete",
+        "baselines_bulk": "baselines",
+        "bullpen_bulk": "bullpen",
+        "defense_bulk": "defense",
+        "defense_bulk_roster_turnover": "defense",
+    }
+    return aliases.get(normalized, normalized.replace("_", " "))
+
+
+def _create_feature_build_run_log_dir() -> Path:
+    started_at = datetime.now(UTC)
+    directory = (
+        Path("logs")
+        / "feature_build"
+        / f"run_{started_at.strftime('%Y%m%d_%H%M%S')}_pid{os.getpid()}"
+    )
+    directory.mkdir(parents=True, exist_ok=True)
+    summary_path = directory / "README.md"
+    if not summary_path.exists():
+        summary_path.write_text(
+            (
+                "# Feature Build Worker Logs\n\n"
+                f"- Started: `{started_at.isoformat()}`\n"
+                f"- Parent PID: `{os.getpid()}`\n"
+                "- Files: one Markdown log per worker process.\n"
+            ),
+            encoding="utf-8",
+        )
+    return directory
+
+
+def _format_feature_build_elapsed(total_seconds: float) -> str:
+    seconds = max(0, int(total_seconds))
+    minutes, remaining_seconds = divmod(seconds, 60)
+    hours, remaining_minutes = divmod(minutes, 60)
+    if hours > 0:
+        return f"{hours}h {remaining_minutes}m {remaining_seconds}s"
+    if minutes > 0:
+        return f"{minutes}m {remaining_seconds}s"
+    return f"{remaining_seconds}s"
+
+
+def _resolve_feature_build_worker_number() -> int:
+    process_name = current_process().name
+    match = re.search(r"(\d+)$", process_name)
+    if match is None:
+        return 0
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return 0
+
+
+def _resolve_feature_build_worker_log_path(log_dir: Path) -> Path:
+    worker_number = _resolve_feature_build_worker_number()
+    filename = f"worker_{worker_number:02d}.md" if worker_number > 0 else "worker_unknown.md"
+    log_path = log_dir / filename
+    if not log_path.exists():
+        log_path.write_text(
+            (
+                f"# Worker {worker_number if worker_number > 0 else 'unknown'}\n\n"
+                f"- Process: `{current_process().name}`\n"
+                f"- PID: `{os.getpid()}`\n\n"
+                "## Events\n"
+            ),
+            encoding="utf-8",
+        )
+    return log_path
+
+
+def _append_feature_build_worker_log(
+    log_path: Path,
+    *,
+    chunk_index: int,
+    chunk_total: int,
+    chunk_dates: tuple[str, ...],
+    payload: Mapping[str, Any],
+    elapsed_seconds: float,
+) -> None:
+    timestamp = datetime.now(UTC).isoformat()
+    stage = _format_feature_build_worker_stage(payload.get("stage"))
+    status = str(payload.get("status") or "unknown")
+    game_date = str(payload.get("game_date") or "n/a")
+    day_index = payload.get("day_index")
+    total_days = payload.get("total_days")
+    details = [
+        f"`{timestamp}`",
+        f"`+{elapsed_seconds:.1f}s`",
+        f"chunk `{chunk_index}/{chunk_total}`",
+        f"dates `{chunk_dates[0]}..{chunk_dates[-1]}`",
+        f"stage `{stage}`",
+        f"status `{status}`",
+        f"game_date `{game_date}`",
+    ]
+    if day_index is not None and total_days is not None:
+        details.append(f"day `{day_index}/{total_days}`")
+    error_type = payload.get("error_type")
+    error_message = payload.get("error_message")
+    if error_type:
+        details.append(f"error `{error_type}: {error_message}`")
+    try:
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(f"- {' | '.join(details)}\n")
+    except OSError:
+        return
+
+
+def _terminate_feature_build_executor(
+    executor: ProcessPoolExecutor,
+    *,
+    wait: bool = False,
+) -> None:
+    if wait:
+        executor.shutdown(wait=True, cancel_futures=True)
+        return
+    processes = getattr(executor, "_processes", None) or {}
+    for process in processes.values():
+        if process is None or not process.is_alive():
+            continue
+        try:
+            process.terminate()
+        except OSError:
+            continue
+    executor.shutdown(wait=wait, cancel_futures=True)
 
 
 def _combine_timing_summaries(
@@ -1680,6 +2609,7 @@ def _assemble_training_rows(
     weather_fetcher: WeatherFetcher | None,
     historical_odds_db_path: str | Path | None,
     historical_rl_book_name: str | None,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> pd.DataFrame:
     schedule_context_lookup = _build_schedule_context_lookup(schedule)
     feature_lookup = (
@@ -1688,8 +2618,10 @@ def _assemble_training_rows(
         else pd.DataFrame(index=pd.Index([], name="game_pk"))
     )
     rows: list[dict[str, Any]] = []
+    games = schedule.to_dict(orient="records")
+    total_games = len(games)
 
-    for game in schedule.to_dict(orient="records"):
+    for game_index, game in enumerate(games, start=1):
         game_pk = int(game["game_pk"])
         game_start = pd.Timestamp(game["scheduled_start"])
         if game_start.tzinfo is None:
@@ -1727,6 +2659,7 @@ def _assemble_training_rows(
             for feature_name, feature_value in feature_values.items():
                 if pd.notna(feature_value):
                     row[str(feature_name)] = float(feature_value)
+        row.update(_derive_temporal_delta_features(row))
         row.update(_derive_matchup_interaction_features(row))
 
         f5_home_score = int(game["f5_home_score"])
@@ -1747,6 +2680,10 @@ def _assemble_training_rows(
             }
         )
         rows.append(row)
+        if progress_callback is not None and (
+            game_index == total_games or game_index % 250 == 0
+        ):
+            progress_callback(game_index, total_games)
 
     dataset = pd.DataFrame(rows).sort_values(["scheduled_start", "game_pk"]).reset_index(drop=True)
     dataset = _fill_missing_feature_values(dataset)
@@ -1755,6 +2692,44 @@ def _assemble_training_rows(
         historical_odds_db_path=historical_odds_db_path,
         historical_rl_book_name=historical_rl_book_name,
     )
+
+
+def _assemble_training_rows_with_progress(
+    schedule: pd.DataFrame,
+    *,
+    feature_frame: pd.DataFrame,
+    database_path: Path,
+    weather_fetcher: WeatherFetcher | None,
+    historical_odds_db_path: str | Path | None,
+    historical_rl_book_name: str | None,
+) -> pd.DataFrame:
+    total_games = int(len(schedule))
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold cyan]{task.description}"),
+        BarColumn(bar_width=40),
+        MofNCompleteColumn(),
+        TextColumn("[dim]games[/dim]"),
+        TimeElapsedColumn(),
+        refresh_per_second=4,
+        console=_console,
+    ) as progress:
+        task_id = progress.add_task("Assembling training rows", total=max(1, total_games))
+
+        def progress_callback(completed_games: int, _total_games: int) -> None:
+            progress.update(task_id, completed=completed_games)
+
+        dataset = _assemble_training_rows(
+            schedule,
+            feature_frame=feature_frame,
+            database_path=database_path,
+            weather_fetcher=weather_fetcher,
+            historical_odds_db_path=historical_odds_db_path,
+            historical_rl_book_name=historical_rl_book_name,
+            progress_callback=progress_callback,
+        )
+        progress.update(task_id, completed=max(1, total_games))
+        return dataset
 
 
 def _attach_historical_runline_targets(
@@ -1909,6 +2884,7 @@ def _assemble_inference_rows(
             for feature_name, feature_value in feature_values.items():
                 if pd.notna(feature_value):
                     row[str(feature_name)] = float(feature_value)
+        row.update(_derive_temporal_delta_features(row))
         row.update(_derive_matchup_interaction_features(row))
 
         rows.append(row)
@@ -2076,6 +3052,10 @@ def _call_weather_fetcher(
     game_datetime: str | datetime,
     database_path: Path,
 ) -> WeatherData | None:
+    if isinstance(weather_fetcher, partial):
+        bound_keywords = weather_fetcher.keywords or {}
+        if "db_path" in bound_keywords:
+            return weather_fetcher(team_abbr, game_datetime)
     try:
         return weather_fetcher(team_abbr, game_datetime, db_path=database_path)
     except TypeError:
@@ -2106,7 +3086,14 @@ def _ensure_expected_feature_columns(dataframe: pd.DataFrame) -> pd.DataFrame:
         for metric, default_value in _LINEUP_CONTEXT_FEATURE_DEFAULTS.items():
             if metric in {"opposing_starter_throws_left", "opposing_starter_throws_right"}:
                 column = f"{side_name}_{metric}"
-            elif metric in {"lhb_pct", "rhb_pct", "shb_pct", "known_bats_pct", "platoon_advantage_pct", "confirmed"}:
+            elif metric in {
+                "lhb_pct",
+                "rhb_pct",
+                "shb_pct",
+                "known_bats_pct",
+                "platoon_advantage_pct",
+                "confirmed",
+            }:
                 column = f"{side_name}_lineup_{metric}"
             else:
                 column = f"{side_name}_team_{metric}"
@@ -2121,6 +3108,8 @@ def _default_feature_fill_value(column: str) -> float:
         return float(_SCHEDULE_FEATURE_DEFAULTS[column])
     if column in _WEATHER_FEATURE_DEFAULTS:
         return float(_WEATHER_FEATURE_DEFAULTS[column])
+    if "_delta_" in column:
+        return float("nan")
     if "_starter_" in column:
         return _resolve_pattern_default(column, _PITCHING_FEATURE_DEFAULTS)
     if "_team_bullpen_" in column:
@@ -2142,11 +3131,42 @@ def _default_feature_fill_value(column: str) -> float:
     return 0.0
 
 
+def resolve_feature_fill_value(column: str) -> float:
+    """Expose the canonical feature fill value for training diagnostics."""
+
+    return _default_feature_fill_value(column)
+
+
+def _derive_temporal_delta_features(row: Mapping[str, Any]) -> dict[str, float]:
+    features: dict[str, float] = {}
+
+    for side_name in ("home", "away"):
+        for metric in _LINEUP_TEMPORAL_DELTA_METRICS:
+            short_feature = f"{side_name}_lineup_{metric}_7g"
+            medium_feature = f"{side_name}_lineup_{metric}_30g"
+            features[f"{side_name}_lineup_{metric}_delta_7v30g"] = _temporal_delta_or_nan(
+                row,
+                short_feature,
+                medium_feature,
+            )
+
+        for metric in _STARTER_TEMPORAL_DELTA_METRICS:
+            short_feature = f"{side_name}_starter_{metric}_7s"
+            medium_feature = f"{side_name}_starter_{metric}_30s"
+            features[f"{side_name}_starter_{metric}_delta_7v30s"] = _temporal_delta_or_nan(
+                row,
+                short_feature,
+                medium_feature,
+            )
+
+    return features
+
+
 def _derive_matchup_interaction_features(row: Mapping[str, Any]) -> dict[str, float]:
-    home_lineup_woba = _coerce_feature_float(row.get("home_lineup_woba_30g"))
-    away_lineup_woba = _coerce_feature_float(row.get("away_lineup_woba_30g"))
-    home_starter_xera = _coerce_feature_float(row.get("home_starter_xera_30s"))
-    away_starter_xera = _coerce_feature_float(row.get("away_starter_xera_30s"))
+    home_lineup_woba = _resolved_row_feature_float(row, "home_lineup_woba_30g")
+    away_lineup_woba = _resolved_row_feature_float(row, "away_lineup_woba_30g")
+    home_starter_xera = _resolved_row_feature_float(row, "home_starter_xera_30s")
+    away_starter_xera = _resolved_row_feature_float(row, "away_starter_xera_30s")
 
     away_starter_xwoba = _starter_xwoba_from_xera(away_starter_xera)
     home_starter_xwoba = _starter_xwoba_from_xera(home_starter_xera)
@@ -2168,6 +3188,25 @@ def _coerce_feature_float(value: Any, default: float = 0.0) -> float:
     if pd.isna(numeric):
         return float(default)
     return numeric
+
+
+def _resolved_row_feature_float(row: Mapping[str, Any], feature_name: str) -> float:
+    return _coerce_feature_float(
+        row.get(feature_name),
+        default=_default_feature_fill_value(feature_name),
+    )
+
+
+def _temporal_delta_or_nan(
+    row: Mapping[str, Any],
+    short_feature_name: str,
+    medium_feature_name: str,
+) -> float:
+    short_value = _coerce_feature_float(row.get(short_feature_name), default=float("nan"))
+    medium_value = _coerce_feature_float(row.get(medium_feature_name), default=float("nan"))
+    if pd.isna(short_value) or pd.isna(medium_value):
+        return float("nan")
+    return float(short_value - medium_value)
 
 
 def _persist_lineup_context_features(
@@ -2347,8 +3386,17 @@ def _load_historical_lineups_by_date(
     if register.empty:
         return {}
 
-    player_lookup = _build_historical_player_lookup(register)
-    starter_throw_lookup = _build_historical_starter_throw_lookup(register)
+    retrosheet_handedness_lookup = _build_retrosheet_handedness_lookup(
+        fetch_retrosheet_allplayers(refresh=refresh)
+    )
+    player_lookup = _build_historical_player_lookup(
+        register,
+        retrosheet_handedness_lookup=retrosheet_handedness_lookup,
+    )
+    starter_throw_lookup = _build_historical_starter_throw_lookup(
+        register,
+        retrosheet_handedness_lookup=retrosheet_handedness_lookup,
+    )
     if not player_lookup:
         return {}
 
@@ -2401,7 +3449,32 @@ def _load_historical_lineups_by_date(
     return lineups_by_date
 
 
-def _build_historical_player_lookup(register: pd.DataFrame) -> dict[str, dict[str, Any]]:
+def _build_retrosheet_handedness_lookup(
+    allplayers: pd.DataFrame,
+) -> dict[str, dict[str, str | None]]:
+    if allplayers.empty or "id" not in allplayers.columns:
+        return {}
+
+    lookup: dict[str, dict[str, str | None]] = {}
+    for row in allplayers.to_dict(orient="records"):
+        retro_id = str(row.get("id", "")).strip().lower()
+        if not retro_id:
+            continue
+        lookup.setdefault(
+            retro_id,
+            {
+                "bats": _normalize_batting_handedness_value(row.get("bat")),
+                "throws": _normalize_handedness_value(row.get("throw")),
+            },
+        )
+    return lookup
+
+
+def _build_historical_player_lookup(
+    register: pd.DataFrame,
+    *,
+    retrosheet_handedness_lookup: Mapping[str, Mapping[str, str | None]] | None = None,
+) -> dict[str, dict[str, Any]]:
     if "key_retro" not in register.columns or "key_mlbam" not in register.columns:
         return {}
 
@@ -2411,25 +3484,42 @@ def _build_historical_player_lookup(register: pd.DataFrame) -> dict[str, dict[st
         player_id = _coerce_int(row.get("key_mlbam"))
         if not retro_id or player_id is None:
             continue
+        handedness_payload = (
+            retrosheet_handedness_lookup.get(retro_id, {})
+            if retrosheet_handedness_lookup is not None
+            else {}
+        )
         lookup.setdefault(
             retro_id,
             {
                 "player_id": player_id,
                 "player_name": _historical_player_name(row, fallback_id=player_id),
-                "bats": _normalize_handedness_value(row.get("bats")),
-                "throws": _normalize_handedness_value(row.get("throws")),
+                "bats": _normalize_batting_handedness_value(row.get("bats"))
+                or handedness_payload.get("bats"),
+                "throws": _normalize_handedness_value(row.get("throws"))
+                or handedness_payload.get("throws"),
             },
         )
     return lookup
 
 
-def _build_historical_starter_throw_lookup(register: pd.DataFrame) -> dict[int, str]:
-    if "key_mlbam" not in register.columns:
+def _build_historical_starter_throw_lookup(
+    register: pd.DataFrame,
+    *,
+    retrosheet_handedness_lookup: Mapping[str, Mapping[str, str | None]] | None = None,
+) -> dict[int, str]:
+    if "key_mlbam" not in register.columns or "key_retro" not in register.columns:
         return {}
     lookup: dict[int, str] = {}
     for row in register.to_dict(orient="records"):
         player_id = _coerce_int(row.get("key_mlbam"))
-        throws = _normalize_handedness_value(row.get("throws"))
+        retro_id = str(row.get("key_retro", "")).strip().lower()
+        handedness_payload = (
+            retrosheet_handedness_lookup.get(retro_id, {})
+            if retrosheet_handedness_lookup is not None
+            else {}
+        )
+        throws = _normalize_handedness_value(row.get("throws")) or handedness_payload.get("throws")
         if player_id is not None and throws is not None:
             lookup.setdefault(player_id, throws)
     return lookup
@@ -2444,6 +3534,13 @@ def _historical_player_name(row: Mapping[str, Any], *, fallback_id: int) -> str:
 
 def _normalize_handedness_value(value: Any) -> str | None:
     normalized = str(value or "").strip().upper()
+    return normalized if normalized in {"L", "R", "S"} else None
+
+
+def _normalize_batting_handedness_value(value: Any) -> str | None:
+    normalized = str(value or "").strip().upper()
+    if normalized == "B":
+        return "S"
     return normalized if normalized in {"L", "R", "S"} else None
 
 
@@ -2777,7 +3874,9 @@ def _precompute_team_batting_splits_for_all_dates(
         return {target_day: {} for target_day in target_dates}
 
     daily_totals = (
-        plate_appearances.groupby(["game_day", "batting_team", "p_throws"], dropna=True, as_index=False)
+        plate_appearances.groupby(
+            ["game_day", "batting_team", "p_throws"], dropna=True, as_index=False
+        )
         .agg(
             woba_total=("woba_value", "sum"),
             pa_count=("woba_value", "count"),
@@ -2899,13 +3998,11 @@ def _build_cached_team_batting_splits_fetcher() -> Callable[..., dict[str, dict[
                     target_day,
                 }
             )
-            for precompute_day in all_dates:
+            bulk_lookup = _precompute_team_batting_splits_for_all_dates(season_frame, all_dates)
+            for precompute_day, precomputed_splits in bulk_lookup.items():
                 precompute_key = (*season_key, precompute_day.isoformat())
                 if precompute_key not in splits_cache:
-                    splits_cache[precompute_key] = _compute_team_batting_splits(
-                        season_frame,
-                        precompute_day,
-                    )
+                    splits_cache[precompute_key] = precomputed_splits
 
         splits_key = (*season_key, target_day.isoformat())
         if splits_key not in splits_cache:
@@ -3098,6 +4195,141 @@ def _to_tz_naive_datetime_series(values: Any) -> pd.Series:
     return parsed.dt.tz_convert(None)
 
 
+def _run_count_training_schema_metadata() -> dict[str, Any]:
+    return {
+        "schema_name": RUN_COUNT_TRAINING_SCHEMA_NAME,
+        "schema_version": RUN_COUNT_TRAINING_SCHEMA_VERSION,
+        "required_columns": list(RUN_COUNT_REQUIRED_TRAINING_COLUMNS),
+        "required_temporal_delta_columns": list(RUN_COUNT_REQUIRED_TEMPORAL_DELTA_COLUMNS),
+    }
+
+
+def _json_bytes(payload: Mapping[str, Any]) -> bytes:
+    return json.dumps(payload, sort_keys=True).encode("utf-8")
+
+
+def _write_parquet_with_metadata(
+    dataframe: pd.DataFrame,
+    output_path: Path,
+    *,
+    parquet_metadata: Mapping[bytes, bytes] | None = None,
+) -> None:
+    table = pa.Table.from_pandas(dataframe, preserve_index=False)
+    if parquet_metadata:
+        schema_metadata = dict(table.schema.metadata or {})
+        schema_metadata.update(parquet_metadata)
+        table = table.replace_schema_metadata(schema_metadata)
+    pq.write_table(table, output_path)
+
+
+def read_parquet_metadata(path: str | Path) -> dict[str, Any]:
+    parquet_path = Path(path)
+    metadata = pq.read_metadata(parquet_path).metadata or {}
+    decoded: dict[str, Any] = {}
+    for key, value in metadata.items():
+        decoded[key.decode("utf-8")] = value.decode("utf-8")
+    return decoded
+
+
+def read_run_count_training_schema_metadata(path: str | Path) -> dict[str, Any] | None:
+    metadata = read_parquet_metadata(path)
+    raw_payload = metadata.get(_RUN_COUNT_TRAINING_PARQUET_METADATA_KEY.decode("utf-8"))
+    if raw_payload is None:
+        return None
+    return json.loads(raw_payload)
+
+
+def validate_run_count_training_data(
+    source: pd.DataFrame | str | Path,
+) -> pd.DataFrame:
+    if isinstance(source, pd.DataFrame):
+        dataset = source.copy()
+        schema_metadata = source.attrs.get("run_count_training_schema") or {
+            key: source.attrs.get(key)
+            for key in ("schema_name", "schema_version")
+            if source.attrs.get(key) is not None
+        }
+    else:
+        path = Path(source)
+        schema_metadata = read_run_count_training_schema_metadata(path)
+        dataset = pd.read_parquet(path)
+
+    missing_columns = sorted(
+        column for column in RUN_COUNT_REQUIRED_TRAINING_COLUMNS if column not in dataset.columns
+    )
+    if missing_columns:
+        raise ValueError(
+            "Run-count training parquet is stale: missing required columns "
+            f"{missing_columns}. Rebuild the parquet with scripts/build_parquet.py."
+        )
+
+    expected_schema_name = RUN_COUNT_TRAINING_SCHEMA_NAME
+    expected_schema_version = RUN_COUNT_TRAINING_SCHEMA_VERSION
+    actual_schema_name = (
+        schema_metadata.get("schema_name") if isinstance(schema_metadata, Mapping) else None
+    )
+    actual_schema_version = (
+        schema_metadata.get("schema_version") if isinstance(schema_metadata, Mapping) else None
+    )
+    if actual_schema_name != expected_schema_name or actual_schema_version != expected_schema_version:
+        raise ValueError(
+            "Run-count training parquet schema mismatch: expected "
+            f"{expected_schema_name} v{expected_schema_version}, got "
+            f"{actual_schema_name or 'missing'} v{actual_schema_version or 'missing'}. "
+            "Rebuild the parquet with scripts/build_parquet.py."
+        )
+
+    dataset = dataset.copy()
+    dataset.attrs["run_count_training_schema"] = dict(schema_metadata)
+    return dataset
+
+
+def inspect_run_count_training_data(
+    source: pd.DataFrame | str | Path,
+) -> TrainingDataInspectionSummary:
+    if isinstance(source, pd.DataFrame):
+        dataset = source.copy()
+        parquet_path = None
+        metadata_path = None
+        schema_metadata = dataset.attrs.get("run_count_training_schema") or {
+            key: dataset.attrs.get(key)
+            for key in ("schema_name", "schema_version")
+            if dataset.attrs.get(key) is not None
+        }
+    else:
+        parquet_path = Path(source)
+        metadata_path = parquet_path.with_suffix(".metadata.json")
+        schema_metadata = read_run_count_training_schema_metadata(parquet_path) or {}
+        dataset = pd.read_parquet(parquet_path)
+
+    missing_temporal_delta_columns = tuple(
+        sorted(
+            column
+            for column in RUN_COUNT_REQUIRED_TEMPORAL_DELTA_COLUMNS
+            if column not in dataset.columns
+        )
+    )
+    return TrainingDataInspectionSummary(
+        parquet_path=parquet_path,
+        metadata_path=metadata_path if metadata_path is not None and metadata_path.exists() else None,
+        row_count=int(len(dataset)),
+        feature_column_count=int(len(_feature_columns(dataset))),
+        data_version_hash=_resolve_training_data_version_hash(dataset),
+        schema_name=str(
+            schema_metadata.get("schema_name", "legacy/unknown")
+            if isinstance(schema_metadata, Mapping)
+            else "legacy/unknown"
+        ),
+        schema_version=str(
+            schema_metadata.get("schema_version", "legacy/unknown")
+            if isinstance(schema_metadata, Mapping)
+            else "legacy/unknown"
+        ),
+        has_temporal_delta_features=not missing_temporal_delta_columns,
+        missing_temporal_delta_columns=missing_temporal_delta_columns,
+    )
+
+
 def _coerce_training_data_source(source: pd.DataFrame | str | Path) -> pd.DataFrame:
     if isinstance(source, pd.DataFrame):
         return source.copy()
@@ -3145,6 +4377,14 @@ def _compute_data_version_hash(dataframe: pd.DataFrame) -> str:
     stable_payload = dataframe[stable_columns].sort_values(["scheduled_start", "game_pk"])
     encoded = stable_payload.to_json(orient="records", date_format="iso").encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _resolve_training_data_version_hash(dataframe: pd.DataFrame) -> str:
+    if "data_version_hash" in dataframe.columns:
+        non_null_hashes = dataframe["data_version_hash"].dropna().astype(str).unique().tolist()
+        if len(non_null_hashes) == 1:
+            return non_null_hashes[0]
+    return _compute_data_version_hash(dataframe)
 
 
 def _feature_columns(dataframe: pd.DataFrame) -> list[str]:

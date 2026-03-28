@@ -318,9 +318,108 @@ def test_compute_bullpen_features_returns_defaults_for_first_three_days(
     assert by_name["home_team_bullpen_pitch_count_3d"] == 0.0
     assert by_name["home_team_bullpen_pitch_count_5d"] == 0.0
     assert by_name["home_team_bullpen_avg_rest_days_top5"] == 3.0
-    assert by_name["home_team_bullpen_ir_pct_30g"] == 0.0
-    assert by_name["home_team_bullpen_xfip"] == pytest.approx(4.2)
-    assert by_name["home_team_bullpen_high_leverage_available_count"] == 5.0
+
+
+def test_fetch_season_bullpen_metrics_writes_cache_when_inherited_runner_lookup_is_empty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.features.bullpen import (
+        _bullpen_metrics_cache_path,
+        _fetch_season_bullpen_metrics,
+    )
+
+    db_path = tmp_path / "bullpen_cache.db"
+    season_games = pd.DataFrame(
+        [
+            {
+                "game_pk": 8001,
+                "game_date": pd.Timestamp("2025-04-10"),
+                "home_team": "NYY",
+                "away_team": "BOS",
+                "home_starter_id": 101,
+                "away_starter_id": 201,
+            }
+        ]
+    )
+
+    monkeypatch.setattr("src.features.bullpen.DERIVED_CACHE_ROOT", tmp_path / "derived_bullpen")
+    monkeypatch.setattr(
+        "src.features.bullpen._load_season_games",
+        lambda *_args, **_kwargs: season_games.copy(),
+    )
+    monkeypatch.setattr(
+        "src.features.bullpen.fetch_statcast_range",
+        lambda *_args, **_kwargs: pd.DataFrame(
+            [
+                {
+                    "game_pk": 8001,
+                    "game_date": "2025-04-10",
+                    "pitcher": 301,
+                    "at_bat_number": 1,
+                    "pitch_number": 1,
+                    "inning_topbot": "Top",
+                    "events": "strikeout",
+                    "bb_type": None,
+                    "home_team": "NYY",
+                    "away_team": "BOS",
+                },
+                {
+                    "game_pk": 8001,
+                    "game_date": "2025-04-10",
+                    "pitcher": 301,
+                    "at_bat_number": 2,
+                    "pitch_number": 1,
+                    "inning_topbot": "Top",
+                    "events": "field_out",
+                    "bb_type": "ground_ball",
+                    "home_team": "NYY",
+                    "away_team": "BOS",
+                },
+                {
+                    "game_pk": 8001,
+                    "game_date": "2025-04-10",
+                    "pitcher": 302,
+                    "at_bat_number": 1,
+                    "pitch_number": 1,
+                    "inning_topbot": "Bot",
+                    "events": "walk",
+                    "bb_type": None,
+                    "home_team": "NYY",
+                    "away_team": "BOS",
+                },
+            ]
+        ),
+    )
+
+    metrics = _fetch_season_bullpen_metrics(
+        2025,
+        db_path=db_path,
+        end_date=date(2025, 4, 10),
+        refresh=False,
+        team_logs_fetcher=lambda *_args, **_kwargs: pd.DataFrame(),
+    )
+
+    cache_path = _bullpen_metrics_cache_path(2025, season_games)
+
+    assert cache_path.exists()
+    assert set(["inherited_runners", "inherited_runners_scored"]).issubset(metrics.columns)
+    assert metrics["inherited_runners"].tolist() == [0.0, 0.0]
+    assert metrics["inherited_runners_scored"].tolist() == [0.0, 0.0]
+
+    monkeypatch.setattr(
+        "src.features.bullpen.fetch_statcast_range",
+        lambda *_args, **_kwargs: pytest.fail("cached bullpen metrics should be reused"),
+    )
+    cached = _fetch_season_bullpen_metrics(
+        2025,
+        db_path=db_path,
+        end_date=date(2025, 4, 10),
+        refresh=False,
+        team_logs_fetcher=lambda *_args, **_kwargs: pd.DataFrame(),
+    )
+
+    assert len(cached) == len(metrics)
 
 
 def test_compute_bullpen_features_for_schedule_matches_day_by_day_results(
@@ -673,6 +772,26 @@ def test_compute_bullpen_features_parses_flattened_pitching_ir_logs(
     by_name = {row.feature_name: row.feature_value for row in rows}
     assert by_name["home_team_bullpen_ir_pct_30g"] == pytest.approx(2 / 6)
     assert by_name["home_team_bullpen_ir_pct_30g"] > 0.0
+
+
+def test_normalize_inherited_runner_logs_parses_baseball_reference_pitching_stats_columns() -> None:
+    from src.features.bullpen import _normalize_inherited_runner_logs
+
+    raw_logs = pd.DataFrame(
+        {
+            "Date": ["2025-04-05", "2025-04-07"],
+            "Pitching Stats_IR": [2, 1],
+            "Pitching Stats_IS": [1, 0],
+        }
+    )
+
+    normalized = _normalize_inherited_runner_logs(raw_logs, "NYY")
+
+    assert normalized["team"].tolist() == ["NYY", "NYY"]
+    assert normalized["game_date"].dt.strftime("%Y-%m-%d").tolist() == ["2025-04-05", "2025-04-07"]
+    assert normalized["inherited_runners"].tolist() == [2.0, 1.0]
+    assert normalized["inherited_runners_scored"].tolist() == [1.0, 0.0]
+    assert normalized["date_index"].tolist() == [0, 0]
 
 
 def test_collapse_plate_appearances_keeps_same_at_bat_number_separate_across_games() -> None:

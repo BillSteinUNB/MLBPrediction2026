@@ -7,12 +7,17 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
+import src.clients.weather_client as weather_client
 from src.clients.weather_client import (
+    _OPEN_METEO_HISTORICAL_RESPONSE_CACHE,
+    _WEATHER_MEMORY_CACHE,
     _cache_weather,
+    _build_weather_data_from_open_meteo,
     _can_fetch_forecast_for_game_time,
     _calculate_air_density,
     _calculate_wind_factor,
     _find_closest_forecast,
+    _find_closest_historical_hour,
     _get_cached_weather,
     _get_default_weather,
     _kelvin_to_fahrenheit,
@@ -26,6 +31,17 @@ from src.models.weather import WeatherData
 
 UTC = timezone.utc
 GAME_TIME = datetime(2026, 7, 4, 19, 0, tzinfo=UTC)
+
+
+@pytest.fixture(autouse=True)
+def clear_historical_response_cache() -> None:
+    _OPEN_METEO_HISTORICAL_RESPONSE_CACHE.clear()
+    _WEATHER_MEMORY_CACHE.clear()
+    weather_client._STADIUMS_CACHE = None
+    yield
+    _OPEN_METEO_HISTORICAL_RESPONSE_CACHE.clear()
+    _WEATHER_MEMORY_CACHE.clear()
+    weather_client._STADIUMS_CACHE = None
 
 
 def _stadium_settings() -> dict[str, object]:
@@ -85,6 +101,60 @@ def test_find_closest_forecast_respects_time_window() -> None:
 
     assert match is not None
     assert match["dt"] == int(GAME_TIME.timestamp())
+
+
+def test_find_closest_historical_hour_prefers_same_or_previous_hour() -> None:
+    hourly_payload = {
+        "time": [
+            "2021-07-15T18:00",
+            "2021-07-15T20:00",
+        ],
+        "temperature_2m": [80.0, 77.0],
+        "wind_speed_10m": [12.0, 8.0],
+        "wind_direction_10m": [225.0, 180.0],
+        "precipitation": [0.0, 0.4],
+        "relative_humidity_2m": [55.0, 60.0],
+        "cloud_cover": [25.0, 65.0],
+        "surface_pressure": [1012.0, 1011.0],
+    }
+
+    match = _find_closest_historical_hour(
+        hourly_payload,
+        datetime(2021, 7, 15, 19, 5, tzinfo=UTC),
+    )
+
+    assert match is not None
+    assert match["time"] == "2021-07-15T18:00"
+
+
+def test_build_weather_data_from_open_meteo_uses_requested_units() -> None:
+    retrieved_at = datetime.now(UTC)
+
+    weather = _build_weather_data_from_open_meteo(
+        {
+            "time": "2020-08-20T19:00",
+            "temperature_2m": 88.0,
+            "wind_speed_10m": 14.0,
+            "wind_direction_10m": 225.0,
+            "precipitation": 0.2,
+            "relative_humidity_2m": 30.0,
+            "cloud_cover": 18.0,
+            "surface_pressure": 840.0,
+        },
+        stadium_cf_orientation_deg=45.0,
+        retrieved_at=retrieved_at,
+    )
+
+    assert weather.temperature_f == pytest.approx(88.0)
+    assert weather.wind_speed_mph == pytest.approx(14.0)
+    assert weather.pressure_hpa == pytest.approx(840.0)
+    assert weather.air_density < 1.1
+    assert weather.wind_factor > 0
+    assert weather.precipitation_probability is None
+    assert weather.precipitation_mm == pytest.approx(0.2)
+    assert weather.cloud_cover_pct == pytest.approx(18.0)
+    assert weather.forecast_time == datetime(2020, 8, 20, 19, 0, tzinfo=UTC)
+    assert weather.fetched_at == retrieved_at
 
 
 def test_can_fetch_forecast_for_game_time_only_allows_openweather_future_window() -> None:
@@ -147,6 +217,20 @@ def test_cache_round_trip_and_expiry(tmp_path: Path) -> None:
     _cache_weather(db_path, "NYY", GAME_TIME, stale_weather)
 
     assert _get_cached_weather(db_path, "NYY", GAME_TIME) is None
+
+    historical_game_time = datetime.now(UTC) - timedelta(days=30)
+    historical_stale_weather = fresh_weather.model_copy(
+        update={
+            "forecast_time": historical_game_time,
+            "fetched_at": datetime.now(UTC) - timedelta(hours=24),
+        }
+    )
+    _cache_weather(db_path, "LAD", historical_game_time, historical_stale_weather)
+
+    cached_historical_weather = _get_cached_weather(db_path, "LAD", historical_game_time)
+
+    assert cached_historical_weather is not None
+    assert cached_historical_weather.temperature_f == pytest.approx(72.5)
 
 
 def test_fetch_game_weather_uses_retrieval_time_for_cache_ttl(
@@ -226,24 +310,82 @@ def test_fetch_game_weather_skips_dome_without_api_call(
     assert calls["count"] == 0
 
 
-def test_fetch_game_weather_skips_historical_open_air_without_api_call(
+def test_fetch_game_weather_uses_open_meteo_for_historical_open_air_games(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    monkeypatch.setattr("src.clients.weather_client._load_settings_yaml", _stadium_settings)
+
+    forecast_calls = {"count": 0}
+    historical_calls = {"count": 0}
+
+    def _unexpected_fetch(**_kwargs: object) -> dict[str, object]:
+        forecast_calls["count"] += 1
+        raise AssertionError("historical weather lookup should not hit forecast API")
+
+    monkeypatch.setattr("src.clients.weather_client._fetch_from_api", _unexpected_fetch)
+    monkeypatch.setattr(
+        "src.clients.weather_client._fetch_from_open_meteo_historical",
+        lambda **_kwargs: historical_calls.__setitem__("count", historical_calls["count"] + 1)
+        or {
+            "hourly": {
+                "time": ["2026-02-24T19:00"],
+                "temperature_2m": [61.0],
+                "wind_speed_10m": [11.0],
+                "wind_direction_10m": [180.0],
+                "precipitation": [0.0],
+                "relative_humidity_2m": [47.0],
+                "cloud_cover": [35.0],
+                "surface_pressure": [1016.0],
+            }
+        },
+    )
+
+    historical_game_time = datetime(2026, 2, 24, 19, 10, tzinfo=UTC)
+    weather = fetch_game_weather("NYY", historical_game_time, db_path=tmp_path / "weather.db")
+
+    assert weather.temperature_f == pytest.approx(61.0)
+    assert weather.wind_speed_mph == pytest.approx(11.0)
+    assert weather.forecast_time == datetime(2026, 2, 24, 19, 0, tzinfo=UTC)
+    assert forecast_calls["count"] == 0
+    assert historical_calls["count"] == 1
+
+
+def test_fetch_game_weather_reuses_open_meteo_day_payload_for_same_team_and_date(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "weather.db"
     monkeypatch.setattr("src.clients.weather_client._load_settings_yaml", _stadium_settings)
 
     calls = {"count": 0}
 
-    def _unexpected_fetch(**_kwargs: object) -> dict[str, object]:
+    def _historical_payload(**_kwargs: object) -> dict[str, object]:
         calls["count"] += 1
-        raise AssertionError("historical weather lookup should not hit forecast API")
+        return {
+            "hourly": {
+                "time": ["2026-02-24T18:00", "2026-02-24T21:00"],
+                "temperature_2m": [58.0, 54.0],
+                "wind_speed_10m": [9.0, 6.0],
+                "wind_direction_10m": [180.0, 90.0],
+                "precipitation": [0.0, 0.1],
+                "relative_humidity_2m": [52.0, 63.0],
+                "cloud_cover": [20.0, 75.0],
+                "surface_pressure": [1015.0, 1013.0],
+            }
+        }
 
-    monkeypatch.setattr("src.clients.weather_client._fetch_from_api", _unexpected_fetch)
+    monkeypatch.setattr(
+        "src.clients.weather_client._fetch_from_open_meteo_historical",
+        _historical_payload,
+    )
 
-    historical_game_time = datetime.now(UTC) - timedelta(days=30)
-    weather = fetch_game_weather("NYY", historical_game_time)
+    first_weather = fetch_game_weather("NYY", datetime(2026, 2, 24, 18, 5, tzinfo=UTC), db_path=db_path)
+    second_weather = fetch_game_weather("NYY", datetime(2026, 2, 24, 21, 5, tzinfo=UTC), db_path=db_path)
 
-    assert weather == _get_default_weather(is_dome=False)
-    assert calls["count"] == 0
+    assert calls["count"] == 1
+    assert first_weather.temperature_f == pytest.approx(58.0)
+    assert second_weather.temperature_f == pytest.approx(54.0)
 
 
 def test_fetch_game_weather_fetches_open_air_and_then_uses_cache(

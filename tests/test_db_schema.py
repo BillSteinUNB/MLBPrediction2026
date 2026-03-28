@@ -35,6 +35,7 @@ def test_init_db_creates_all_required_tables(tmp_path: Path) -> None:
         "schema_version",
         "games",
         "features",
+        "pitcher_siera_cache",
         "predictions",
         "odds_snapshots",
         "bets",
@@ -137,4 +138,20 @@ def test_init_db_is_idempotent(tmp_path: Path) -> None:
         ).fetchone()
 
     assert version_rows == (1,)
-    assert tables == (8,)
+    assert tables == (11,)
+
+
+def test_pitcher_siera_cache_table_includes_seasonal_siera_fields(tmp_path: Path) -> None:
+    db_path = tmp_path / "schema.db"
+
+    init_db(db_path)
+
+    siera_columns = _table_columns(db_path, "pitcher_siera_cache")
+
+    assert siera_columns["season"][0].upper() == "INTEGER"
+    assert siera_columns["pitcher_name"][0].upper() == "TEXT"
+    assert siera_columns["pitcher_name"][1] == 1
+    assert siera_columns["siera"][0].upper() == "REAL"
+    assert siera_columns["siera"][1] == 1
+    assert siera_columns["fetched_at"][0].upper() == "TEXT"
+    assert siera_columns["fetched_at"][1] == 1

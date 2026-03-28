@@ -272,6 +272,12 @@ export interface SlateResponse {
   games: SlateGame[]
 }
 
+export interface MacSyncResponse {
+  ok: boolean
+  message: string
+  output?: string | null
+}
+
 export interface LiveSeasonSummaryResponse {
   season: number
   tracked_games: number

@@ -170,6 +170,17 @@ export function getSlate(pipelineDate?: string): Promise<t.SlateResponse> {
   return fetchGet(`/slate${query ? `?${query}` : ''}`)
 }
 
+export function pullSlateFromMac(pipelineDate?: string): Promise<t.MacSyncResponse> {
+  const params = new URLSearchParams()
+  if (pipelineDate) {
+    params.set('pipeline_date', pipelineDate)
+  }
+  const query = params.toString()
+  return fetchAPI<t.MacSyncResponse>(`/slate/pull-from-mac${query ? `?${query}` : ''}`, {
+    method: 'POST',
+  })
+}
+
 export function getLiveSeasonSummary(
   season: number = 2026
 ): Promise<t.LiveSeasonSummaryResponse> {

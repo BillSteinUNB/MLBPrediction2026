@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import io
+import sqlite3
 import zipfile
 from pathlib import Path
-
-import pandas as pd
 
 
 def _zip_bytes(member_name: str, csv_text: str) -> bytes:
@@ -33,6 +32,15 @@ def test_fetch_retrosheet_public_datasets_cache_and_derive_views(tmp_path: Path,
             "allplayers.csv",
             "id,last,first,team,season\njudge001,Judge,Aaron,NYY,2024\n"
         ),
+        retrosheet_client.RETROSHEET_GAME_LOG_URL_TEMPLATE.format(season=2024): _zip_bytes(
+            "gl2024.txt",
+            (
+                '"20240401","0","Mon","BOS","AL",1,"NYA","AL",1,3,5,54,"N","","","","NYC01",'
+                '41000,185,"000000300","20000003X",27,8,1,0,3,7,1,1,2,10,0,9,1,0,0,0,4,7,5,'
+                '5,1,0,27,10,1,0,2,0,31,9,2,0,2,8,0,0,0,2,0,10,0,0,3,0,5,6,3,3,0,1,27,6,0,0,'
+                '0,0,"westj902","Will Little","gibsh902","Tripp Gibson"\n'
+            ),
+        ),
     }
     calls: list[str] = []
 
@@ -57,17 +65,27 @@ def test_fetch_retrosheet_public_datasets_cache_and_derive_views(tmp_path: Path,
         season=2024,
         raw_data_root=tmp_path,
     )
-    umpires = retrosheet_client.fetch_retrosheet_umpires(season=2024, raw_data_root=tmp_path)
+    game_logs = retrosheet_client.fetch_retrosheet_game_logs(
+        season=2024,
+        db_path=tmp_path / "mlb.db",
+    )
+    umpires = retrosheet_client.fetch_retrosheet_umpires(season=2024, db_path=tmp_path / "mlb.db")
 
     assert gameinfo.loc[0, "umphome"] == "bluej901"
     assert teamstats.loc[0, "team"] == "NYY"
     assert allplayers.loc[0, "id"] == "judge001"
     assert len(lineups) == 1
     assert lineups.loc[0, "start_l1"] == "judge001"
-    assert umpires.loc[0, "ump1b"] == "westj902"
+    assert game_logs.loc[0, "matchup_sequence"] == 1
+    assert umpires.loc[0, "umphome"] == "westj902"
     assert (tmp_path / "retrosheet" / "gameinfo.parquet").exists()
     assert (tmp_path / "retrosheet" / "teamstats.parquet").exists()
     assert (tmp_path / "retrosheet" / "allplayers.parquet").exists()
+    with sqlite3.connect(tmp_path / "mlb.db") as connection:
+        cached_rows = connection.execute(
+            "SELECT COUNT(*) FROM retrosheet_game_logs WHERE season = 2024"
+        ).fetchone()[0]
+    assert cached_rows == 1
 
     monkeypatch.setattr(
         retrosheet_client.requests,
@@ -77,6 +95,11 @@ def test_fetch_retrosheet_public_datasets_cache_and_derive_views(tmp_path: Path,
         ),
     )
     cached = retrosheet_client.fetch_retrosheet_gameinfo(raw_data_root=tmp_path)
+    cached_umpires = retrosheet_client.fetch_retrosheet_umpires(
+        season=2024,
+        db_path=tmp_path / "mlb.db",
+    )
 
     assert cached.equals(gameinfo)
-    assert len(calls) == 3
+    assert cached_umpires.equals(umpires)
+    assert len(calls) == 4

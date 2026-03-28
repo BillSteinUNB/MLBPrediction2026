@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { getSlate } from "../api";
+import { getSlate, pullSlateFromMac } from "../api";
 import type { SlateGame, SlateResponse } from "../api";
 import { TooltipLabel } from "../components/TooltipLabel";
+
+const macSyncEnabled = import.meta.env.VITE_MAC_SYNC_ENABLED === "true";
 
 const pageStyle: React.CSSProperties = {
   display: "flex",
@@ -202,6 +204,12 @@ function fmtPoint(value: number | null | undefined): string {
 }
 
 
+function fmtLine(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "—";
+  return Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1);
+}
+
+
 function fmtRuns(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
   return value.toFixed(2);
@@ -265,6 +273,10 @@ function marketLineLabel(
 function marketLabel(marketType: string): string {
   if (marketType === "f5_ml") return "First 5 Moneyline";
   if (marketType === "f5_rl") return "First 5 Run Line";
+  if (marketType === "f5_total") return "First 5 Total";
+  if (marketType === "full_game_ml") return "Full Game Moneyline";
+  if (marketType === "full_game_rl") return "Full Game Run Line";
+  if (marketType === "full_game_total") return "Full Game Total";
   return marketType.toUpperCase();
 }
 
@@ -273,12 +285,74 @@ function sourceModelLabel(value: string | null | undefined): string {
   if (value === "legacy_f5_ml") return "Legacy F5 ML";
   if (value === "legacy_f5_ml_equiv") return "Legacy F5 ML Equivalent";
   if (value === "legacy_f5_rl") return "Legacy F5 RL";
+  if (value === "run_count_f5_ml") return "Run Count F5 ML";
+  if (value === "run_count_f5_rl") return "Run Count F5 RL";
+  if (value === "run_count_f5_total") return "Run Count F5 Total";
+  if (value === "run_count_full_game_ml") return "Run Count Full Game ML";
+  if (value === "run_count_full_game_rl") return "Run Count Full Game RL";
+  if (value === "run_count_full_game_total") return "Run Count Full Game Total";
   if (value === "rlv2_direct") return "RL V2 Direct";
   if (value === "rlv2_margin") return "RL V2 Margin";
   if (value === "rlv2_blend") return "RL V2 Blend";
   return value;
 }
 void sourceModelLabel;
+
+type SlateDecisionLike = NonNullable<SlateGame["selected_decision"]>;
+
+function decisionDisplayLabel(game: SlateGame, decision: SlateDecisionLike | null | undefined): string {
+  if (!decision) return "—";
+  if (decision.market_type === "f5_total" || decision.market_type === "full_game_total") {
+    const direction = decision.side === "under" ? "Under" : "Over";
+    return decision.line_at_bet !== null && decision.line_at_bet !== undefined
+      ? `${direction} ${fmtLine(decision.line_at_bet)}`
+      : direction;
+  }
+  if (
+    (decision.market_type === "f5_rl" || decision.market_type === "full_game_rl") &&
+    (decision.side === "home" || decision.side === "away")
+  ) {
+    return decision.line_at_bet !== null && decision.line_at_bet !== undefined
+      ? `${teamNameForSide(game, decision.side)} ${fmtPoint(decision.line_at_bet)}`
+      : teamNameForSide(game, decision.side);
+  }
+  if (decision.side === "home" || decision.side === "away") {
+    return teamNameForSide(game, decision.side);
+  }
+  return decision.side.toUpperCase();
+}
+
+function projectedScoreText(game: SlateGame, scope: "f5" | "full"): string {
+  const awayRuns =
+    scope === "f5"
+      ? game.prediction?.projected_f5_away_runs
+      : game.prediction?.projected_full_game_away_runs;
+  const homeRuns =
+    scope === "f5"
+      ? game.prediction?.projected_f5_home_runs
+      : game.prediction?.projected_full_game_home_runs;
+  return `${teamNameForSide(game, "away")} ${fmtRuns(awayRuns)} – ${fmtRuns(homeRuns)} ${teamNameForSide(game, "home")}`;
+}
+
+function decisionProjectionSummary(
+  game: SlateGame,
+  decision: SlateDecisionLike | null | undefined,
+): { label: string; value: string } | null {
+  if (!game.prediction) return null;
+  switch (decision?.market_type) {
+    case "f5_total":
+      return { label: "Proj F5 Total", value: fmtRuns(game.prediction.projected_f5_total_runs) };
+    case "full_game_ml":
+    case "full_game_rl":
+      return { label: "Proj Full Score", value: projectedScoreText(game, "full") };
+    case "full_game_total":
+      return { label: "Proj Full Total", value: fmtRuns(game.prediction.projected_full_game_total_runs) };
+    case "f5_ml":
+    case "f5_rl":
+    default:
+      return { label: "Proj F5 Score", value: projectedScoreText(game, "f5") };
+  }
+}
 
 function bet365DecisionOddsLabel(game: SlateGame): string | null {
   const decision = game.selected_decision;
@@ -294,6 +368,23 @@ function bet365DecisionOddsLabel(game: SlateGame): string | null {
       decision.side === "home" ? input.bet365_f5_rl_home_point : input.bet365_f5_rl_away_point;
     const odds =
       decision.side === "home" ? input.bet365_f5_rl_home_odds : input.bet365_f5_rl_away_odds;
+    if (odds === null || odds === undefined) return null;
+    return `${marketLineLabel(game, decision.side as "home" | "away", point)} ${fmtOdds(odds)}`;
+  }
+  if (decision.market_type === "full_game_ml") {
+    const odds =
+      decision.side === "home" ? input.bet365_full_game_home_ml : input.bet365_full_game_away_ml;
+    return odds !== null && odds !== undefined ? fmtOdds(odds) : null;
+  }
+  if (decision.market_type === "full_game_rl") {
+    const point =
+      decision.side === "home"
+        ? input.bet365_full_game_home_spread
+        : input.bet365_full_game_away_spread;
+    const odds =
+      decision.side === "home"
+        ? input.bet365_full_game_home_spread_odds
+        : input.bet365_full_game_away_spread_odds;
     if (odds === null || odds === undefined) return null;
     return `${marketLineLabel(game, decision.side as "home" | "away", point)} ${fmtOdds(odds)}`;
   }
@@ -320,6 +411,25 @@ function consensusDecisionOddsLabel(game: SlateGame): string | null {
       decision.side === "home"
         ? input.consensus_f5_rl_home_odds
         : input.consensus_f5_rl_away_odds;
+    if (odds === null || odds === undefined) return null;
+    return `${marketLineLabel(game, decision.side as "home" | "away", point)} ${fmtOdds(odds)}`;
+  }
+  if (decision.market_type === "full_game_ml") {
+    const odds =
+      decision.side === "home"
+        ? input.consensus_full_game_home_ml
+        : input.consensus_full_game_away_ml;
+    return odds !== null && odds !== undefined ? fmtOdds(odds) : null;
+  }
+  if (decision.market_type === "full_game_rl") {
+    const point =
+      decision.side === "home"
+        ? input.consensus_full_game_home_spread
+        : input.consensus_full_game_away_spread;
+    const odds =
+      decision.side === "home"
+        ? input.consensus_full_game_home_spread_odds
+        : input.consensus_full_game_away_spread_odds;
     if (odds === null || odds === undefined) return null;
     return `${marketLineLabel(game, decision.side as "home" | "away", point)} ${fmtOdds(odds)}`;
   }
@@ -376,21 +486,9 @@ function GameCard({ game, isPlayOfDay }: { game: SlateGame; isPlayOfDay: boolean
   const estimatedDecision = Boolean(decision?.book_name?.startsWith("estimate:"));
   const bet365DecisionView = bet365DecisionOddsLabel(game);
   const consensusDecisionView = consensusDecisionOddsLabel(game);
-  const recommendedTeam =
-    decision?.side === "home" || decision?.side === "away"
-      ? teamNameForSide(game, decision.side)
-      : null;
-  const displayedLine =
-    decision?.market_type === "f5_rl" && decision?.line_at_bet !== null && decision?.line_at_bet !== undefined
-      ? `${recommendedTeam ?? decision.side.toUpperCase()} ${fmtPoint(decision.line_at_bet)}`
-      : `${recommendedTeam ?? decision?.side?.toUpperCase() ?? "—"}`;
-
-  const forcedDisplayedLine =
-    forcedDecision?.side === "home" || forcedDecision?.side === "away"
-      ? forcedDecision.market_type === "f5_rl" && forcedDecision.line_at_bet !== null && forcedDecision.line_at_bet !== undefined
-        ? `${teamNameForSide(game, forcedDecision.side)} ${fmtPoint(forcedDecision.line_at_bet)}`
-        : `${teamNameForSide(game, forcedDecision.side)}`
-      : "—";
+  const displayedLine = decisionDisplayLabel(game, decision);
+  const forcedDisplayedLine = decisionDisplayLabel(game, forcedDecision);
+  const projectionSummary = decisionProjectionSummary(game, decision);
 
   return (
     <article style={gameCardStyle}>
@@ -529,8 +627,7 @@ function GameCard({ game, isPlayOfDay }: { game: SlateGame; isPlayOfDay: boolean
             </div>
           </div>
 
-          {/* Projected F5 Score */}
-          {game.prediction ? (
+          {projectionSummary ? (
             <div style={{
               marginTop: 14,
               display: "flex",
@@ -544,7 +641,7 @@ function GameCard({ game, isPlayOfDay }: { game: SlateGame; isPlayOfDay: boolean
                 letterSpacing: "0.8px",
                 color: "rgba(243,246,251,0.35)",
               }}>
-                Proj F5
+                {projectionSummary.label}
               </span>
               <span style={{
                 fontSize: 15,
@@ -553,9 +650,7 @@ function GameCard({ game, isPlayOfDay }: { game: SlateGame; isPlayOfDay: boolean
                 fontFamily: "var(--mono)",
                 letterSpacing: "0.5px",
               }}>
-                {teamNameForSide(game, "away")} {fmtRuns(game.prediction.projected_f5_away_runs)}
-                {" "}&ndash;{" "}
-                {fmtRuns(game.prediction.projected_f5_home_runs)} {teamNameForSide(game, "home")}
+                {projectionSummary.value}
               </span>
             </div>
           ) : null}
@@ -636,7 +731,7 @@ function GameCard({ game, isPlayOfDay }: { game: SlateGame; isPlayOfDay: boolean
         </div>
       )}
 
-      {forcedDecision ? (
+      {!decision && forcedDecision ? (
         <div style={forcedBoxStyle}>
           <div style={{
             fontSize: 11,
@@ -692,7 +787,7 @@ function GameCard({ game, isPlayOfDay }: { game: SlateGame; isPlayOfDay: boolean
         </div>
       ) : null}
 
-      <div style={sectionGridStyle}>
+      <div style={{ ...sectionGridStyle, display: "none" }}>
         <div style={statBlockStyle}>
           <TooltipLabel
             label="F5 Moneyline"
@@ -734,7 +829,7 @@ function GameCard({ game, isPlayOfDay }: { game: SlateGame; isPlayOfDay: boolean
         </div>
       </div>
 
-      <details style={collapsibleStyle}>
+      <details style={collapsibleStyle} open>
         <summary style={collapsibleSummaryStyle}>
           <TooltipLabel
             label="Model Read"
@@ -745,6 +840,18 @@ function GameCard({ game, isPlayOfDay }: { game: SlateGame; isPlayOfDay: boolean
         </summary>
         <div style={{ marginTop: 10, fontSize: 14, color: "var(--text-h)" }}>
           F5 score: {teamNameForSide(game, "away")} {fmtRuns(game.prediction?.projected_f5_away_runs)} - {fmtRuns(game.prediction?.projected_f5_home_runs)} {teamNameForSide(game, "home")}
+        </div>
+        <div style={{ ...mutedStyle, marginTop: 6 }}>
+          F5 ML: {teamNameForSide(game, "home")} {fmtPct(game.prediction?.f5_ml_home_prob)} • {teamNameForSide(game, "away")} {fmtPct(game.prediction?.f5_ml_away_prob)}
+        </div>
+        <div style={mutedStyle}>
+          F5 ML lean: {mlLean ? `${teamNameForSide(game, mlLean.side as "home" | "away")} (${fmtPct(mlLean.probability)})` : "â€”"} • fair {mlLean ? fairAmericanOdds(mlLean.probability) : "â€”"}
+        </div>
+        <div style={{ ...mutedStyle, marginTop: 6 }}>
+          F5 RL: {teamNameForSide(game, "home")} {fmtPct(game.prediction?.f5_rl_home_prob)} • {teamNameForSide(game, "away")} {fmtPct(game.prediction?.f5_rl_away_prob)}
+        </div>
+        <div style={mutedStyle}>
+          F5 RL lean: {rlLean ? `${teamNameForSide(game, rlLean.side as "home" | "away")} (${fmtPct(rlLean.probability)})` : "â€”"} • fair {rlLean ? fairAmericanOdds(rlLean.probability) : "â€”"}
         </div>
         <div style={{ ...mutedStyle, marginTop: 6 }}>
           F5 total: {fmtRuns(game.prediction?.projected_f5_total_runs)}
@@ -845,7 +952,22 @@ const SlatePage: React.FC = () => {
   const [queryDate, setQueryDate] = useState<string>(todayLocalDate());
   const [data, setData] = useState<SlateResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [syncing, setSyncing] = useState<boolean>(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  async function loadSlate(targetDate: string): Promise<void> {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await getSlate(targetDate);
+      setData(response);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to load slate");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -871,6 +993,24 @@ const SlatePage: React.FC = () => {
       cancelled = true;
     };
   }, [queryDate]);
+
+  async function handlePullFromMac(): Promise<void> {
+    setSyncing(true);
+    setSyncMessage(null);
+    setError(null);
+    try {
+      const response = await pullSlateFromMac(selectedDate);
+      setSyncMessage(response.message);
+      if (selectedDate !== queryDate) {
+        setQueryDate(selectedDate);
+      }
+      await loadSlate(selectedDate);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to pull from Mac");
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   const summary = useMemo(() => {
     const games = data?.games ?? [];
@@ -922,6 +1062,18 @@ const SlatePage: React.FC = () => {
           <button type="button" style={buttonStyle} onClick={() => setQueryDate(selectedDate)}>
             Run Slate
           </button>
+          {macSyncEnabled ? (
+            <button
+              type="button"
+              style={{ ...buttonStyle, opacity: syncing ? 0.7 : 1 }}
+              onClick={() => {
+                void handlePullFromMac();
+              }}
+              disabled={syncing}
+            >
+              {syncing ? "Pulling from Mac..." : "Pull From Mac"}
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -950,6 +1102,7 @@ const SlatePage: React.FC = () => {
         </div>
       ) : null}
 
+      {syncMessage ? <div style={{ ...mutedStyle, marginTop: -8 }}>{syncMessage}</div> : null}
       {loading ? <div style={emptyStyle}>Running dry-run slate...</div> : null}
       {error ? <div style={emptyStyle}>Failed to load slate: {error}</div> : null}
       {!loading && !error && data && data.games.length === 0 ? (

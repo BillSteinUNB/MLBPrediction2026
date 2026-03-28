@@ -293,6 +293,14 @@ class SlateResponse(BaseModel):
     games: List[SlateGame] = []
 
 
+class MacSyncResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    ok: bool
+    message: str
+    output: Optional[str] = None
+
+
 class LiveSeasonSummaryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

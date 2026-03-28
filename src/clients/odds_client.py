@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from hashlib import blake2b
 from math import ceil
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Collection, Mapping, Sequence
 
 import httpx
 from dotenv import load_dotenv
@@ -1144,6 +1144,7 @@ def fetch_mlb_odds(
     bookmakers: Sequence[str] | None = None,
     commence_time_from: datetime | None = None,
     commence_time_to: datetime | None = None,
+    game_pk_allowlist: Collection[int] | None = None,
     quota_limit: int = ODDS_API_MONTHLY_LIMIT,
     request_pause_seconds: float = 0.35,
 ) -> list[OddsSnapshot]:
@@ -1153,6 +1154,7 @@ def fetch_mlb_odds(
     allow_legacy_fallback = len(resolved_api_keys) == 1
     database_path = init_db(db_path)
     usage_month = _usage_month()
+    allowed_game_pks = {int(game_pk) for game_pk in game_pk_allowlist} if game_pk_allowlist else None
 
     client_context = nullcontext(client) if client is not None else httpx.Client(base_url=ODDS_API_BASE_URL, timeout=30.0)
     snapshots: list[OddsSnapshot] = []
@@ -1221,6 +1223,8 @@ def fetch_mlb_odds(
                     event_venue=_extract_event_venue(event),
                 )
                 if game_pk is None:
+                    continue
+                if allowed_game_pks is not None and int(game_pk) not in allowed_game_pks:
                     continue
 
                 event_payload: dict[str, Any] | None = None

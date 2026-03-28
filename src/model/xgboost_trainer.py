@@ -14,6 +14,8 @@ from typing import Any, Mapping, Sequence
 import joblib
 import optuna
 import pandas as pd
+from rich.console import Console
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from sklearn.base import clone
 from sklearn.metrics import accuracy_score, log_loss, roc_auc_score
 from sklearn.model_selection import TimeSeriesSplit
@@ -32,6 +34,7 @@ from src.ops.experiment_tracker import log_training_run
 
 
 logger = logging.getLogger(__name__)
+_console = Console()
 
 DEFAULT_MODEL_OUTPUT_DIR = Path("data") / "models"
 DEFAULT_TIME_SERIES_SPLITS = 5
@@ -508,25 +511,57 @@ def _run_optuna_search(
             existing_trial_count,
             remaining_trials,
         )
-        progress_callback = _build_optuna_progress_callback(
-            model_name=model_name,
-            target_trial_count=resolved_iterations,
-        )
-        study.optimize(
-            lambda trial: _objective_log_loss(
-                trial,
-                train_frame=train_frame,
-                feature_columns=feature_columns,
-                target_column=target_column,
-                search_space=search_space,
-                splitter=splitter,
-                random_state=random_state,
-            ),
-            n_trials=remaining_trials,
-            callbacks=[progress_callback],
-            gc_after_trial=True,
-            show_progress_bar=False,
-        )
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[bold cyan]{task.description}"),
+            BarColumn(bar_width=30),
+            TextColumn("{task.percentage:>3.0f}%"),
+            TextColumn("best {task.fields[best]}"),
+            TextColumn("latest {task.fields[latest]}"),
+            TextColumn("state {task.fields[state]}"),
+            TimeElapsedColumn(),
+            console=_console,
+        ) as progress:
+            task_id = progress.add_task(
+                f"Training {model_name}",
+                total=10,
+                completed=min(10, existing_trial_count),
+                best="n/a",
+                latest="n/a",
+                state="queued",
+            )
+            progress_callback = _build_optuna_progress_callback(
+                progress=progress,
+                task_id=task_id,
+                model_name=model_name,
+                target_trial_count=resolved_iterations,
+            )
+            study.optimize(
+                lambda trial: _objective_log_loss(
+                    trial,
+                    train_frame=train_frame,
+                    feature_columns=feature_columns,
+                    target_column=target_column,
+                    search_space=search_space,
+                    splitter=splitter,
+                    random_state=random_state,
+                ),
+                n_trials=remaining_trials,
+                callbacks=[progress_callback],
+                gc_after_trial=True,
+                show_progress_bar=False,
+            )
+            try:
+                best_value = study.best_value
+            except (ValueError, AttributeError):
+                best_value = getattr(getattr(study, "best_trial", None), "value", None)
+            progress.update(
+                task_id,
+                completed=10,
+                best="n/a" if best_value is None else f"{best_value:.6f}",
+                latest="done",
+                state="complete",
+            )
     else:
         logger.info(
             "Optuna study %s already has %s trials; resuming without new trials",
@@ -653,41 +688,40 @@ def _build_optuna_study_name(
 
 def _build_optuna_progress_callback(
     *,
+    progress: Progress,
+    task_id: int,
     model_name: str,
     target_trial_count: int,
 ) -> Any:
-    last_logged_progress = -1.0
+    last_logged_bucket = -1
 
     def _callback(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
-        nonlocal last_logged_progress
+        nonlocal last_logged_bucket
         completed_trial_count = len(study.trials)
         progress_fraction = min(1.0, completed_trial_count / max(target_trial_count, 1))
-        should_log = (
-            completed_trial_count == 1
-            or completed_trial_count == target_trial_count
-            or progress_fraction - last_logged_progress >= 0.05
-        )
-        if not should_log:
+        current_bucket = min(10, int(progress_fraction * 10))
+        if (
+            completed_trial_count != target_trial_count
+            and current_bucket <= 0
+        ):
+            return
+        if current_bucket <= last_logged_bucket and completed_trial_count != target_trial_count:
             return
 
-        last_logged_progress = progress_fraction
-        filled = int(round(progress_fraction * 20))
-        bar = "#" * filled + "-" * (20 - filled)
+        if completed_trial_count == target_trial_count:
+            current_bucket = 10
+        last_logged_bucket = current_bucket
         try:
             best_value = study.best_value
         except ValueError:
             best_value = None
         latest_value = trial.value if trial.value is not None else None
-        logger.info(
-            "Optuna progress %s [%s] %s/%s (%.1f%%) best=%s latest=%s state=%s",
-            model_name,
-            bar,
-            completed_trial_count,
-            target_trial_count,
-            progress_fraction * 100.0,
-            "n/a" if best_value is None else f"{best_value:.6f}",
-            "pruned" if latest_value is None else f"{latest_value:.6f}",
-            trial.state.name.lower(),
+        progress.update(
+            task_id,
+            completed=current_bucket,
+            best="n/a" if best_value is None else f"{best_value:.6f}",
+            latest="pruned" if latest_value is None else f"{latest_value:.6f}",
+            state=trial.state.name.lower(),
         )
 
     return _callback

@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
 DEFAULT_DB_PATH = Path("data") / "mlb.db"
 BUILDER_SQLITE_CACHE_SIZE_KB = 64_000
 
@@ -49,6 +49,19 @@ SCHEMA_STATEMENTS = (
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (game_pk) REFERENCES games (game_pk),
         UNIQUE (game_pk, feature_name, window_size, as_of_timestamp)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS team_platoon_splits (
+        team_abbr TEXT NOT NULL,
+        season INTEGER NOT NULL,
+        vs_hand TEXT NOT NULL CHECK (vs_hand IN ('L', 'R')),
+        woba REAL,
+        xwoba REAL,
+        k_pct REAL,
+        bb_pct REAL,
+        pa INTEGER,
+        PRIMARY KEY (team_abbr, season, vs_hand)
     )
     """,
     """
@@ -137,11 +150,59 @@ SCHEMA_STATEMENTS = (
         FOREIGN KEY (game_pk) REFERENCES games (game_pk)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS retrosheet_game_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        season INTEGER NOT NULL,
+        game_date TEXT NOT NULL,
+        away_team TEXT NOT NULL,
+        home_team TEXT NOT NULL,
+        matchup_sequence INTEGER NOT NULL,
+        doubleheader_code TEXT NOT NULL DEFAULT '0',
+        site TEXT,
+        away_score INTEGER,
+        home_score INTEGER,
+        plate_umpire_id TEXT,
+        plate_umpire_name TEXT,
+        row_order INTEGER NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (season, game_date, away_team, home_team, matchup_sequence)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS pitcher_siera_cache (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        season INTEGER NOT NULL,
+        pitcher_name TEXT NOT NULL,
+        team TEXT,
+        pitcher_id INTEGER,
+        fangraphs_id INTEGER,
+        siera REAL NOT NULL,
+        xfip REAL,
+        era REAL,
+        fip REAL,
+        k_pct REAL,
+        bb_pct REAL,
+        fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
     "CREATE INDEX IF NOT EXISTS idx_features_game_pk ON features (game_pk)",
     "CREATE INDEX IF NOT EXISTS idx_predictions_game_pk ON predictions (game_pk)",
     "CREATE INDEX IF NOT EXISTS idx_odds_snapshots_game_pk ON odds_snapshots (game_pk)",
     "CREATE INDEX IF NOT EXISTS idx_bets_game_pk ON bets (game_pk)",
     "CREATE INDEX IF NOT EXISTS idx_bet_performance_game_market ON bet_performance (game_pk, market_type)",
+    """
+    CREATE INDEX IF NOT EXISTS idx_pitcher_siera_cache_season
+    ON pitcher_siera_cache (season)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_retrosheet_game_logs_lookup
+    ON retrosheet_game_logs (season, game_date, home_team, away_team, matchup_sequence)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_retrosheet_game_logs_umpire
+    ON retrosheet_game_logs (plate_umpire_id, game_date)
+    """,
 )
 
 
@@ -183,6 +244,28 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
         connection.execute("ALTER TABLE odds_snapshots ADD COLUMN away_point REAL")
 
 
+def _patch_data_builder_team_platoon_splits_fetcher() -> None:
+    import sys
+
+    data_builder_module = sys.modules.get("src.model.data_builder")
+    if data_builder_module is None:
+        return
+
+    from src.features.offense import build_db_backed_team_batting_splits_fetcher
+
+    if (
+        getattr(data_builder_module, "_build_cached_team_batting_splits_fetcher", None)
+        is build_db_backed_team_batting_splits_fetcher
+    ):
+        return
+
+    setattr(
+        data_builder_module,
+        "_build_cached_team_batting_splits_fetcher",
+        build_db_backed_team_batting_splits_fetcher,
+    )
+
+
 def init_db(db_path: str | Path = DEFAULT_DB_PATH) -> Path:
     """Initialize the SQLite schema and record the current schema version."""
 
@@ -191,11 +274,15 @@ def init_db(db_path: str | Path = DEFAULT_DB_PATH) -> Path:
 
     with sqlite3.connect(database_path) as connection:
         connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA busy_timeout = 5000")
+        connection.execute("PRAGMA journal_mode = WAL")
+        connection.execute("PRAGMA synchronous = NORMAL")
 
         for statement in SCHEMA_STATEMENTS:
             connection.execute(statement)
 
         _apply_migrations(connection)
+        _patch_data_builder_team_platoon_splits_fetcher()
 
         connection.execute(
             """
@@ -221,11 +308,15 @@ def configure_sqlite_connection(
     """Apply standard SQLite pragmas and optional builder-focused performance tuning."""
 
     connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute("PRAGMA busy_timeout = 5000")
     if builder_optimized:
-        connection.execute("PRAGMA journal_mode = MEMORY")
+        connection.execute("PRAGMA journal_mode = WAL")
         connection.execute("PRAGMA synchronous = OFF")
         connection.execute("PRAGMA temp_store = MEMORY")
         connection.execute(f"PRAGMA cache_size = {-BUILDER_SQLITE_CACHE_SIZE_KB}")
+    else:
+        connection.execute("PRAGMA journal_mode = WAL")
+        connection.execute("PRAGMA synchronous = NORMAL")
     return connection
 
 

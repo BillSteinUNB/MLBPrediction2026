@@ -26,7 +26,7 @@ LEAGUE_HR_FB_RATE = 0.11
 FIP_CONSTANT = 3.2
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DERIVED_CACHE_ROOT = REPO_ROOT / "data" / "raw" / "derived" / "bullpen"
-BULLPEN_METRICS_CACHE_VERSION = 2
+BULLPEN_METRICS_CACHE_VERSION = 3
 
 _BullpenMetricsFetcher = Callable[..., pd.DataFrame]
 _TeamLogsFetcher = Callable[..., pd.DataFrame]
@@ -801,6 +801,8 @@ def _fetch_season_bullpen_metrics(
     if inherited_runner_lookup.empty:
         relief_metrics["inherited_runners"] = 0.0
         relief_metrics["inherited_runners_scored"] = 0.0
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        relief_metrics.to_parquet(cache_path, index=False)
         return relief_metrics
 
     merged = relief_metrics.merge(
@@ -928,26 +930,119 @@ def _build_relief_metrics_from_statcast(games: pd.DataFrame, statcast_frame: pd.
     if relief_pitches.empty:
         return _empty_bullpen_metrics()
 
-    league_hr_fb_rate = _calculate_league_hr_fb_rate(relief_pitches)
-    rows: list[dict[str, Any]] = []
-    for keys, group in relief_pitches.groupby(["game_pk", "game_date", "team", "pitcher_id"], dropna=True):
-        game_pk, game_date, team, pitcher_id = keys
-        pitch_count = int(len(group))
-        innings_pitched = _innings_pitched(group)
-        xfip = _xfip_from_pitches(group, league_hr_fb_rate)
-        rows.append(
-            {
-                "game_pk": int(game_pk),
-                "game_date": pd.Timestamp(game_date).normalize(),
-                "team": str(team).strip().upper(),
-                "pitcher_id": int(pitcher_id),
-                "pitch_count": float(pitch_count),
-                "innings_pitched": innings_pitched,
-                "xfip": xfip,
-            }
-        )
+    group_columns = ["game_pk", "game_date", "team", "pitcher_id"]
+    pitch_count_totals = (
+        relief_pitches.groupby(group_columns, dropna=True)
+        .size()
+        .rename("pitch_count")
+        .reset_index()
+    )
 
-    return pd.DataFrame(rows)
+    terminal = _collapse_plate_appearances(relief_pitches)
+    if terminal.empty:
+        return _empty_bullpen_metrics()
+
+    events_column = _first_column(terminal, ("events",))
+    bb_type_column = _first_column(terminal, ("bb_type",))
+    events = (
+        terminal[events_column].astype(str).str.lower()
+        if events_column is not None
+        else pd.Series("", index=terminal.index, dtype=str)
+    )
+    bb_types = (
+        terminal[bb_type_column].astype(str).str.lower()
+        if bb_type_column is not None
+        else pd.Series("", index=terminal.index, dtype=str)
+    )
+
+    fly_ball_mask = bb_types.isin({"fly_ball", "popup"})
+    home_run_count = int(events.eq("home_run").sum())
+    fly_ball_count = int(fly_ball_mask.sum())
+    league_hr_fb_rate = (
+        float(home_run_count / fly_ball_count)
+        if fly_ball_count > 0
+        else LEAGUE_HR_FB_RATE
+    )
+
+    terminal_grouped = terminal.loc[:, group_columns].copy()
+    terminal_grouped["outs_recorded"] = pd.Series(
+        [_event_outs(event_name) for event_name in events.tolist()],
+        index=terminal.index,
+        dtype=float,
+    )
+    terminal_grouped["strikeouts"] = events.isin({"strikeout", "strikeout_double_play"}).astype(
+        float
+    )
+    terminal_grouped["walks"] = events.isin({"walk", "intent_walk"}).astype(float)
+    terminal_grouped["hit_by_pitch"] = events.eq("hit_by_pitch").astype(float)
+    terminal_grouped["fly_balls"] = fly_ball_mask.astype(float)
+
+    aggregated = (
+        terminal_grouped.groupby(group_columns, dropna=True, as_index=False)
+        .agg(
+            outs_recorded=("outs_recorded", "sum"),
+            strikeouts=("strikeouts", "sum"),
+            walks=("walks", "sum"),
+            hit_by_pitch=("hit_by_pitch", "sum"),
+            fly_balls=("fly_balls", "sum"),
+        )
+    )
+
+    relief_metrics = pitch_count_totals.merge(aggregated, on=group_columns, how="left")
+    relief_metrics["pitch_count"] = pd.to_numeric(
+        relief_metrics["pitch_count"], errors="coerce"
+    ).fillna(0.0)
+    relief_metrics["outs_recorded"] = pd.to_numeric(
+        relief_metrics["outs_recorded"], errors="coerce"
+    ).fillna(0.0)
+    relief_metrics["innings_pitched"] = (
+        pd.to_numeric(relief_metrics["outs_recorded"], errors="coerce").fillna(0.0) / 3.0
+    ).astype(float)
+    relief_metrics["expected_home_runs"] = relief_metrics["fly_balls"] * (
+        league_hr_fb_rate if league_hr_fb_rate > 0 else LEAGUE_HR_FB_RATE
+    )
+    relief_metrics["xfip"] = pd.Series(DEFAULT_XFIP, index=relief_metrics.index, dtype=float)
+    valid_ip = relief_metrics["innings_pitched"] > 0
+    relief_metrics.loc[valid_ip, "xfip"] = (
+        (
+            (13.0 * relief_metrics.loc[valid_ip, "expected_home_runs"])
+            + (
+                3.0
+                * (
+                    relief_metrics.loc[valid_ip, "walks"]
+                    + relief_metrics.loc[valid_ip, "hit_by_pitch"]
+                )
+            )
+            - (2.0 * relief_metrics.loc[valid_ip, "strikeouts"])
+        )
+        / relief_metrics.loc[valid_ip, "innings_pitched"]
+        + FIP_CONSTANT
+    )
+
+    relief_metrics["game_pk"] = pd.to_numeric(
+        relief_metrics["game_pk"], errors="coerce"
+    ).astype("Int64")
+    relief_metrics["pitcher_id"] = pd.to_numeric(
+        relief_metrics["pitcher_id"], errors="coerce"
+    ).astype("Int64")
+    relief_metrics["team"] = relief_metrics["team"].astype(str).str.strip().str.upper()
+    relief_metrics["game_date"] = pd.to_datetime(
+        relief_metrics["game_date"], errors="coerce"
+    ).dt.normalize()
+    relief_metrics = relief_metrics.dropna(
+        subset=["game_pk", "game_date", "team", "pitcher_id"]
+    ).copy()
+    if relief_metrics.empty:
+        return _empty_bullpen_metrics()
+
+    relief_metrics["game_pk"] = relief_metrics["game_pk"].astype(int)
+    relief_metrics["pitcher_id"] = relief_metrics["pitcher_id"].astype(int)
+    relief_metrics["pitch_count"] = relief_metrics["pitch_count"].astype(float)
+    relief_metrics["innings_pitched"] = relief_metrics["innings_pitched"].astype(float)
+    relief_metrics["xfip"] = relief_metrics["xfip"].astype(float)
+    return relief_metrics.loc[
+        :, ["game_pk", "game_date", "team", "pitcher_id", "pitch_count", "innings_pitched", "xfip"]
+    ].sort_values(group_columns).reset_index(drop=True)
 
 
 def _resolve_pitching_team(pitches: pd.DataFrame) -> pd.Series:
@@ -1074,6 +1169,7 @@ def _normalize_inherited_runner_logs(raw_logs: pd.DataFrame, team: str) -> pd.Da
             "Inherited_Runners",
             "pitching_ir",
             "Pitching_IR",
+            "Pitching Stats_IR",
         ),
     )
     inherited_runners_scored_column = _first_column(
@@ -1085,6 +1181,7 @@ def _normalize_inherited_runner_logs(raw_logs: pd.DataFrame, team: str) -> pd.Da
             "Inherited_Runners_Scored",
             "pitching_is",
             "Pitching_IS",
+            "Pitching Stats_IS",
         ),
     )
     if date_column is None or inherited_runners_column is None or inherited_runners_scored_column is None:
@@ -1243,6 +1340,22 @@ def _persist_features(db_path: Path, features: Sequence[GameFeatures]) -> None:
     )
 
     with sqlite_connection(db_path, builder_optimized=True) as connection:
+        null_window_rows = [
+            (game_pk, feature_name, as_of_timestamp)
+            for game_pk, feature_name, _feature_value, window_size, as_of_timestamp in rows
+            if window_size is None
+        ]
+        if null_window_rows:
+            connection.executemany(
+                """
+                DELETE FROM features
+                WHERE game_pk = ?
+                  AND feature_name = ?
+                  AND window_size IS NULL
+                  AND as_of_timestamp = ?
+                """,
+                null_window_rows,
+            )
         connection.executemany(
             """
             INSERT OR REPLACE INTO features (

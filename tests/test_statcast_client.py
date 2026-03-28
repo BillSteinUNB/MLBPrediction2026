@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 import pandas as pd
@@ -141,6 +142,71 @@ def test_fetch_batting_and_pitching_stats_persist_parquet_with_advanced_metrics(
     assert pitching_calls["count"] == 1
     assert cached_batting_df.equals(batting_df)
     assert cached_pitching_df.equals(pitching_df)
+
+
+def test_fetch_pitcher_siera_caches_leaderboard_rows_in_sqlite(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from src.clients import statcast_client
+
+    calls = {"count": 0}
+
+    def fake_pitching_stats(season: int, qual: int) -> pd.DataFrame:
+        calls["count"] += 1
+        assert season == 2025
+        assert qual == 0
+        return pd.DataFrame(
+            {
+                "Name": ["Gerrit Cole", "Framber Valdez"],
+                "Team": ["NYY", "HOU"],
+                "IDfg": [13125, 15949],
+                "SIERA": [3.12, 3.48],
+                "xFIP": [3.24, 3.55],
+                "ERA": [2.95, 3.20],
+                "FIP": [3.05, 3.31],
+                "K%": [29.1, 24.0],
+                "BB%": [6.4, 7.9],
+            }
+        )
+
+    monkeypatch.setattr(statcast_client, "pitching_stats", fake_pitching_stats)
+
+    db_path = tmp_path / "siera_cache.db"
+    first = statcast_client.fetch_pitcher_siera(2025, db_path=db_path)
+
+    assert first["pitcher_name"].tolist() == ["Gerrit Cole", "Framber Valdez"]
+    assert first["siera"].tolist() == [3.12, 3.48]
+
+    with sqlite3.connect(db_path) as connection:
+        cached_rows = pd.read_sql_query(
+            """
+            SELECT pitcher_name, team, fangraphs_id, siera, xfip
+            FROM pitcher_siera_cache
+            WHERE season = 2025
+            ORDER BY siera ASC, pitcher_name ASC
+            """,
+            connection,
+        )
+
+    assert cached_rows["pitcher_name"].tolist() == ["Gerrit Cole", "Framber Valdez"]
+    assert cached_rows["team"].tolist() == ["NYY", "HOU"]
+    assert cached_rows["fangraphs_id"].tolist() == [13125, 15949]
+    assert cached_rows["siera"].tolist() == [3.12, 3.48]
+    assert cached_rows["xfip"].tolist() == [3.24, 3.55]
+
+    monkeypatch.setattr(
+        statcast_client,
+        "pitching_stats",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("pitching_stats should not refetch when sqlite cache exists")
+        ),
+    )
+
+    second = statcast_client.fetch_pitcher_siera(2025, db_path=db_path)
+
+    assert calls["count"] == 1
+    assert second.equals(first)
 
 
 def test_fetch_fielding_stats_merges_fangraphs_drs_with_statcast_oaa(

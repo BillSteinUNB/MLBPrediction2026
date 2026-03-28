@@ -24,6 +24,7 @@ from pybaseball import (
 from pybaseball.team_game_logs import get_table as _pybaseball_team_game_logs_table
 
 from src.config import _load_settings_yaml
+from src.db import DEFAULT_DB_PATH, init_db, sqlite_connection
 
 
 logger = logging.getLogger(__name__)
@@ -204,6 +205,32 @@ def fetch_pitcher_stats(
         dataframe = pd.DataFrame()
     _write_parquet(dataframe, parquet_path)
     return dataframe
+
+
+def fetch_pitcher_siera(
+    season: int,
+    *,
+    db_path: str | Path = DEFAULT_DB_PATH,
+    refresh: bool = False,
+) -> pd.DataFrame:
+    """Fetch season-level FanGraphs SIERA and cache it in SQLite."""
+
+    database_path = init_db(db_path)
+    cached = _load_pitcher_siera_cache(database_path, season=season)
+    if not cached.empty and not refresh:
+        return cached
+
+    try:
+        fetched = pitching_stats(season, qual=UNQUALIFIED_LEADERBOARD_MINIMUM).copy()
+    except Exception:
+        if season < datetime.now().year:
+            raise
+        logger.info("No pitcher SIERA leaderboard available yet for %s; returning empty frame", season)
+        fetched = pd.DataFrame()
+
+    normalized = _normalize_pitcher_siera_frame(fetched, season=season)
+    _persist_pitcher_siera_cache(database_path, season=season, dataframe=normalized)
+    return normalized
 
 
 def fetch_batting_stats(
@@ -647,12 +674,216 @@ def _normalize_team_label(value: object) -> str:
     return TEAM_LABEL_TO_CODE.get(label, label)
 
 
+def _load_pitcher_siera_cache(db_path: Path, *, season: int) -> pd.DataFrame:
+    with sqlite_connection(db_path, builder_optimized=True) as connection:
+        cached = pd.read_sql_query(
+            """
+            SELECT
+                season,
+                pitcher_name,
+                team,
+                pitcher_id,
+                fangraphs_id,
+                siera,
+                xfip,
+                era,
+                fip,
+                k_pct,
+                bb_pct
+            FROM pitcher_siera_cache
+            WHERE season = ?
+            ORDER BY siera ASC, pitcher_name ASC
+            """,
+            connection,
+            params=(int(season),),
+        )
+
+    if cached.empty:
+        return cached
+
+    for nullable_int_column in ("pitcher_id", "fangraphs_id"):
+        cached[nullable_int_column] = pd.to_numeric(
+            cached[nullable_int_column],
+            errors="coerce",
+        ).astype("Int64")
+    return cached
+
+
+def _persist_pitcher_siera_cache(
+    db_path: Path,
+    *,
+    season: int,
+    dataframe: pd.DataFrame,
+) -> None:
+    with sqlite_connection(db_path, builder_optimized=True) as connection:
+        connection.execute("DELETE FROM pitcher_siera_cache WHERE season = ?", (int(season),))
+        if dataframe.empty:
+            connection.commit()
+            return
+
+        connection.executemany(
+            """
+            INSERT INTO pitcher_siera_cache (
+                season,
+                pitcher_name,
+                team,
+                pitcher_id,
+                fangraphs_id,
+                siera,
+                xfip,
+                era,
+                fip,
+                k_pct,
+                bb_pct
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    int(row["season"]),
+                    str(row["pitcher_name"]),
+                    str(row["team"]),
+                    _optional_int(row.get("pitcher_id")),
+                    _optional_int(row.get("fangraphs_id")),
+                    float(row["siera"]),
+                    _optional_float(row.get("xfip")),
+                    _optional_float(row.get("era")),
+                    _optional_float(row.get("fip")),
+                    _optional_float(row.get("k_pct")),
+                    _optional_float(row.get("bb_pct")),
+                )
+                for row in dataframe.to_dict(orient="records")
+            ],
+        )
+        connection.commit()
+
+
+def _normalize_pitcher_siera_frame(dataframe: pd.DataFrame, *, season: int) -> pd.DataFrame:
+    normalized = _stringify_columns(dataframe.copy())
+    if normalized.empty:
+        return pd.DataFrame(
+            columns=[
+                "season",
+                "pitcher_name",
+                "team",
+                "pitcher_id",
+                "fangraphs_id",
+                "siera",
+                "xfip",
+                "era",
+                "fip",
+                "k_pct",
+                "bb_pct",
+            ]
+        )
+
+    name_column = _first_matching_column(normalized.columns, ("Name", "name", "player_name"))
+    team_column = _first_matching_column(normalized.columns, ("Team", "team"))
+    pitcher_id_column = _first_matching_column(
+        normalized.columns,
+        ("MLBAMID", "mlbam_id", "key_mlbam"),
+    )
+    fangraphs_id_column = _first_matching_column(normalized.columns, ("IDfg", "idfg"))
+    siera_column = _first_matching_column(normalized.columns, ("SIERA", "siera"))
+    xfip_column = _first_matching_column(normalized.columns, ("xFIP", "xfip"))
+    era_column = _first_matching_column(normalized.columns, ("ERA", "era"))
+    fip_column = _first_matching_column(normalized.columns, ("FIP", "fip"))
+    k_pct_column = _first_matching_column(normalized.columns, ("K%", "k_pct", "k%"))
+    bb_pct_column = _first_matching_column(normalized.columns, ("BB%", "bb_pct", "bb%"))
+
+    if name_column is None or siera_column is None:
+        return pd.DataFrame(
+            columns=[
+                "season",
+                "pitcher_name",
+                "team",
+                "pitcher_id",
+                "fangraphs_id",
+                "siera",
+                "xfip",
+                "era",
+                "fip",
+                "k_pct",
+                "bb_pct",
+            ]
+        )
+
+    result = pd.DataFrame(
+        {
+            "season": pd.Series(int(season), index=normalized.index, dtype="int64"),
+            "pitcher_name": normalized[name_column].astype(str).str.strip(),
+            "team": (
+                normalized[team_column].map(_normalize_team_label)
+                if team_column is not None
+                else pd.Series("", index=normalized.index, dtype=str)
+            ),
+            "pitcher_id": (
+                pd.to_numeric(normalized[pitcher_id_column], errors="coerce").astype("Int64")
+                if pitcher_id_column is not None
+                else pd.Series(pd.NA, index=normalized.index, dtype="Int64")
+            ),
+            "fangraphs_id": (
+                pd.to_numeric(normalized[fangraphs_id_column], errors="coerce").astype("Int64")
+                if fangraphs_id_column is not None
+                else pd.Series(pd.NA, index=normalized.index, dtype="Int64")
+            ),
+            "siera": pd.to_numeric(normalized[siera_column], errors="coerce"),
+            "xfip": (
+                pd.to_numeric(normalized[xfip_column], errors="coerce")
+                if xfip_column is not None
+                else pd.Series(dtype=float)
+            ),
+            "era": (
+                pd.to_numeric(normalized[era_column], errors="coerce")
+                if era_column is not None
+                else pd.Series(dtype=float)
+            ),
+            "fip": (
+                pd.to_numeric(normalized[fip_column], errors="coerce")
+                if fip_column is not None
+                else pd.Series(dtype=float)
+            ),
+            "k_pct": (
+                pd.to_numeric(normalized[k_pct_column], errors="coerce")
+                if k_pct_column is not None
+                else pd.Series(dtype=float)
+            ),
+            "bb_pct": (
+                pd.to_numeric(normalized[bb_pct_column], errors="coerce")
+                if bb_pct_column is not None
+                else pd.Series(dtype=float)
+            ),
+        }
+    )
+    result = result.dropna(subset=["pitcher_name", "siera"]).copy()
+    result = result.loc[result["pitcher_name"] != ""].reset_index(drop=True)
+    return result
+
+
 def _first_matching_column(columns: Iterable[str], candidates: Sequence[str]) -> str | None:
     normalized_map = {column.lower(): column for column in columns}
     for candidate in candidates:
         if candidate.lower() in normalized_map:
             return normalized_map[candidate.lower()]
     return None
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None or pd.isna(value):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_float(value: object) -> float | None:
+    if value is None or pd.isna(value):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def lookup_player_ids(

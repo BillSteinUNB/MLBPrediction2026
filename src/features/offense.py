@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import sqlite3
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
@@ -9,6 +10,7 @@ from typing import Any, Callable
 
 import pandas as pd
 
+from src.config import _load_settings_yaml
 from src.clients.statcast_client import (
     fetch_batting_stats,
     fetch_statcast_range,
@@ -44,9 +46,56 @@ WOBA_WEIGHTS = {
 LEAGUE_WOBA_BASELINE = 0.320
 LEAGUE_WRC_PLUS_BASELINE = 100.0
 LEAGUE_BARREL_PCT_BASELINE = 7.0
+TEAM_PLATOON_SPLITS_TABLE = "team_platoon_splits"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DERIVED_CACHE_ROOT = REPO_ROOT / "data" / "raw" / "derived" / "offense"
 OFFENSE_STATCAST_CACHE_VERSION = 2
+_TEAM_CODES = {str(team).strip().upper() for team in _load_settings_yaml().get("teams", {})}
+_TEAM_PLATOON_ABBR_NORMALIZATION = {
+    "ANA": "LAA",
+    "ARI": "ARI",
+    "ATH": "OAK",
+    "ATL": "ATL",
+    "AZ": "ARI",
+    "BAL": "BAL",
+    "BOS": "BOS",
+    "CHC": "CHC",
+    "CHW": "CWS",
+    "CIN": "CIN",
+    "CLE": "CLE",
+    "COL": "COL",
+    "CWS": "CWS",
+    "DET": "DET",
+    "HOU": "HOU",
+    "KAN": "KC",
+    "KC": "KC",
+    "KCA": "KC",
+    "KCR": "KC",
+    "LAA": "LAA",
+    "LAD": "LAD",
+    "MIA": "MIA",
+    "MIL": "MIL",
+    "MIN": "MIN",
+    "NYM": "NYM",
+    "NYY": "NYY",
+    "OAK": "OAK",
+    "PHI": "PHI",
+    "PIT": "PIT",
+    "SD": "SD",
+    "SDP": "SD",
+    "SEA": "SEA",
+    "SF": "SF",
+    "SFG": "SF",
+    "STL": "STL",
+    "TB": "TB",
+    "TBA": "TB",
+    "TBR": "TB",
+    "TEX": "TEX",
+    "TOR": "TOR",
+    "WAS": "WSH",
+    "WSH": "WSH",
+    "WSN": "WSH",
+}
 
 
 _TeamLogsFetcher = Callable[..., pd.DataFrame]
@@ -137,6 +186,12 @@ def compute_offensive_features(
         refresh=refresh,
         batting_stats_fetcher=batting_stats_fetcher,
         statcast_metrics=prior_statcast_metrics,
+    )
+    team_batting_splits_lookup = build_db_backed_team_batting_splits_fetcher()(
+        target_day.year,
+        db_path=database_path,
+        target_day=target_day,
+        refresh=refresh,
     )
 
     as_of_timestamp = datetime.combine(
@@ -246,8 +301,519 @@ def compute_offensive_features(
                         )
                     )
 
+            team_batting_splits = team_batting_splits_lookup.get(
+                team, _default_team_platoon_splits()
+            )
+            for hand_suffix, split_key in (("LHP", "vs_LHP"), ("RHP", "vs_RHP")):
+                features.append(
+                    GameFeatures(
+                        game_pk=game_pk,
+                        feature_name=f"{side_name}_team_woba_vs_{hand_suffix}",
+                        feature_value=float(
+                            team_batting_splits.get(split_key, LEAGUE_WOBA_BASELINE)
+                        ),
+                        window_size=None,
+                        as_of_timestamp=as_of_timestamp,
+                    )
+                )
+
     _persist_features(database_path, features)
     return features
+
+
+def compute_offensive_features_for_schedule(
+    schedule: pd.DataFrame,
+    *,
+    db_path: str | Path = DEFAULT_DB_PATH,
+    windows: Sequence[int] = DEFAULT_WINDOWS,
+    regression_weight: int = DEFAULT_REGRESSION_WEIGHT,
+    min_periods: int = DEFAULT_MIN_PERIODS,
+    refresh: bool = False,
+    lineup_player_ids_by_date: Mapping[str, Mapping[tuple[int, str], Sequence[int]]] | None = None,
+    roster_turnover_lookup: Mapping[tuple[str, str], float] | None = None,
+    team_logs_fetcher: _TeamLogsFetcher = fetch_team_game_logs,
+    batting_stats_fetcher: _BattingStatsFetcher = fetch_batting_stats,
+    offense_statcast_fetcher: _OffenseStatcastFetcher | None = None,
+) -> list[GameFeatures]:
+    if schedule.empty:
+        return []
+
+    database_path = Path(db_path)
+    init_db(database_path)
+
+    working_schedule = schedule.copy()
+    working_schedule["game_pk"] = pd.to_numeric(working_schedule["game_pk"], errors="coerce")
+    working_schedule["game_date"] = pd.to_datetime(
+        working_schedule["game_date"], errors="coerce"
+    ).dt.date
+    working_schedule["home_team"] = (
+        working_schedule["home_team"].astype(str).str.strip().str.upper()
+    )
+    working_schedule["away_team"] = (
+        working_schedule["away_team"].astype(str).str.strip().str.upper()
+    )
+    working_schedule = working_schedule.dropna(
+        subset=["game_pk", "game_date", "home_team", "away_team"]
+    ).copy()
+    if working_schedule.empty:
+        return []
+
+    working_schedule["game_pk"] = working_schedule["game_pk"].astype(int)
+    resolved_offense_statcast_fetcher = (
+        offense_statcast_fetcher or _fetch_season_offense_statcast_metrics
+    )
+    normalized_lineup_player_ids = lineup_player_ids_by_date or {}
+
+    features: list[GameFeatures] = []
+    grouped_schedule = working_schedule.groupby(
+        pd.to_datetime(working_schedule["game_date"], errors="coerce").dt.year,
+        sort=True,
+    )
+    for season, season_schedule in grouped_schedule:
+        season_int = int(season)
+        target_dates = sorted({value for value in season_schedule["game_date"].dropna().tolist()})
+        teams = sorted(
+            {
+                str(team).strip().upper()
+                for column in ("home_team", "away_team")
+                for team in season_schedule[column].dropna().tolist()
+            }
+        )
+        if not target_dates or not teams:
+            continue
+
+        current_statcast_metrics = _normalize_statcast_offense_metrics(
+            resolved_offense_statcast_fetcher(
+                season_int,
+                db_path=database_path,
+                end_date=None,
+                refresh=refresh,
+            )
+        )
+        prior_statcast_metrics = _normalize_statcast_offense_metrics(
+            resolved_offense_statcast_fetcher(
+                season_int - 1,
+                db_path=database_path,
+                end_date=None,
+                refresh=refresh,
+            )
+        )
+
+        current_statcast_by_team = {
+            team: current_statcast_metrics.loc[current_statcast_metrics["team"] == team].copy()
+            for team in teams
+        }
+        prior_statcast_by_team = {
+            team: prior_statcast_metrics.loc[prior_statcast_metrics["team"] == team].copy()
+            for team in teams
+        }
+        team_batting_splits_lookup = load_team_platoon_splits_lookup(
+            season_int,
+            db_path=database_path,
+        )
+
+        team_histories: dict[str, pd.DataFrame] = {}
+        team_history_ordinals: dict[str, Any] = {}
+        prior_team_metric_lookup: dict[str, dict[str, float]] = {}
+        league_rows: list[pd.DataFrame] = []
+        for team in teams:
+            current_logs = team_logs_fetcher(season_int, team, refresh=refresh)
+            current_team_frame = _compute_game_level_metrics(
+                current_logs,
+                statcast_metrics=current_statcast_by_team.get(team),
+            )
+            team_histories[team] = current_team_frame
+            if current_team_frame.empty:
+                team_history_ordinals[team] = pd.Series(dtype="int64").to_numpy()
+            else:
+                team_history_ordinals[team] = (
+                    current_team_frame["game_date"]
+                    .dt.date.map(lambda value: value.toordinal())
+                    .to_numpy()
+                )
+                league_rows.append(
+                    current_team_frame.loc[
+                        :, ["game_date", "woba_numerator", "woba_denominator"]
+                    ].copy()
+                )
+
+            prior_logs = team_logs_fetcher(season_int - 1, team, refresh=refresh)
+            prior_team_metric_lookup[team] = _summarize_prior_team_baseline_frame(
+                _compute_game_level_metrics(
+                    prior_logs,
+                    statcast_metrics=prior_statcast_by_team.get(team),
+                )
+            )
+
+        if league_rows:
+            league_history = pd.concat(league_rows, ignore_index=True)
+            league_history = league_history.sort_values(["game_date"]).reset_index(drop=True)
+            league_ordinals = (
+                league_history["game_date"].dt.date.map(lambda value: value.toordinal()).to_numpy()
+            )
+            league_cum_woba_numerator = (
+                pd.to_numeric(league_history["woba_numerator"], errors="coerce")
+                .fillna(0.0)
+                .cumsum()
+                .to_numpy()
+            )
+            league_cum_woba_denominator = (
+                pd.to_numeric(league_history["woba_denominator"], errors="coerce")
+                .fillna(0.0)
+                .cumsum()
+                .to_numpy()
+            )
+        else:
+            league_ordinals = pd.Series(dtype="int64").to_numpy()
+            league_cum_woba_numerator = pd.Series(dtype="float64").to_numpy()
+            league_cum_woba_denominator = pd.Series(dtype="float64").to_numpy()
+
+        batting_stats = _normalize_batting_stats(
+            batting_stats_fetcher(season_int, min_pa=0, refresh=refresh)
+        )
+        if not batting_stats.empty and "game_date" in batting_stats.columns:
+            batting_stats = batting_stats.dropna(subset=["game_date"]).copy()
+        else:
+            batting_stats = pd.DataFrame(
+                columns=["player_id", "game_date", "game_pk", "pa", *METRICS]
+            )
+
+        try:
+            prior_batting_stats = _normalize_batting_stats(
+                batting_stats_fetcher(season_int - 1, min_pa=0, refresh=refresh)
+            )
+        except Exception:
+            prior_batting_stats = pd.DataFrame(
+                columns=["player_id", "game_date", "game_pk", "pa", *METRICS]
+            )
+
+        season_lineup_player_ids: dict[tuple[int, str], Sequence[int]] = {}
+        for target_day in target_dates:
+            season_lineup_player_ids.update(
+                normalized_lineup_player_ids.get(target_day.isoformat(), {})
+            )
+        lineup_prior_lookup, lineup_all_first_year_lookup = (
+            _build_lineup_prior_metric_lookup_from_frames(
+                lineup_player_ids=season_lineup_player_ids,
+                prior_batting_stats=prior_batting_stats,
+                prior_statcast_metrics=prior_statcast_metrics,
+            )
+        )
+
+        for target_day in target_dates:
+            target_ordinal = target_day.toordinal()
+            lineup_metric_lookup = _build_lineup_metric_lookup_from_frames(
+                lineup_player_ids=normalized_lineup_player_ids.get(target_day.isoformat(), {}),
+                batting_stats=batting_stats,
+                statcast_metrics=current_statcast_metrics,
+                target_day=target_day,
+                windows=windows,
+                league_woba=_league_woba_before_target_day(
+                    league_ordinals=league_ordinals,
+                    cumulative_woba_numerator=league_cum_woba_numerator,
+                    cumulative_woba_denominator=league_cum_woba_denominator,
+                    target_day=target_day,
+                ),
+            )
+            league_woba = _league_woba_before_target_day(
+                league_ordinals=league_ordinals,
+                cumulative_woba_numerator=league_cum_woba_numerator,
+                cumulative_woba_denominator=league_cum_woba_denominator,
+                target_day=target_day,
+            )
+            as_of_timestamp = datetime.combine(
+                target_day - timedelta(days=1),
+                time.min,
+                tzinfo=timezone.utc,
+            )
+            day_schedule = season_schedule.loc[season_schedule["game_date"] == target_day].copy()
+            for game in day_schedule.to_dict(orient="records"):
+                game_pk = int(game["game_pk"])
+                for side_name, team_key in (("home", "home_team"), ("away", "away_team")):
+                    team = str(game[team_key]).strip().upper()
+                    full_team_frame = team_histories.get(team, _empty_game_metrics_frame())
+                    team_ordinals = team_history_ordinals.get(
+                        team, pd.Series(dtype="int64").to_numpy()
+                    )
+                    cutoff = team_ordinals.searchsorted(target_ordinal, side="left")
+                    team_frame = full_team_frame.iloc[:cutoff].reset_index(drop=True)
+                    season_games_played = len(team_frame)
+                    prior_team_metrics = _prior_team_baselines_for_league_woba(
+                        prior_team_metric_lookup.get(team, {}),
+                        league_woba=league_woba,
+                    )
+                    roster_turnover_pct = (
+                        None
+                        if roster_turnover_lookup is None
+                        else roster_turnover_lookup.get((target_day.isoformat(), team))
+                    )
+
+                    for window in windows:
+                        current_window_metrics = _rolling_metrics_as_of(
+                            team_frame=team_frame,
+                            metric_names=(
+                                "woba",
+                                "xwoba",
+                                "woba_minus_xwoba",
+                                "iso",
+                                "barrel_pct",
+                                "babip",
+                                "k_pct",
+                                "bb_pct",
+                            ),
+                            window=window,
+                            min_periods=min_periods,
+                        )
+
+                        current_team_values = {
+                            metric: current_window_metrics[metric].value
+                            for metric in (
+                                "woba",
+                                "xwoba",
+                                "woba_minus_xwoba",
+                                "iso",
+                                "barrel_pct",
+                                "babip",
+                                "k_pct",
+                                "bb_pct",
+                            )
+                        }
+                        current_team_values["wrc_plus"] = _team_wrc_plus(
+                            current_team_values["woba"],
+                            league_woba,
+                        )
+
+                        team_feature_values: dict[str, float] = {}
+                        for metric in METRICS:
+                            blended_value = _apply_metric_blend(
+                                metric=metric,
+                                current_value=current_team_values[metric],
+                                prior_value=prior_team_metrics.get(
+                                    metric,
+                                    _default_metric_baseline(metric),
+                                ),
+                                games_played=season_games_played,
+                                regression_weight=regression_weight,
+                                roster_turnover_pct=roster_turnover_pct,
+                            )
+                            team_feature_values[metric] = blended_value
+                            features.append(
+                                GameFeatures(
+                                    game_pk=game_pk,
+                                    feature_name=f"{side_name}_team_{metric}_{window}g",
+                                    feature_value=blended_value,
+                                    window_size=window,
+                                    as_of_timestamp=as_of_timestamp,
+                                )
+                            )
+
+                        lineup_feature_values = team_feature_values.copy()
+                        lineup_metrics = lineup_metric_lookup.get((game_pk, team, window))
+                        if lineup_metrics is not None:
+                            lineup_prior_metrics = lineup_prior_lookup.get((game_pk, team))
+                            lineup_is_first_year = lineup_all_first_year_lookup.get(
+                                (game_pk, team), False
+                            )
+                            for metric in METRICS:
+                                lineup_feature_values[metric] = _apply_metric_blend(
+                                    metric=metric,
+                                    current_value=lineup_metrics.get(
+                                        metric, team_feature_values[metric]
+                                    ),
+                                    prior_value=(
+                                        lineup_prior_metrics.get(
+                                            metric,
+                                            prior_team_metrics.get(
+                                                metric, _default_metric_baseline(metric)
+                                            ),
+                                        )
+                                        if lineup_prior_metrics is not None
+                                        else prior_team_metrics.get(
+                                            metric, _default_metric_baseline(metric)
+                                        )
+                                    ),
+                                    games_played=season_games_played,
+                                    regression_weight=regression_weight,
+                                    roster_turnover_pct=roster_turnover_pct,
+                                    is_first_year=lineup_is_first_year,
+                                )
+
+                        for metric in METRICS:
+                            features.append(
+                                GameFeatures(
+                                    game_pk=game_pk,
+                                    feature_name=f"{side_name}_lineup_{metric}_{window}g",
+                                    feature_value=lineup_feature_values[metric],
+                                    window_size=window,
+                                    as_of_timestamp=as_of_timestamp,
+                                )
+                            )
+
+                    team_batting_splits = team_batting_splits_lookup.get(
+                        team, _default_team_platoon_splits()
+                    )
+                    for hand_suffix, split_key in (("LHP", "vs_LHP"), ("RHP", "vs_RHP")):
+                        features.append(
+                            GameFeatures(
+                                game_pk=game_pk,
+                                feature_name=f"{side_name}_team_woba_vs_{hand_suffix}",
+                                feature_value=float(
+                                    team_batting_splits.get(split_key, LEAGUE_WOBA_BASELINE)
+                                ),
+                                window_size=None,
+                                as_of_timestamp=as_of_timestamp,
+                            )
+                        )
+
+    _persist_features(database_path, features)
+    return features
+
+
+def _default_team_platoon_splits() -> dict[str, float]:
+    return {
+        "vs_LHP": float(LEAGUE_WOBA_BASELINE),
+        "vs_RHP": float(LEAGUE_WOBA_BASELINE),
+    }
+
+
+def _normalize_team_platoon_abbr(team_abbr: str) -> str | None:
+    normalized = str(team_abbr).strip().upper()
+    if not normalized:
+        return None
+    mapped = _TEAM_PLATOON_ABBR_NORMALIZATION.get(normalized, normalized)
+    return mapped if mapped in _TEAM_CODES else None
+
+
+def _empty_team_platoon_rows() -> pd.DataFrame:
+    return pd.DataFrame(
+        columns=["team_abbr", "season", "vs_hand", "woba", "xwoba", "k_pct", "bb_pct", "pa"]
+    )
+
+
+def _load_team_platoon_rows_from_path(
+    database_path: Path,
+    *,
+    seasons: Sequence[int],
+) -> pd.DataFrame:
+    if not database_path.exists():
+        return _empty_team_platoon_rows()
+
+    with sqlite3.connect(database_path) as connection:
+        table_row = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (TEAM_PLATOON_SPLITS_TABLE,),
+        ).fetchone()
+        if table_row is None:
+            return _empty_team_platoon_rows()
+
+        placeholders = ", ".join("?" for _ in seasons)
+        query = f"""
+            SELECT team_abbr, season, vs_hand, woba, xwoba, k_pct, bb_pct, pa
+            FROM {TEAM_PLATOON_SPLITS_TABLE}
+            WHERE season IN ({placeholders})
+        """
+        rows = pd.read_sql_query(query, connection, params=tuple(int(season) for season in seasons))
+
+    if rows.empty:
+        return _empty_team_platoon_rows()
+
+    rows["team_abbr"] = rows["team_abbr"].map(_normalize_team_platoon_abbr)
+    rows["vs_hand"] = rows["vs_hand"].astype(str).str.strip().str.upper()
+    rows["season"] = pd.to_numeric(rows["season"], errors="coerce").astype("Int64")
+    rows["woba"] = pd.to_numeric(rows["woba"], errors="coerce")
+    rows["xwoba"] = pd.to_numeric(rows["xwoba"], errors="coerce")
+    rows["k_pct"] = pd.to_numeric(rows["k_pct"], errors="coerce")
+    rows["bb_pct"] = pd.to_numeric(rows["bb_pct"], errors="coerce")
+    rows["pa"] = pd.to_numeric(rows["pa"], errors="coerce")
+    rows = rows.dropna(subset=["team_abbr", "season"]).copy()
+    if rows.empty:
+        return _empty_team_platoon_rows()
+
+    rows["season"] = rows["season"].astype(int)
+    rows = rows.loc[rows["vs_hand"].isin({"L", "R"})].copy()
+    return rows.reset_index(drop=True)
+
+
+def load_team_platoon_splits_lookup(
+    season: int,
+    *,
+    db_path: str | Path = DEFAULT_DB_PATH,
+) -> dict[str, dict[str, float]]:
+    target_season = int(season)
+    prior_season = target_season - 1
+    fallback_season = target_season
+
+    candidate_paths: list[Path] = [Path(db_path)]
+    default_database_path = Path(DEFAULT_DB_PATH)
+    if default_database_path not in candidate_paths:
+        candidate_paths.append(default_database_path)
+
+    splits_lookup: dict[str, dict[str, float]] = {}
+    resolved_keys: set[tuple[str, str]] = set()
+    for database_path in candidate_paths:
+        rows = _load_team_platoon_rows_from_path(
+            database_path,
+            seasons=(prior_season, fallback_season),
+        )
+        if rows.empty:
+            continue
+
+        ordered_rows = rows.assign(
+            _season_priority=rows["season"].map(
+                lambda value: 0 if int(value) == prior_season else 1
+            )
+        ).sort_values(["_season_priority", "season", "team_abbr", "vs_hand"])
+
+        for row in ordered_rows.to_dict(orient="records"):
+            team_abbr = str(row["team_abbr"]).strip().upper()
+            vs_hand = str(row["vs_hand"]).strip().upper()
+            if team_abbr not in _TEAM_CODES or vs_hand not in {"L", "R"}:
+                continue
+
+            team_splits = splits_lookup.setdefault(team_abbr, _default_team_platoon_splits())
+            metric_key = "vs_LHP" if vs_hand == "L" else "vs_RHP"
+            resolved_key = (team_abbr, metric_key)
+            if resolved_key in resolved_keys:
+                continue
+
+            woba = pd.to_numeric(row.get("woba"), errors="coerce")
+            team_splits[metric_key] = float(woba) if pd.notna(woba) else float(LEAGUE_WOBA_BASELINE)
+            resolved_keys.add(resolved_key)
+
+    return {
+        team: {
+            "vs_LHP": float(team_splits.get("vs_LHP", LEAGUE_WOBA_BASELINE)),
+            "vs_RHP": float(team_splits.get("vs_RHP", LEAGUE_WOBA_BASELINE)),
+        }
+        for team, team_splits in splits_lookup.items()
+    }
+
+
+def build_db_backed_team_batting_splits_fetcher() -> Callable[..., dict[str, dict[str, float]]]:
+    cache: dict[tuple[int, str], dict[str, dict[str, float]]] = {}
+
+    def wrapper(
+        season: int,
+        *,
+        db_path: str | Path,
+        target_day: date,
+        refresh: bool = False,
+    ) -> dict[str, dict[str, float]]:
+        del target_day, refresh
+        cache_key = (int(season), str(Path(db_path)))
+        if cache_key not in cache:
+            cache[cache_key] = load_team_platoon_splits_lookup(season, db_path=db_path)
+
+        cached_lookup = cache[cache_key]
+        return {
+            team: {
+                "vs_LHP": float(team_splits.get("vs_LHP", LEAGUE_WOBA_BASELINE)),
+                "vs_RHP": float(team_splits.get("vs_RHP", LEAGUE_WOBA_BASELINE)),
+            }
+            for team, team_splits in cached_lookup.items()
+        }
+
+    return wrapper
 
 
 def _coerce_date(value: str | date | datetime) -> date:
@@ -375,6 +941,68 @@ def _build_prior_team_baselines(
     return baselines
 
 
+def _summarize_prior_team_baseline_frame(prior_frame: pd.DataFrame) -> dict[str, float]:
+    if prior_frame.empty:
+        return {metric: _default_metric_baseline(metric) for metric in METRICS}
+
+    team_woba = _series_mean(prior_frame["woba"])
+    team_xwoba = _series_mean(prior_frame["xwoba"])
+    return {
+        "woba": team_woba,
+        "xwoba": team_xwoba,
+        "woba_minus_xwoba": (
+            team_woba - team_xwoba
+            if pd.notna(team_woba) and pd.notna(team_xwoba)
+            else _default_metric_baseline("woba_minus_xwoba")
+        ),
+        "iso": _series_mean(prior_frame["iso"]),
+        "barrel_pct": _series_mean(prior_frame["barrel_pct"]),
+        "babip": _series_mean(prior_frame["babip"]),
+        "k_pct": _series_mean(prior_frame["k_pct"]),
+        "bb_pct": _series_mean(prior_frame["bb_pct"]),
+    }
+
+
+def _prior_team_baselines_for_league_woba(
+    prior_metrics: Mapping[str, float],
+    *,
+    league_woba: float,
+) -> dict[str, float]:
+    if not prior_metrics:
+        return {metric: _default_metric_baseline(metric) for metric in METRICS}
+
+    baselines = {
+        metric: float(prior_metrics.get(metric, _default_metric_baseline(metric)))
+        for metric in METRICS
+        if metric != "wrc_plus"
+    }
+    baselines["wrc_plus"] = _team_wrc_plus(
+        baselines.get("woba", _default_metric_baseline("woba")),
+        league_woba,
+    )
+    return baselines
+
+
+def _league_woba_before_target_day(
+    *,
+    league_ordinals: Any,
+    cumulative_woba_numerator: Any,
+    cumulative_woba_denominator: Any,
+    target_day: date,
+) -> float:
+    if len(league_ordinals) == 0:
+        return LEAGUE_WOBA_BASELINE
+
+    cutoff = league_ordinals.searchsorted(target_day.toordinal(), side="left") - 1
+    if cutoff < 0:
+        return LEAGUE_WOBA_BASELINE
+
+    denominator = float(cumulative_woba_denominator[cutoff])
+    if denominator <= 0:
+        return LEAGUE_WOBA_BASELINE
+    return float(cumulative_woba_numerator[cutoff] / denominator)
+
+
 def _build_lineup_metric_lookup(
     *,
     lineup_player_ids: Mapping[tuple[int, str], Sequence[int]],
@@ -392,6 +1020,35 @@ def _build_lineup_metric_lookup(
     batting_stats = _normalize_batting_stats(
         batting_stats_fetcher(season, min_pa=0, refresh=refresh)
     )
+    if not batting_stats.empty and "game_date" in batting_stats.columns:
+        batting_stats = batting_stats.dropna(subset=["game_date"]).copy()
+        batting_stats = batting_stats.loc[batting_stats["game_date"].dt.date < target_day].copy()
+    else:
+        batting_stats = pd.DataFrame(columns=["player_id", "game_date", "game_pk", "pa", *METRICS])
+
+    batter_xwoba = _normalize_statcast_offense_metrics(statcast_metrics)
+    return _build_lineup_metric_lookup_from_frames(
+        lineup_player_ids=lineup_player_ids,
+        batting_stats=batting_stats,
+        statcast_metrics=batter_xwoba,
+        target_day=target_day,
+        windows=windows,
+        league_woba=league_woba,
+    )
+
+
+def _build_lineup_metric_lookup_from_frames(
+    *,
+    lineup_player_ids: Mapping[tuple[int, str], Sequence[int]],
+    batting_stats: pd.DataFrame,
+    statcast_metrics: pd.DataFrame,
+    target_day: date,
+    windows: Sequence[int],
+    league_woba: float,
+) -> dict[tuple[int, str, int], dict[str, float]]:
+    if not lineup_player_ids:
+        return {}
+
     if not batting_stats.empty and "game_date" in batting_stats.columns:
         batting_stats = batting_stats.dropna(subset=["game_date"]).copy()
         batting_stats = batting_stats.loc[batting_stats["game_date"].dt.date < target_day].copy()
@@ -459,6 +1116,21 @@ def _build_lineup_prior_metric_lookup(
         )
 
     prior_statcast_metrics = _normalize_statcast_offense_metrics(statcast_metrics)
+    return _build_lineup_prior_metric_lookup_from_frames(
+        lineup_player_ids=lineup_player_ids,
+        prior_batting_stats=prior_batting_stats,
+        prior_statcast_metrics=prior_statcast_metrics,
+    )
+
+
+def _build_lineup_prior_metric_lookup_from_frames(
+    *,
+    lineup_player_ids: Mapping[tuple[int, str], Sequence[int]],
+    prior_batting_stats: pd.DataFrame,
+    prior_statcast_metrics: pd.DataFrame,
+) -> tuple[dict[tuple[int, str], dict[str, float]], dict[tuple[int, str], bool]]:
+    if not lineup_player_ids:
+        return {}, {}
     if prior_batting_stats.empty and prior_statcast_metrics.empty:
         return {}, {}
 
@@ -859,8 +1531,10 @@ def _compute_game_level_metrics(
     result["xwoba"] = _series_from_value(xwoba)
     result["woba_minus_xwoba"] = _series_from_value(result["woba"] - result["xwoba"])
     result["barrel_pct"] = _series_from_value(barrel_pct)
-    result = result.dropna(subset=["game_date"]).sort_values(["game_date", "game_pk"]).reset_index(
-        drop=True
+    result = (
+        result.dropna(subset=["game_date"])
+        .sort_values(["game_date", "game_pk"])
+        .reset_index(drop=True)
     )
     return result
 
@@ -1164,11 +1838,14 @@ def _align_statcast_team_metric(
         ).values
         return aligned_metric
 
-    # Normalize both sides to tz-naive before merge to avoid datetime64[us] vs datetime64[us, UTC] conflict
-    alignment["game_date"] = _to_tz_naive_datetime_series(alignment["game_date"])
+    # Team game logs often have date-only timestamps while Statcast carries first-pitch times.
+    # Match on the calendar day when game_pk is unavailable.
+    alignment["game_date"] = _to_tz_naive_datetime_series(alignment["game_date"]).dt.normalize()
 
     team_game_metrics = team_game_metrics.sort_values(["game_date", "game_pk"]).copy()
-    team_game_metrics["game_date"] = _to_tz_naive_datetime_series(team_game_metrics["game_date"])
+    team_game_metrics["game_date"] = _to_tz_naive_datetime_series(
+        team_game_metrics["game_date"]
+    ).dt.normalize()
 
     alignment["_date_slot"] = alignment.groupby("game_date", sort=False).cumcount()
     team_game_metrics["_date_slot"] = team_game_metrics.groupby("game_date", sort=False).cumcount()

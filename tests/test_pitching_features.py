@@ -59,6 +59,7 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "game_date": "2025-04-01",
                     "team": "NYY",
                     "pitcher_id": 100,
+                    "SIERA": 3.1,
                     "xFIP": 3.0,
                     "xERA": 3.2,
                     "K%": 24.0,
@@ -76,6 +77,7 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "game_date": "2025-04-03",
                     "team": "NYY",
                     "pitcher_id": 200,
+                    "SIERA": 6.8,
                     "xFIP": 8.5,
                     "xERA": 6.9,
                     "K%": 12.0,
@@ -93,6 +95,7 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "game_date": "2025-04-06",
                     "team": "NYY",
                     "pitcher_id": 100,
+                    "SIERA": 3.8,
                     "xFIP": 4.0,
                     "xERA": 4.1,
                     "K%": 22.0,
@@ -110,6 +113,7 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "game_date": "2025-04-08",
                     "team": "NYY",
                     "pitcher_id": 300,
+                    "SIERA": 6.2,
                     "xFIP": 7.5,
                     "xERA": 6.5,
                     "K%": 14.0,
@@ -127,6 +131,7 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "game_date": "2025-04-10",
                     "team": "NYY",
                     "pitcher_id": 100,
+                    "SIERA": 2.1,
                     "xFIP": 1.0,
                     "xERA": 1.5,
                     "K%": 35.0,
@@ -144,6 +149,7 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "game_date": "2025-04-02",
                     "team": "BOS",
                     "pitcher_id": 400,
+                    "SIERA": 3.45,
                     "xFIP": 3.5,
                     "xERA": 3.4,
                     "K%": 25.0,
@@ -161,6 +167,7 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "game_date": "2025-04-07",
                     "team": "BOS",
                     "pitcher_id": 400,
+                    "SIERA": 3.55,
                     "xFIP": 3.7,
                     "xERA": 3.6,
                     "K%": 24.0,
@@ -178,6 +185,7 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "game_date": "2025-04-01",
                     "team": "SEA",
                     "pitcher_id": 700,
+                    "SIERA": 3.9,
                     "xFIP": 4.0,
                     "xERA": 3.8,
                     "K%": 21.0,
@@ -195,6 +203,7 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "game_date": "2025-03-28",
                     "team": "TB",
                     "pitcher_id": 900,
+                    "SIERA": 6.5,
                     "xFIP": 8.0,
                     "xERA": 6.8,
                     "K%": 18.0,
@@ -212,6 +221,7 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "game_date": "2025-04-02",
                     "team": "TB",
                     "pitcher_id": 900,
+                    "SIERA": 6.7,
                     "xFIP": 9.0,
                     "xERA": 7.0,
                     "K%": 17.0,
@@ -229,6 +239,7 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "game_date": "2025-04-12",
                     "team": "TB",
                     "pitcher_id": 901,
+                    "SIERA": 3.2,
                     "xFIP": 3.0,
                     "xERA": 3.1,
                     "K%": 27.0,
@@ -246,6 +257,7 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "game_date": "2025-04-17",
                     "team": "TB",
                     "pitcher_id": 902,
+                    "SIERA": 3.4,
                     "xFIP": 3.5,
                     "xERA": 3.4,
                     "K%": 26.0,
@@ -263,6 +275,7 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "game_date": "2025-04-10",
                     "team": "TOR",
                     "pitcher_id": 950,
+                    "SIERA": 4.3,
                     "xFIP": 4.4,
                     "xERA": 4.1,
                     "K%": 22.0,
@@ -284,6 +297,7 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "game_date": "2024-08-01",
                     "team": "NYY",
                     "pitcher_id": 100,
+                    "SIERA": 2.7,
                     "xFIP": 2.5,
                     "xERA": 2.8,
                     "K%": 28.0,
@@ -299,6 +313,7 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "game_date": "2024-08-02",
                     "team": "BOS",
                     "pitcher_id": 400,
+                    "SIERA": 3.0,
                     "xFIP": 3.1,
                     "xERA": 3.0,
                     "K%": 26.0,
@@ -314,6 +329,7 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "game_date": "2024-08-03",
                     "team": "SEA",
                     "pitcher_id": 700,
+                    "SIERA": 3.3,
                     "xFIP": 3.2,
                     "xERA": 3.1,
                     "K%": 24.0,
@@ -329,6 +345,7 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "game_date": "2024-08-04",
                     "team": "TB",
                     "pitcher_id": 901,
+                    "SIERA": 3.25,
                     "xFIP": 3.4,
                     "xERA": 3.3,
                     "K%": 25.0,
@@ -344,6 +361,7 @@ def _start_metrics_by_season() -> dict[int, pd.DataFrame]:
                     "game_date": "2024-08-05",
                     "team": "TOR",
                     "pitcher_id": 950,
+                    "SIERA": 3.9,
                     "xFIP": 4.0,
                     "xERA": 3.9,
                     "K%": 23.0,
@@ -480,6 +498,33 @@ def test_compute_start_metrics_returns_pitch_count() -> None:
     assert metrics["innings_pitched"] == pytest.approx(1 / 3)
 
 
+def test_estimate_siera_uses_pitching_interaction_formula() -> None:
+    from src.features.pitching import _estimate_siera
+
+    siera = _estimate_siera(
+        strikeouts=7,
+        walks=2,
+        batters_faced=25,
+        ground_balls=8,
+        fly_balls=4,
+        line_drives=3,
+        infield_fly_balls=1,
+    )
+
+    expected = (
+        6.145
+        - (16.986 * (7 / 25))
+        + (11.434 * (2 / 25))
+        - (1.858 * (8 / 16))
+        + (7.653 * ((7 / 25) ** 2))
+        + (6.664 * ((8 / 16) ** 2))
+        + (10.130 * ((7 / 25) * (8 / 16)))
+        - (5.195 * ((2 / 25) * (8 / 16)))
+    )
+
+    assert siera == pytest.approx(expected)
+
+
 def _lineup_for(
     *,
     game_pk: int,
@@ -527,6 +572,7 @@ def test_compute_pitching_features_uses_starter_starts_only_and_excludes_current
     )
 
     by_name = {row.feature_name: row.feature_value for row in rows}
+    assert by_name["home_starter_siera_2s"] == pytest.approx(3.45)
     assert by_name["home_starter_xfip_2s"] == pytest.approx(3.5)
     assert by_name["home_starter_xera_2s"] == pytest.approx(3.65)
     assert by_name["home_starter_avg_fastball_velocity_2s"] == pytest.approx(95.95)
@@ -536,6 +582,7 @@ def test_compute_pitching_features_uses_starter_starts_only_and_excludes_current
     assert by_name["home_starter_days_rest"] == pytest.approx(4.0)
     assert by_name["home_starter_last_start_pitch_count"] == pytest.approx(101.0)
     assert by_name["home_starter_cumulative_pitch_load_5s"] == pytest.approx(96.5)
+    assert by_name["away_starter_siera_2s"] == pytest.approx(3.5)
     assert by_name["away_starter_xfip_2s"] == pytest.approx(3.6)
     assert by_name["away_starter_days_rest"] == pytest.approx(3.0)
     assert by_name["away_starter_last_start_pitch_count"] == pytest.approx(97.0)
@@ -577,9 +624,11 @@ def test_compute_pitching_features_applies_pitcher_marcel_blend(tmp_path: Path) 
     )
 
     by_name = {row.feature_name: row.feature_value for row in rows}
+    expected_home_siera = (3.9 * 1 + 3.3 * 15) / 16
     expected_home_xfip = (4.0 * 1 + 3.2 * 15) / 16
     expected_home_xera = (3.8 * 1 + 3.1 * 15) / 16
 
+    assert by_name["home_starter_siera_7s"] == pytest.approx(expected_home_siera)
     assert by_name["home_starter_xfip_7s"] == pytest.approx(expected_home_xfip)
     assert by_name["home_starter_xera_7s"] == pytest.approx(expected_home_xera)
     assert by_name["home_starter_xfip_7s"] < 4.0
@@ -615,6 +664,7 @@ def test_compute_pitching_features_uses_team_composite_when_lineup_flags_opener(
     )
 
     by_name = {row.feature_name: row.feature_value for row in rows}
+    assert by_name["home_starter_siera_2s"] == pytest.approx((3.8 + 6.2) / 2)
     assert by_name["home_starter_is_opener"] == 1.0
     assert by_name["home_starter_uses_team_composite"] == 1.0
     assert by_name["home_starter_xfip_2s"] == pytest.approx((4.0 + 7.5) / 2)
@@ -651,6 +701,7 @@ def test_compute_pitching_features_detects_opener_and_uses_team_composite(
     )
 
     by_name = {row.feature_name: row.feature_value for row in rows}
+    assert by_name["home_starter_siera_2s"] == pytest.approx((3.2 + 3.4) / 2)
     assert by_name["home_starter_is_opener"] == 1.0
     assert by_name["home_starter_uses_team_composite"] == 1.0
     assert by_name["home_starter_xfip_2s"] == pytest.approx((3.0 + 3.5) / 2)
@@ -719,6 +770,7 @@ def test_compute_pitching_features_uses_league_average_prior_for_first_year_star
                     "game_date": "2025-04-10",
                     "team": "TOR",
                     "pitcher_id": 960,
+                    "SIERA": 4.3,
                     "xFIP": 4.4,
                     "xERA": 4.1,
                     "K%": 22.0,
@@ -734,6 +786,7 @@ def test_compute_pitching_features_uses_league_average_prior_for_first_year_star
                     "game_date": "2025-04-07",
                     "team": "BOS",
                     "pitcher_id": 400,
+                    "SIERA": 3.55,
                     "xFIP": 3.7,
                     "xERA": 3.6,
                     "K%": 24.0,
@@ -753,6 +806,7 @@ def test_compute_pitching_features_uses_league_average_prior_for_first_year_star
                     "game_date": "2024-08-02",
                     "team": "BOS",
                     "pitcher_id": 400,
+                    "SIERA": 3.0,
                     "xFIP": 3.1,
                     "xERA": 3.0,
                     "K%": 26.0,
@@ -794,7 +848,9 @@ def test_compute_pitching_features_uses_league_average_prior_for_first_year_star
 
     by_name = {row.feature_name: row.feature_value for row in rows}
     expected_home_xfip = (4.4 * 1 + DEFAULT_METRIC_BASELINES["xfip"] * 2) / 3
+    expected_home_siera = (4.3 * 1 + DEFAULT_METRIC_BASELINES["siera"] * 2) / 3
 
+    assert by_name["home_starter_siera_1s"] == pytest.approx(expected_home_siera)
     assert by_name["home_starter_xfip_1s"] == pytest.approx(expected_home_xfip)
     assert by_name["home_starter_uses_team_composite"] == 0.0
 
@@ -824,6 +880,7 @@ def test_fetch_season_start_metrics_reuses_persisted_cache(
                 "game_date": "2025-04-10",
                 "team": "NYY",
                 "pitcher_id": 100,
+                "siera": 3.15,
                 "xfip": 3.2,
                 "xera": 3.1,
                 "k_pct": 28.0,
@@ -839,6 +896,7 @@ def test_fetch_season_start_metrics_reuses_persisted_cache(
                 "game_date": "2025-04-10",
                 "team": "BOS",
                 "pitcher_id": 400,
+                "siera": 3.7,
                 "xfip": 3.8,
                 "xera": 3.7,
                 "k_pct": 24.0,

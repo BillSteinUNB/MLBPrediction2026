@@ -10,6 +10,7 @@ from src.ops.live_season_tracker import (
     capture_daily_result,
     list_tracked_games,
     settle_tracked_games,
+    sync_live_game_state,
 )
 from src.pipeline.daily import DailyPipelineResult, GameProcessingResult
 
@@ -163,3 +164,96 @@ def test_capture_and_settle_live_season_tracking(tmp_path: Path) -> None:
     assert summary.f5_ml_accuracy is not None
     assert summary.f5_rl_accuracy is not None
     assert summary.flat_profit_units > 0
+
+
+def test_sync_live_game_state_updates_games_and_settles(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "live_tracking_sync.db"
+
+    result = DailyPipelineResult(
+        run_id="run-20260326",
+        pipeline_date="2026-03-26",
+        mode="prod",
+        dry_run=True,
+        model_version="live-test-v1",
+        pick_count=1,
+        no_pick_count=0,
+        error_count=0,
+        notification_type="picks",
+        notification_payload={},
+        games=[
+            GameProcessingResult(
+                game_pk=2001,
+                matchup="NYY @ SF",
+                status="pick",
+                prediction=_prediction(2001, ml_home=0.40, rl_home=0.35),
+                selected_decision=_decision(
+                    2001,
+                    market_type="f5_ml",
+                    side="away",
+                    odds=110,
+                    model_probability=0.60,
+                ),
+                input_status={"home_lineup_available": True},
+            )
+        ],
+    )
+    capture_daily_result(result=result, db_path=db_path)
+
+    from src.db import init_db
+    import sqlite3
+    import src.ops.live_season_tracker as tracker_module
+
+    init_db(db_path)
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO games (
+                game_pk, date, home_team, away_team, home_starter_id, away_starter_id,
+                venue, is_dome, is_abs_active, f5_home_score, f5_away_score,
+                final_home_score, final_away_score, status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (2001, "2026-03-26", "SF", "NYY", None, None, "Oracle", 0, 1, 0, 2, None, None, "scheduled"),
+        )
+        connection.commit()
+
+    monkeypatch.setattr(
+        tracker_module,
+        "_default_schedule_fetcher",
+        lambda target_date, mode: __import__("pandas").DataFrame(),
+    )
+
+    game_state_path = tmp_path / "live_game_state.json"
+    game_state_path.write_text(
+        __import__("json").dumps(
+            [
+                {
+                    "event_id": "game-2001",
+                    "game_date": "2026-03-26",
+                    "away_team": "NYY",
+                    "home_team": "SF",
+                    "away_team_score": 4,
+                    "home_team_score": 1,
+                    "game_status_text": "Final",
+                    "status": "1",
+                    "inning": 9,
+                    "outs": 3,
+                    "fetched_at": "2026-03-27T00:00:00+00:00",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    summary = sync_live_game_state(input_path=game_state_path, db_path=db_path, settle=True)
+    assert summary["imported_rows"] == 1
+    assert summary["settled_rows"] == 1
+
+    tracked = list_tracked_games(season=2026, db_path=db_path)
+    assert tracked[0]["actual_status"] == "final"
+    assert tracked[0]["actual_f5_home_score"] == 0
+    assert tracked[0]["actual_f5_away_score"] == 2
+    assert tracked[0]["actual_final_home_score"] == 1
+    assert tracked[0]["actual_final_away_score"] == 4
+    assert tracked[0]["settled_result"] == "WIN"

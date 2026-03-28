@@ -3,12 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sqlite3
 import sys
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
-from typing import Any, Callable, Literal, Mapping, Protocol, Sequence
+from typing import Any, Callable, Collection, Literal, Mapping, Protocol, Sequence
 
 import httpx
 import joblib
@@ -44,7 +45,11 @@ from src.model.data_builder import (
 from src.model.market_recalibration import shrink_probability_toward_market
 from src.model.margin_pricing import margin_to_cover_probability
 from src.model.run_count_trainer import BlendedRunCountRegressor
-from src.model.score_pricing import moneyline_probabilities, spread_cover_probabilities
+from src.model.score_pricing import (
+    moneyline_probabilities,
+    spread_cover_probabilities,
+    totals_probabilities,
+)
 from src.model.xgboost_trainer import DEFAULT_MODEL_OUTPUT_DIR
 from src.models.bet import BetDecision
 from src.models.lineup import Lineup
@@ -88,11 +93,16 @@ DEFAULT_RLV2_BLEND_EVAL_PATHS: tuple[tuple[str, str], ...] = (
     ("rlv2-blend-longhorizon", "rl_v2_blend_eval_2021_2025.json"),
     ("rlv2-blend-tuned", "rl_v2_blend_eval_2025.json"),
 )
-DEFAULT_RUN_COUNT_EXPERIMENT = "2026-run-count-newfeatures-150x5"
+DEFAULT_RUN_COUNT_EXPERIMENT = os.getenv(
+    "MLB_RUN_COUNT_EXPERIMENT",
+    "2026-run-count-newfeatures-150x5",
+)
 LIVE_ODDS_CACHE_TTL_MINUTES = 15
 FULL_GAME_ODDS_CACHE_TTL_MINUTES = 30
 LIVE_ODDS_CACHE_RETENTION_DAYS = 7
 SCRAPER_ODDS_DB_PATH = Path("OddsScraper") / "data" / "mlb_odds.db"
+SCRAPER_MARKET_STATE_PATH = Path("OddsScraper") / "data" / "live_market_state.json"
+WINDOWS_MARKET_SYNC_STATE_PATH = Path("OddsScraper") / "data" / "windows_market_sync_state.json"
 
 _SCHEDULE_CIRCUIT = CircuitBreaker(name="schedule")
 _HISTORY_CIRCUIT = CircuitBreaker(name="history")
@@ -398,6 +408,7 @@ class ArtifactOrFallbackPredictionEngine:
         prediction: Prediction,
         snapshots: Sequence[OddsSnapshot],
         db_path: str | Path,
+        full_game_context: Mapping[str, Any] | None = None,
     ) -> list[BetDecision]:
         candidates: list[BetDecision] = []
         resolved_frame = inference_frame.copy().reset_index(drop=True)
@@ -422,14 +433,56 @@ class ArtifactOrFallbackPredictionEngine:
                     away_odds=snapshot.away_odds,
                 )
                 candidates.extend(
-                    self._build_market_candidates(
+                    self._build_two_way_candidates(
                         game_pk=prediction.game_pk,
                         market_type=snapshot.market_type,
-                        home_probability=adjusted_home_probability,
-                        away_probability=adjusted_away_probability,
-                        snapshot=snapshot,
+                        first_side="home",
+                        first_probability=adjusted_home_probability,
+                        first_odds=snapshot.home_odds,
+                        first_point=snapshot.home_point,
+                        second_side="away",
+                        second_probability=adjusted_away_probability,
+                        second_odds=snapshot.away_odds,
+                        second_point=snapshot.away_point,
+                        book_name=snapshot.book_name,
                         db_path=db_path,
                         source_model=ml_source_model,
+                        source_model_version=self.model_version,
+                    )
+                )
+                continue
+
+            if snapshot.market_type == "f5_total":
+                if (
+                    prediction.projected_f5_home_runs is None
+                    or prediction.projected_f5_away_runs is None
+                    or snapshot.home_point is None
+                ):
+                    continue
+                total_over_probability, total_under_probability = totals_probabilities(
+                    home_runs_mean=prediction.projected_f5_home_runs,
+                    away_runs_mean=prediction.projected_f5_away_runs,
+                    home_runs_std=self._resolve_run_count_std(self.run_count_f5_home) or 2.35,
+                    away_runs_std=self._resolve_run_count_std(self.run_count_f5_away) or 2.29,
+                    total_point=float(snapshot.home_point),
+                )
+                if total_over_probability is None or total_under_probability is None:
+                    continue
+                candidates.extend(
+                    self._build_two_way_candidates(
+                        game_pk=prediction.game_pk,
+                        market_type=snapshot.market_type,
+                        first_side="over",
+                        first_probability=total_over_probability,
+                        first_odds=snapshot.home_odds,
+                        first_point=snapshot.home_point,
+                        second_side="under",
+                        second_probability=total_under_probability,
+                        second_odds=snapshot.away_odds,
+                        second_point=snapshot.away_point,
+                        book_name=snapshot.book_name,
+                        db_path=db_path,
+                        source_model="run_count_f5_total",
                         source_model_version=self.model_version,
                     )
                 )
@@ -462,12 +515,18 @@ class ArtifactOrFallbackPredictionEngine:
                     legacy_source_model = "legacy_f5_ml_equiv"
 
             candidates.extend(
-                self._build_market_candidates(
+                self._build_two_way_candidates(
                     game_pk=prediction.game_pk,
                     market_type=snapshot.market_type,
-                    home_probability=legacy_home_probability,
-                    away_probability=1.0 - legacy_home_probability,
-                    snapshot=snapshot,
+                    first_side="home",
+                    first_probability=legacy_home_probability,
+                    first_odds=snapshot.home_odds,
+                    first_point=snapshot.home_point,
+                    second_side="away",
+                    second_probability=1.0 - legacy_home_probability,
+                    second_odds=snapshot.away_odds,
+                    second_point=snapshot.away_point,
+                    book_name=snapshot.book_name,
                     db_path=db_path,
                     source_model=legacy_source_model,
                     source_model_version=self.model_version,
@@ -484,12 +543,18 @@ class ArtifactOrFallbackPredictionEngine:
             )
             if direct_probability is not None:
                 candidates.extend(
-                    self._build_market_candidates(
+                    self._build_two_way_candidates(
                         game_pk=prediction.game_pk,
                         market_type=snapshot.market_type,
-                        home_probability=direct_probability,
-                        away_probability=1.0 - direct_probability,
-                        snapshot=snapshot,
+                        first_side="home",
+                        first_probability=direct_probability,
+                        first_odds=snapshot.home_odds,
+                        first_point=snapshot.home_point,
+                        second_side="away",
+                        second_probability=1.0 - direct_probability,
+                        second_odds=snapshot.away_odds,
+                        second_point=snapshot.away_point,
+                        book_name=snapshot.book_name,
                         db_path=db_path,
                         source_model="rlv2_direct",
                         source_model_version=self.rlv2_direct.model_version
@@ -499,12 +564,18 @@ class ArtifactOrFallbackPredictionEngine:
                 )
             if margin_probability is not None:
                 candidates.extend(
-                    self._build_market_candidates(
+                    self._build_two_way_candidates(
                         game_pk=prediction.game_pk,
                         market_type=snapshot.market_type,
-                        home_probability=margin_probability,
-                        away_probability=1.0 - margin_probability,
-                        snapshot=snapshot,
+                        first_side="home",
+                        first_probability=margin_probability,
+                        first_odds=snapshot.home_odds,
+                        first_point=snapshot.home_point,
+                        second_side="away",
+                        second_probability=1.0 - margin_probability,
+                        second_odds=snapshot.away_odds,
+                        second_point=snapshot.away_point,
+                        book_name=snapshot.book_name,
                         db_path=db_path,
                         source_model="rlv2_margin",
                         source_model_version=self.rlv2_margin.model_version
@@ -518,12 +589,18 @@ class ArtifactOrFallbackPredictionEngine:
                     + (1.0 - self.rlv2_blend_weight) * margin_probability
                 )
                 candidates.extend(
-                    self._build_market_candidates(
+                    self._build_two_way_candidates(
                         game_pk=prediction.game_pk,
                         market_type=snapshot.market_type,
-                        home_probability=blend_probability,
-                        away_probability=1.0 - blend_probability,
-                        snapshot=snapshot,
+                        first_side="home",
+                        first_probability=blend_probability,
+                        first_odds=snapshot.home_odds,
+                        first_point=snapshot.home_point,
+                        second_side="away",
+                        second_probability=1.0 - blend_probability,
+                        second_odds=snapshot.away_odds,
+                        second_point=snapshot.away_point,
+                        book_name=snapshot.book_name,
                         db_path=db_path,
                         source_model="rlv2_blend",
                         source_model_version=(
@@ -531,6 +608,126 @@ class ArtifactOrFallbackPredictionEngine:
                             f"margin={self.rlv2_margin.model_version if self.rlv2_margin else 'na'};"
                             f"weight={self.rlv2_blend_weight:.2f}"
                         ),
+                    )
+                )
+
+        resolved_full_game_context = dict(full_game_context or {})
+        full_game_ml_home_probability = prediction.full_game_ml_home_prob
+        if full_game_ml_home_probability is not None:
+            for pair in resolved_full_game_context.get("full_game_ml_pairs") or []:
+                home_odds = pair.get("home_odds")
+                away_odds = pair.get("away_odds")
+                book_name = pair.get("book_name")
+                if home_odds is None or away_odds is None or not isinstance(book_name, str):
+                    continue
+                adjusted_home_probability, adjusted_away_probability = _recalibrate_ml_market_pair(
+                    home_probability=float(full_game_ml_home_probability),
+                    away_probability=float(1.0 - full_game_ml_home_probability),
+                    home_odds=int(home_odds),
+                    away_odds=int(away_odds),
+                )
+                candidates.extend(
+                    self._build_two_way_candidates(
+                        game_pk=prediction.game_pk,
+                        market_type="full_game_ml",
+                        first_side="home",
+                        first_probability=adjusted_home_probability,
+                        first_odds=int(home_odds),
+                        first_point=None,
+                        second_side="away",
+                        second_probability=adjusted_away_probability,
+                        second_odds=int(away_odds),
+                        second_point=None,
+                        book_name=book_name,
+                        db_path=db_path,
+                        source_model="run_count_full_game_ml",
+                        source_model_version=self.model_version,
+                    )
+                )
+
+        if (
+            prediction.projected_full_game_home_runs is not None
+            and prediction.projected_full_game_away_runs is not None
+        ):
+            for pair in resolved_full_game_context.get("full_game_rl_pairs") or []:
+                home_odds = pair.get("home_odds")
+                away_odds = pair.get("away_odds")
+                home_point = pair.get("home_point")
+                away_point = pair.get("away_point")
+                book_name = pair.get("book_name")
+                if (
+                    home_odds is None
+                    or away_odds is None
+                    or home_point is None
+                    or away_point is None
+                    or not isinstance(book_name, str)
+                ):
+                    continue
+                full_game_rl_home_probability, full_game_rl_away_probability = spread_cover_probabilities(
+                    home_runs_mean=prediction.projected_full_game_home_runs,
+                    away_runs_mean=prediction.projected_full_game_away_runs,
+                    home_runs_std=self._resolve_run_count_std(self.run_count_full_home) or 3.13,
+                    away_runs_std=self._resolve_run_count_std(self.run_count_full_away) or 3.36,
+                    home_point=float(home_point),
+                )
+                if full_game_rl_home_probability is None or full_game_rl_away_probability is None:
+                    continue
+                candidates.extend(
+                    self._build_two_way_candidates(
+                        game_pk=prediction.game_pk,
+                        market_type="full_game_rl",
+                        first_side="home",
+                        first_probability=full_game_rl_home_probability,
+                        first_odds=int(home_odds),
+                        first_point=float(home_point),
+                        second_side="away",
+                        second_probability=full_game_rl_away_probability,
+                        second_odds=int(away_odds),
+                        second_point=float(away_point),
+                        book_name=book_name,
+                        db_path=db_path,
+                        source_model="run_count_full_game_rl",
+                        source_model_version=self.model_version,
+                    )
+                )
+
+            for pair in resolved_full_game_context.get("full_game_total_pairs") or []:
+                over_odds = pair.get("over_odds")
+                under_odds = pair.get("under_odds")
+                total_point = pair.get("total_point")
+                book_name = pair.get("book_name")
+                if (
+                    over_odds is None
+                    or under_odds is None
+                    or total_point is None
+                    or not isinstance(book_name, str)
+                ):
+                    continue
+                total_over_probability, total_under_probability = totals_probabilities(
+                    home_runs_mean=prediction.projected_full_game_home_runs,
+                    away_runs_mean=prediction.projected_full_game_away_runs,
+                    home_runs_std=self._resolve_run_count_std(self.run_count_full_home) or 3.13,
+                    away_runs_std=self._resolve_run_count_std(self.run_count_full_away) or 3.36,
+                    total_point=float(total_point),
+                )
+                if total_over_probability is None or total_under_probability is None:
+                    continue
+                candidates.extend(
+                    self._build_two_way_candidates(
+                        game_pk=prediction.game_pk,
+                        market_type="full_game_total",
+                        first_side="over",
+                        first_probability=total_over_probability,
+                        first_odds=int(over_odds),
+                        first_point=float(total_point),
+                        second_side="under",
+                        second_probability=total_under_probability,
+                        second_odds=int(under_odds),
+                        second_point=float(total_point),
+                        book_name=book_name,
+                        db_path=db_path,
+                        source_model="run_count_full_game_total",
+                        source_model_version=self.model_version,
                     )
                 )
 
@@ -958,14 +1155,20 @@ class ArtifactOrFallbackPredictionEngine:
             )
         return frame
 
-    def _build_market_candidates(
+    def _build_two_way_candidates(
         self,
         *,
         game_pk: int,
         market_type: str,
-        home_probability: float,
-        away_probability: float,
-        snapshot: OddsSnapshot,
+        first_side: str,
+        first_probability: float,
+        first_odds: int,
+        first_point: float | None,
+        second_side: str,
+        second_probability: float,
+        second_odds: int,
+        second_point: float | None,
+        book_name: str,
         db_path: str | Path,
         source_model: str,
         source_model_version: str | None,
@@ -974,25 +1177,25 @@ class ArtifactOrFallbackPredictionEngine:
             calculate_edge(
                 game_pk=game_pk,
                 market_type=market_type,
-                side="home",
-                model_probability=home_probability,
-                home_odds=snapshot.home_odds,
-                away_odds=snapshot.away_odds,
-                home_point=snapshot.home_point,
-                away_point=snapshot.away_point,
-                book_name=snapshot.book_name,
+                side=first_side,
+                model_probability=first_probability,
+                home_odds=first_odds,
+                away_odds=second_odds,
+                home_point=first_point,
+                away_point=second_point,
+                book_name=book_name,
                 db_path=db_path,
             ),
             calculate_edge(
                 game_pk=game_pk,
                 market_type=market_type,
-                side="away",
-                model_probability=away_probability,
-                home_odds=snapshot.home_odds,
-                away_odds=snapshot.away_odds,
-                home_point=snapshot.home_point,
-                away_point=snapshot.away_point,
-                book_name=snapshot.book_name,
+                side=second_side,
+                model_probability=second_probability,
+                home_odds=first_odds,
+                away_odds=second_odds,
+                home_point=first_point,
+                away_point=second_point,
+                book_name=book_name,
                 db_path=db_path,
             ),
         ]
@@ -1148,6 +1351,7 @@ def run_daily_pipeline(
                 snapshots=odds_by_game.get(game_pk, []),
                 db_path=database_path,
                 prediction_engine=prediction_engine,
+                full_game_context=full_game_odds_context.get(game_pk, {}),
             )
             forced_decision = _select_forced_game_decision(candidate_decisions)
 
@@ -1390,11 +1594,13 @@ def _fetch_live_odds_with_retry(
     db_path: str | Path,
     commence_time_from: datetime,
     commence_time_to: datetime,
+    game_pk_allowlist: Collection[int] | None = None,
 ) -> list[OddsSnapshot]:
     primary_snapshots = fetch_mlb_odds(
         db_path=db_path,
         commence_time_from=commence_time_from,
         commence_time_to=commence_time_to,
+        game_pk_allowlist=game_pk_allowlist,
     )
     primary_f5_games = {
         snapshot.game_pk for snapshot in primary_snapshots if snapshot.market_type == "f5_ml"
@@ -1470,6 +1676,148 @@ def _default_lineups_fetcher(target_date: str) -> list[Lineup]:
     )
 
 
+def _load_scraper_market_state_payload(scraper_market_state_path: str | Path) -> list[dict[str, Any]]:
+    path = Path(scraper_market_state_path)
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        logger.warning("Failed to load scraper market state from %s", path, exc_info=True)
+        return []
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        games = payload.get("games")
+        if isinstance(games, list):
+            return [item for item in games if isinstance(item, dict)]
+        return [item for item in payload.values() if isinstance(item, dict)]
+    return []
+
+
+def _load_windows_market_sync_state(sync_state_path: str | Path) -> dict[str, Any]:
+    path = Path(sync_state_path)
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        logger.warning("Failed to load Windows market sync state from %s", path, exc_info=True)
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _persist_windows_market_sync_state(
+    sync_state_path: str | Path,
+    payload: Mapping[str, Any],
+) -> None:
+    path = Path(sync_state_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(dict(payload), indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _resolve_market_state_game_pk(
+    *,
+    state: Mapping[str, Any],
+    game_pk_lookup: Mapping[tuple[str, str], int],
+) -> int | None:
+    raw_game_pk = state.get("game_pk")
+    if raw_game_pk is not None:
+        try:
+            return int(raw_game_pk)
+        except (TypeError, ValueError):
+            pass
+    away_team = _resolve_scraper_team_code(state.get("away_team"))
+    home_team = _resolve_scraper_team_code(state.get("home_team"))
+    if away_team is None or home_team is None:
+        return None
+    return game_pk_lookup.get((away_team, home_team))
+
+
+def _eligible_f5_refresh_game_pks(
+    *,
+    target_date: date,
+    repo_db_path: str | Path,
+    scraper_market_state_path: str | Path,
+    sync_state_path: str | Path,
+) -> set[int] | None:
+    states = _load_scraper_market_state_payload(scraper_market_state_path)
+    if not states:
+        return None
+
+    game_pk_lookup = _load_repo_game_pk_lookup(repo_db_path=repo_db_path, target_date=target_date)
+    if not game_pk_lookup:
+        return set()
+
+    sync_state = _load_windows_market_sync_state(sync_state_path)
+    fingerprint_state = sync_state.setdefault("full_game_fingerprints", {})
+    eligible: set[int] = set()
+    target_date_iso = target_date.isoformat()
+    seen_game_pks: set[int] = set()
+    required_f5_markets = {"f5_ml", "f5_rl"}
+
+    for state in states:
+        state_date = str(
+            state.get("game_date")
+            or state.get("pipeline_date")
+            or state.get("date")
+            or ""
+        )
+        if state_date and state_date != target_date_iso:
+            continue
+        game_pk = _resolve_market_state_game_pk(state=state, game_pk_lookup=game_pk_lookup)
+        if game_pk is None:
+            continue
+        seen_game_pks.add(int(game_pk))
+        markets_present = {
+            str(market)
+            for market in (state.get("markets_present") or [])
+            if market is not None
+        }
+        if required_f5_markets.issubset(markets_present):
+            continue
+        fingerprint = state.get("full_game_market_fingerprint")
+        if not isinstance(fingerprint, str) or not fingerprint:
+            eligible.add(int(game_pk))
+            continue
+        if fingerprint_state.get(str(game_pk)) != fingerprint:
+            eligible.add(int(game_pk))
+
+    if not seen_game_pks:
+        return None
+    return eligible
+
+
+def _mark_games_synced_to_fingerprint(
+    *,
+    target_date: date,
+    game_pks: Collection[int],
+    repo_db_path: str | Path,
+    scraper_market_state_path: str | Path,
+    sync_state_path: str | Path,
+) -> None:
+    if not game_pks:
+        return
+    normalized_game_pks = {int(value) for value in game_pks}
+    states = _load_scraper_market_state_payload(scraper_market_state_path)
+    if not states:
+        return
+    game_pk_lookup = _load_repo_game_pk_lookup(repo_db_path=repo_db_path, target_date=target_date)
+    if not game_pk_lookup:
+        return
+    sync_state = _load_windows_market_sync_state(sync_state_path)
+    fingerprint_state = sync_state.setdefault("full_game_fingerprints", {})
+    for state in states:
+        game_pk = _resolve_market_state_game_pk(state=state, game_pk_lookup=game_pk_lookup)
+        if game_pk is None or int(game_pk) not in normalized_game_pks:
+            continue
+        fingerprint = state.get("full_game_market_fingerprint")
+        if isinstance(fingerprint, str) and fingerprint:
+            fingerprint_state[str(int(game_pk))] = fingerprint
+    sync_state["updated_at"] = datetime.now(UTC).isoformat()
+    _persist_windows_market_sync_state(sync_state_path, sync_state)
+
+
 def _default_odds_fetcher(target_date: date, mode: Mode, db_path: str | Path) -> list[OddsSnapshot]:
     if mode == "prod":
         _prune_live_odds_cache(db_path, anchor_date=target_date)
@@ -1478,31 +1826,90 @@ def _default_odds_fetcher(target_date: date, mode: Mode, db_path: str | Path) ->
             scraper_db_path=SCRAPER_ODDS_DB_PATH,
             repo_db_path=db_path,
         )
-        if scraper_snapshots:
-            return scraper_snapshots
         cached_snapshots = _load_fresh_odds_from_db_for_date(
             db_path,
             target_date,
             max_age=timedelta(minutes=LIVE_ODDS_CACHE_TTL_MINUTES),
         )
-        if cached_snapshots:
-            return cached_snapshots
+        eligible_game_pks = _eligible_f5_refresh_game_pks(
+            target_date=target_date,
+            repo_db_path=db_path,
+            scraper_market_state_path=SCRAPER_MARKET_STATE_PATH,
+            sync_state_path=WINDOWS_MARKET_SYNC_STATE_PATH,
+        )
+        if eligible_game_pks == set():
+            return sorted(
+                [*scraper_snapshots, *cached_snapshots],
+                key=lambda snapshot: (snapshot.game_pk, snapshot.book_name, snapshot.market_type),
+            )
+        cached_by_key = {
+            (
+                int(snapshot.game_pk),
+                str(snapshot.book_name),
+                str(snapshot.market_type),
+                float(snapshot.home_point) if snapshot.home_point is not None else None,
+                float(snapshot.away_point) if snapshot.away_point is not None else None,
+            ): snapshot
+            for snapshot in cached_snapshots
+        }
+        for snapshot in scraper_snapshots:
+            cached_by_key[
+                (
+                    int(snapshot.game_pk),
+                    str(snapshot.book_name),
+                    str(snapshot.market_type),
+                    float(snapshot.home_point) if snapshot.home_point is not None else None,
+                    float(snapshot.away_point) if snapshot.away_point is not None else None,
+                )
+            ] = snapshot
+        if cached_by_key and eligible_game_pks is not None and not eligible_game_pks:
+            return sorted(
+                cached_by_key.values(),
+                key=lambda snapshot: (snapshot.game_pk, snapshot.book_name, snapshot.market_type),
+            )
         start = datetime.combine(target_date, time.min, tzinfo=UTC)
         # MLB official game dates routinely spill past midnight UTC, especially
         # for West Coast starts and overseas openers. Extend the fetch window so
         # same official-date games still pick up live odds.
         end = start + timedelta(days=1, hours=8)
-        return call_with_graceful_degradation(
+        live_snapshots = call_with_graceful_degradation(
             lambda: _retry_with_circuit_breaker(
                 _fetch_live_odds_with_retry,
                 _ODDS_CIRCUIT,
                 db_path=db_path,
                 commence_time_from=start,
                 commence_time_to=end,
+                game_pk_allowlist=eligible_game_pks,
             ),
             operation_name=f"live odds fetch for {target_date.isoformat()}",
             fallback=lambda _exc: _load_odds_from_db_for_date(db_path, target_date),
             logger_=logger,
+        )
+        combined_by_key = dict(cached_by_key)
+        for snapshot in live_snapshots:
+            combined_by_key[
+                (
+                    int(snapshot.game_pk),
+                    str(snapshot.book_name),
+                    str(snapshot.market_type),
+                    float(snapshot.home_point) if snapshot.home_point is not None else None,
+                    float(snapshot.away_point) if snapshot.away_point is not None else None,
+                )
+            ] = snapshot
+        _mark_games_synced_to_fingerprint(
+            target_date=target_date,
+            game_pks={
+                int(snapshot.game_pk)
+                for snapshot in live_snapshots
+                if snapshot.market_type in {"f5_ml", "f5_rl"}
+            },
+            repo_db_path=db_path,
+            scraper_market_state_path=SCRAPER_MARKET_STATE_PATH,
+            sync_state_path=WINDOWS_MARKET_SYNC_STATE_PATH,
+        )
+        return sorted(
+            combined_by_key.values(),
+            key=lambda snapshot: (snapshot.game_pk, snapshot.book_name, snapshot.market_type),
         )
 
     return _load_odds_from_db_for_date(db_path, target_date)
@@ -2065,8 +2472,19 @@ def _load_scraper_full_game_odds_context(
                 "consensus_full_game_home_spread_odds": None,
                 "consensus_full_game_away_spread": None,
                 "consensus_full_game_away_spread_odds": None,
+                "full_game_total": None,
+                "full_game_total_over_odds": None,
+                "full_game_total_under_odds": None,
+                "full_game_total_book": None,
+                "bet365_full_game_total": None,
+                "bet365_full_game_total_over_odds": None,
+                "bet365_full_game_total_under_odds": None,
+                "consensus_full_game_total": None,
+                "consensus_full_game_total_over_odds": None,
+                "consensus_full_game_total_under_odds": None,
                 "full_game_ml_pairs": [],
                 "full_game_rl_pairs": [],
+                "full_game_total_pairs": [],
             },
         )
         if bookmaker not in game_context["full_game_odds_books"]:
@@ -2135,8 +2553,35 @@ def _load_scraper_full_game_odds_context(
         if market_type == "full_game_total":
             over_row = sides.get("over")
             under_row = sides.get("under")
-            if over_row is not None or under_row is not None:
-                game_context["full_game_odds_available"] = True
+            if over_row is None or under_row is None:
+                continue
+            over_price = int(over_row["price"])
+            under_price = int(under_row["price"])
+            total_point = (
+                float(over_row["point"])
+                if over_row["point"] is not None
+                else float(under_row["point"])
+                if under_row["point"] is not None
+                else None
+            )
+            game_context["full_game_odds_available"] = True
+            game_context["full_game_total_pairs"].append(
+                {
+                    "book_name": bookmaker,
+                    "total_point": total_point,
+                    "over_odds": over_price,
+                    "under_odds": under_price,
+                }
+            )
+            if _book_name_key(bookmaker) == "bet365":
+                game_context["bet365_full_game_total"] = total_point
+                game_context["bet365_full_game_total_over_odds"] = over_price
+                game_context["bet365_full_game_total_under_odds"] = under_price
+            if _is_better_price(over_price, game_context["full_game_total_over_odds"]):
+                game_context["full_game_total"] = total_point
+                game_context["full_game_total_over_odds"] = over_price
+                game_context["full_game_total_under_odds"] = under_price
+                game_context["full_game_total_book"] = bookmaker
 
     for game_context in result.values():
         game_context["full_game_odds_books"] = sorted(game_context["full_game_odds_books"])
@@ -2161,6 +2606,17 @@ def _load_scraper_full_game_odds_context(
             )
             game_context["consensus_full_game_away_spread_odds"] = _average_int(
                 [pair["away_odds"] for pair in rl_pairs if pair.get("away_odds") is not None]
+            )
+        total_pairs = list(game_context.get("full_game_total_pairs") or [])
+        if total_pairs:
+            game_context["consensus_full_game_total"] = _average_float(
+                [pair["total_point"] for pair in total_pairs if pair.get("total_point") is not None]
+            )
+            game_context["consensus_full_game_total_over_odds"] = _average_int(
+                [pair["over_odds"] for pair in total_pairs if pair.get("over_odds") is not None]
+            )
+            game_context["consensus_full_game_total_under_odds"] = _average_int(
+                [pair["under_odds"] for pair in total_pairs if pair.get("under_odds") is not None]
             )
     return result
 
@@ -2556,6 +3012,7 @@ def _build_candidate_decisions(
     snapshots: Sequence[OddsSnapshot],
     db_path: str | Path,
     prediction_engine: PredictionEngine | Any,
+    full_game_context: Mapping[str, Any] | None = None,
 ) -> list[BetDecision]:
     if hasattr(prediction_engine, "build_candidate_decisions"):
         return prediction_engine.build_candidate_decisions(
@@ -2563,6 +3020,7 @@ def _build_candidate_decisions(
             prediction=prediction,
             snapshots=snapshots,
             db_path=db_path,
+            full_game_context=full_game_context,
         )
 
     candidates: list[BetDecision] = []
@@ -2693,8 +3151,18 @@ def _is_official_live_candidate(candidate: BetDecision) -> bool:
     ):
         return False
     if candidate.market_type == "f5_ml":
-        return candidate.source_model == "legacy_f5_ml"
-    return candidate.market_type == "f5_rl" and candidate.source_model == "rlv2_direct"
+        return candidate.source_model in {"legacy_f5_ml", "run_count_f5_ml"}
+    if candidate.market_type == "f5_rl":
+        return candidate.source_model in {"rlv2_direct", "run_count_f5_rl"}
+    if candidate.market_type == "f5_total":
+        return candidate.source_model == "run_count_f5_total"
+    if candidate.market_type == "full_game_ml":
+        return candidate.source_model == "run_count_full_game_ml"
+    if candidate.market_type == "full_game_rl":
+        return candidate.source_model == "run_count_full_game_rl"
+    if candidate.market_type == "full_game_total":
+        return candidate.source_model == "run_count_full_game_total"
+    return False
 
 
 def _official_edge_threshold(candidate: BetDecision) -> float:
@@ -2704,7 +3172,7 @@ def _official_edge_threshold(candidate: BetDecision) -> float:
 
 def _official_selection_score(candidate: BetDecision) -> float:
     score = float(candidate.edge_pct)
-    if candidate.market_type == "f5_rl":
+    if candidate.market_type in {"f5_rl", "full_game_rl"}:
         score -= DEFAULT_OFFICIAL_RL_SELECTION_PENALTY
     return score
 

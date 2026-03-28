@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,7 @@ DEFAULT_EDGE_THRESHOLD = float(_SETTINGS_PAYLOAD["thresholds"]["edge_min"])
 
 _AMERICAN_ODDS_ADAPTER = TypeAdapter(AmericanOdds)
 _PROBABILITY_ADAPTER = TypeAdapter(Probability)
+logger = logging.getLogger(__name__)
 
 
 def _ensure_edge_calculations_table(db_path: str | Path) -> Path:
@@ -123,56 +125,66 @@ def _log_edge_calculation(
     edge_threshold: float,
     calculated_at: datetime,
 ) -> None:
-    database_path = _ensure_edge_calculations_table(db_path)
+    if decision.market_type not in {"f5_ml", "f5_rl"}:
+        return
+    if decision.side not in {"home", "away"}:
+        return
+    try:
+        database_path = _ensure_edge_calculations_table(db_path)
 
-    with sqlite3.connect(database_path) as connection:
-        connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute(
-            """
-            INSERT INTO edge_calculations (
-                game_pk,
-                market_type,
-                side,
-                book_name,
-                model_probability,
-                fair_probability,
-                home_implied_probability,
-                away_implied_probability,
-                home_fair_probability,
-                away_fair_probability,
-                edge_pct,
-                ev,
-                edge_threshold,
-                is_positive_ev,
-                odds_at_bet,
-                home_odds,
-                away_odds,
-                calculated_at
+        with sqlite3.connect(database_path) as connection:
+            connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute(
+                """
+                INSERT INTO edge_calculations (
+                    game_pk,
+                    market_type,
+                    side,
+                    book_name,
+                    model_probability,
+                    fair_probability,
+                    home_implied_probability,
+                    away_implied_probability,
+                    home_fair_probability,
+                    away_fair_probability,
+                    edge_pct,
+                    ev,
+                    edge_threshold,
+                    is_positive_ev,
+                    odds_at_bet,
+                    home_odds,
+                    away_odds,
+                    calculated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    decision.game_pk,
+                    decision.market_type,
+                    decision.side,
+                    book_name,
+                    decision.model_probability,
+                    decision.fair_probability,
+                    home_implied_probability,
+                    away_implied_probability,
+                    home_fair_probability,
+                    away_fair_probability,
+                    decision.edge_pct,
+                    decision.ev,
+                    edge_threshold,
+                    int(decision.is_positive_ev),
+                    decision.odds_at_bet,
+                    home_odds,
+                    away_odds,
+                    calculated_at.isoformat(),
+                ),
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                decision.game_pk,
-                decision.market_type,
-                decision.side,
-                book_name,
-                decision.model_probability,
-                decision.fair_probability,
-                home_implied_probability,
-                away_implied_probability,
-                home_fair_probability,
-                away_fair_probability,
-                decision.edge_pct,
-                decision.ev,
-                edge_threshold,
-                int(decision.is_positive_ev),
-                decision.odds_at_bet,
-                home_odds,
-                away_odds,
-                calculated_at.isoformat(),
-            ),
+            connection.commit()
+    except sqlite3.DatabaseError:
+        logger.warning(
+            "Skipping edge_calculations audit logging due to SQLite database error",
+            exc_info=True,
         )
-        connection.commit()
 
 
 def calculate_edge(
@@ -206,7 +218,7 @@ def calculate_edge(
         validated_away_odds,
     )
 
-    if side == "home":
+    if side in {"home", "over"}:
         fair_probability = home_fair_probability
         odds_at_bet = validated_home_odds
         line_at_bet = home_point
