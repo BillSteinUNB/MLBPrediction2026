@@ -2341,7 +2341,16 @@ def _run_validation_retest(
 
 
 def _parse_result_payload(stdout: str) -> dict[str, Any]:
-    return json.loads(stdout)
+    normalized = str(stdout or "").strip()
+    if not normalized:
+        raise ValueError("train.py returned success but produced no stdout payload")
+    try:
+        return json.loads(normalized)
+    except json.JSONDecodeError:
+        json_start = normalized.find("{")
+        if json_start < 0:
+            raise
+        return json.loads(normalized[json_start:])
 
 
 def run_planner_self_check() -> dict[str, Any]:

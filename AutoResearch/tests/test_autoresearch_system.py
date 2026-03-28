@@ -218,6 +218,16 @@ def test_plan_next_experiment_falls_back_when_llm_response_is_invalid(monkeypatc
     assert "fallback" in decision.reasoning.lower()
 
 
+def test_parse_result_payload_tolerates_rich_progress_prefix() -> None:
+    payload = agent._parse_result_payload(
+        "Training full_game_away_runs_model 100% best 2.3525 latest done state complete\n"
+        '{\n  "mode": "fast",\n  "metrics": {"holdout_r2": 0.02}\n}'
+    )
+
+    assert payload["mode"] == "fast"
+    assert payload["metrics"]["holdout_r2"] == 0.02
+
+
 def test_best_fast_experiment_orders_by_holdout_r2_then_cv_rmse(tmp_path: Path) -> None:
     db_path = agent.ensure_experiment_db(tmp_path / "experiments.db")
     first_config = {
