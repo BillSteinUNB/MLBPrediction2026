@@ -126,6 +126,12 @@ def _attach_market_prior_features(
         "market_full_game_total_under_fair_prob",
         "market_full_game_total_over_implied_prob",
         "market_full_game_total_under_implied_prob",
+        "market_full_game_away_team_total_line",
+        "market_full_game_away_team_total_over_fair_prob",
+        "market_full_game_away_team_total_under_fair_prob",
+        "market_full_game_away_team_total_over_implied_prob",
+        "market_full_game_away_team_total_under_implied_prob",
+        "market_full_game_away_team_total_available",
         "market_implied_f5_away_runs",
         "market_implied_full_game_away_runs",
         "market_away_run_share_anchor",
@@ -156,6 +162,12 @@ def _attach_market_prior_features(
         ("market_full_game_total_under_fair_prob", 0.5),
         ("market_full_game_total_over_implied_prob", 0.5),
         ("market_full_game_total_under_implied_prob", 0.5),
+        ("market_full_game_away_team_total_line", DEFAULT_MARKET_AWAY_RUN_BASELINE),
+        ("market_full_game_away_team_total_over_fair_prob", 0.5),
+        ("market_full_game_away_team_total_under_fair_prob", 0.5),
+        ("market_full_game_away_team_total_over_implied_prob", 0.5),
+        ("market_full_game_away_team_total_under_implied_prob", 0.5),
+        ("market_full_game_away_team_total_available", 0.0),
         ("market_implied_f5_away_runs", DEFAULT_MARKET_F5_TOTAL_BASELINE / 2.0),
         ("market_implied_full_game_away_runs", DEFAULT_MARKET_AWAY_RUN_BASELINE),
         ("market_away_run_share_anchor", 0.5),
@@ -212,6 +224,10 @@ def _attach_market_prior_features(
         market_type="full_game_total",
         **market_lookup_kwargs,
     )
+    full_away_team_total_market = load_historical_odds_for_games(
+        market_type="full_game_team_total_away",
+        **market_lookup_kwargs,
+    )
 
     loaded_markets = (
         f5_ml_market,
@@ -220,6 +236,7 @@ def _attach_market_prior_features(
         full_ml_market,
         full_rl_market,
         full_total_market,
+        full_away_team_total_market,
     )
     if all(frame.empty for frame in loaded_markets):
         return feature_columns, MarketPriorMetadata(
@@ -370,6 +387,31 @@ def _attach_market_prior_features(
         merged["market_full_game_total_over_odds"] = np.nan
         merged["market_full_game_total_under_odds"] = np.nan
 
+    if not full_away_team_total_market.empty:
+        full_away_team_total_market = full_away_team_total_market.rename(
+            columns={
+                "total_point": "market_full_game_away_team_total_line",
+                "over_odds": "market_full_game_away_team_total_over_odds",
+                "under_odds": "market_full_game_away_team_total_under_odds",
+            }
+        )
+        merged = merged.merge(
+            full_away_team_total_market[
+                [
+                    "game_pk",
+                    "market_full_game_away_team_total_line",
+                    "market_full_game_away_team_total_over_odds",
+                    "market_full_game_away_team_total_under_odds",
+                ]
+            ],
+            on="game_pk",
+            how="left",
+        )
+    else:
+        merged["market_full_game_away_team_total_line"] = np.nan
+        merged["market_full_game_away_team_total_over_odds"] = np.nan
+        merged["market_full_game_away_team_total_under_odds"] = np.nan
+
     f5_fair_probabilities = merged.apply(_safe_devig_row, axis=1, result_type="expand")
     f5_fair_probabilities.columns = [
         "market_f5_home_fair_prob",
@@ -419,6 +461,20 @@ def _attach_market_prior_features(
         "market_full_game_total_available",
     ]
     merged = pd.concat([merged, full_total_fair_probabilities], axis=1)
+    away_team_total_fair_probabilities = merged.apply(
+        lambda row: _safe_devig_pair(
+            row.get("market_full_game_away_team_total_over_odds"),
+            row.get("market_full_game_away_team_total_under_odds"),
+        ),
+        axis=1,
+        result_type="expand",
+    )
+    away_team_total_fair_probabilities.columns = [
+        "market_full_game_away_team_total_over_fair_prob",
+        "market_full_game_away_team_total_under_fair_prob",
+        "market_full_game_away_team_total_available",
+    ]
+    merged = pd.concat([merged, away_team_total_fair_probabilities], axis=1)
 
     merged["market_f5_home_implied_prob"] = merged["market_f5_home_odds"].map(_american_to_implied_or_default)
     merged["market_f5_away_implied_prob"] = merged["market_f5_away_odds"].map(_american_to_implied_or_default)
@@ -440,6 +496,12 @@ def _attach_market_prior_features(
     merged["market_full_game_total_under_implied_prob"] = merged[
         "market_full_game_total_under_odds"
     ].map(_american_to_implied_or_default)
+    merged["market_full_game_away_team_total_over_implied_prob"] = merged[
+        "market_full_game_away_team_total_over_odds"
+    ].map(_american_to_implied_or_default)
+    merged["market_full_game_away_team_total_under_implied_prob"] = merged[
+        "market_full_game_away_team_total_under_odds"
+    ].map(_american_to_implied_or_default)
     merged["market_f5_rl_home_point"] = pd.to_numeric(merged["market_f5_rl_home_point"], errors="coerce").fillna(0.0)
     merged["market_f5_rl_away_point"] = pd.to_numeric(merged["market_f5_rl_away_point"], errors="coerce").fillna(0.0)
     merged["market_full_game_rl_home_point"] = pd.to_numeric(
@@ -457,6 +519,10 @@ def _attach_market_prior_features(
         merged["market_full_game_total_line"],
         errors="coerce",
     ).fillna(DEFAULT_MARKET_FULL_GAME_TOTAL_BASELINE)
+    merged["market_full_game_away_team_total_line"] = pd.to_numeric(
+        merged["market_full_game_away_team_total_line"],
+        errors="coerce",
+    ).fillna(DEFAULT_MARKET_AWAY_RUN_BASELINE)
     merged["market_priors_available"] = (
         merged[
             [
@@ -464,6 +530,7 @@ def _attach_market_prior_features(
                 "market_full_game_ml_available",
                 "market_f5_total_available",
                 "market_full_game_total_available",
+                "market_full_game_away_team_total_available",
             ]
         ]
         .max(axis=1)
@@ -476,6 +543,7 @@ def _attach_market_prior_features(
         + 0.16 * merged["market_full_game_ml_available"]
         + 0.08 * merged["market_full_game_rl_home_point"].abs().gt(0).astype(float)
         + 0.20 * merged["market_full_game_total_available"]
+        + 0.24 * merged["market_full_game_away_team_total_available"]
     ).clip(0.0, 1.0)
     merged["market_away_run_share_anchor"] = (
         0.50
@@ -491,19 +559,30 @@ def _attach_market_prior_features(
         merged["market_full_game_total_over_fair_prob"]
         - merged["market_full_game_total_under_fair_prob"]
     ).clip(-0.18, 0.18)
+    away_team_total_price_pressure = (
+        merged["market_full_game_away_team_total_over_fair_prob"]
+        - merged["market_full_game_away_team_total_under_fair_prob"]
+    ).clip(-0.18, 0.18)
     merged["market_implied_f5_away_runs"] = (
         merged["market_f5_total_line"] * merged["market_away_run_share_anchor"]
         + ((-merged["market_f5_rl_away_point"]).clip(-1.5, 1.5) * 0.18)
         + (f5_total_price_pressure * 0.60)
     ).clip(0.8, 4.8)
     merged["market_implied_full_game_away_runs"] = np.where(
-        merged["market_full_game_total_available"] > 0.0,
+        merged["market_full_game_away_team_total_available"] > 0.0,
+        (
+            merged["market_full_game_away_team_total_line"]
+            + (away_team_total_price_pressure * 0.60)
+        ),
+        np.where(
+            merged["market_full_game_total_available"] > 0.0,
         (
             merged["market_full_game_total_line"] * merged["market_away_run_share_anchor"]
             + ((-merged["market_full_game_rl_away_point"]).clip(-2.5, 2.5) * 0.24)
             + (full_total_price_pressure * 0.90)
         ),
-        merged["market_implied_f5_away_runs"] * 1.82,
+            merged["market_implied_f5_away_runs"] * 1.82,
+        ),
     ).clip(1.2, 8.6)
     merged["market_run_environment_anchor"] = (
         merged["market_implied_full_game_away_runs"] / DEFAULT_MARKET_AWAY_RUN_BASELINE
@@ -526,10 +605,10 @@ def _attach_market_prior_features(
         ),
         notes=(
             (
-                "Market priors use F5 and full-game totals plus ML/RL when the historical archive contains them."
+                "Market priors use F5 and full-game totals plus ML/RL, and prefer direct away-team totals when present."
             ),
             (
-                "Away-team-total markets are still not present locally; away-run anchors are derived from totals and side markets."
+                "Away-run anchors fall back to derived totals-and-side-market estimates only when direct away-team-total history is unavailable."
             ),
             (
                 f"Historical market book selection: {historical_market_book_name or 'consensus across available books'}."

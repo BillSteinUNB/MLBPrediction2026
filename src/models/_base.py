@@ -38,6 +38,8 @@ MarketType = Literal[
     "full_game_ml",
     "full_game_rl",
     "full_game_total",
+    "full_game_team_total_home",
+    "full_game_team_total_away",
     "f5_ml",
     "f5_rl",
     "f5_total",

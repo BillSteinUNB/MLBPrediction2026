@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-30T06:05:09.332666+00:00",
+  "generated_at": "2026-03-30T07:29:48.508344+00:00",
   "lane_key": "best_distribution_lane",
   "lane_kind": "distribution",
   "artifact_path": "data/models/2026-away-dist-zanb-v1-controlmu-flat-3f-20260330T055143Z/full_game_away_runs_distribution_model_20260330T055544Z_cc10c0f6.metadata.json",
@@ -538,6 +538,9 @@
     "net_units": null,
     "max_drawdown": null,
     "market_anchor_coverage": 0.9897119341563786,
+    "market_type": "full_game_team_total_away",
+    "away_team_total_coverage": 0.0,
+    "away_team_total_closing_coverage": 0.0,
     "full_game_total_coverage": 0.9897119341563786,
     "f5_total_coverage": 0.9897119341563786,
     "full_game_total_closing_coverage": 0.0,
@@ -545,6 +548,14 @@
     "clv_supported": false,
     "clv_basis": "opening_vs_closing",
     "clv_coverage": 0.0,
+    "clv_bet_count": 0,
+    "average_clv": null,
+    "positive_clv_rate": null,
+    "bet_side_counts": {
+      "over": 0,
+      "under": 0
+    },
+    "bet_win_rate": null,
     "historical_market_source": "historical_market_archive_old_scraper",
     "reason": "Historical totals matched the holdout frame, but direct away-team-total prices are still unavailable; promotion betting evidence and per-bet CLV remain blocked."
   },

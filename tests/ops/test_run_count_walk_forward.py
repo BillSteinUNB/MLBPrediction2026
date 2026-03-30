@@ -207,13 +207,14 @@ def _seed_old_scraper_totals_db(frame: pd.DataFrame, db_path: Path) -> Path:
             )
             total_line = 8.5 + (0.5 * (int(row.game_pk) % 2))
             f5_line = 4.5 + (0.5 * (int(row.game_pk) % 2))
+            away_team_total_line = 2.5
             connection.executemany(
                 """
                 INSERT INTO odds (
                     event_id, game_date, commence_time, away_team, home_team, fetched_at,
                     bookmaker, market_type, side, point, price, commence_time_utc, is_opening
                 )
-                VALUES (?, ?, ?, ?, ?, ?, 'DraftKings', ?, ?, ?, ?, ?, 1)
+                VALUES (?, ?, ?, ?, ?, ?, 'DraftKings', ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -228,6 +229,7 @@ def _seed_old_scraper_totals_db(frame: pd.DataFrame, db_path: Path) -> Path:
                         str(total_line),
                         "-110",
                         str(row.scheduled_start),
+                        1,
                     ),
                     (
                         event_id,
@@ -241,6 +243,7 @@ def _seed_old_scraper_totals_db(frame: pd.DataFrame, db_path: Path) -> Path:
                         str(total_line),
                         "-110",
                         str(row.scheduled_start),
+                        1,
                     ),
                     (
                         event_id,
@@ -254,6 +257,7 @@ def _seed_old_scraper_totals_db(frame: pd.DataFrame, db_path: Path) -> Path:
                         str(f5_line),
                         "-110",
                         str(row.scheduled_start),
+                        1,
                     ),
                     (
                         event_id,
@@ -267,6 +271,63 @@ def _seed_old_scraper_totals_db(frame: pd.DataFrame, db_path: Path) -> Path:
                         str(f5_line),
                         "-110",
                         str(row.scheduled_start),
+                        1,
+                    ),
+                    (
+                        event_id,
+                        str(row.game_date),
+                        str(row.scheduled_start),
+                        str(row.away_team),
+                        str(row.home_team),
+                        str(row.as_of_timestamp),
+                        "full_game_team_total_away",
+                        "over",
+                        str(away_team_total_line),
+                        "-110",
+                        str(row.scheduled_start),
+                        1,
+                    ),
+                    (
+                        event_id,
+                        str(row.game_date),
+                        str(row.scheduled_start),
+                        str(row.away_team),
+                        str(row.home_team),
+                        str(row.as_of_timestamp),
+                        "full_game_team_total_away",
+                        "under",
+                        str(away_team_total_line),
+                        "-110",
+                        str(row.scheduled_start),
+                        1,
+                    ),
+                    (
+                        event_id,
+                        str(row.game_date),
+                        str(row.scheduled_start),
+                        str(row.away_team),
+                        str(row.home_team),
+                        str(pd.Timestamp(row.scheduled_start) - timedelta(minutes=30)),
+                        "full_game_team_total_away",
+                        "over",
+                        str(away_team_total_line),
+                        "-130",
+                        str(row.scheduled_start),
+                        0,
+                    ),
+                    (
+                        event_id,
+                        str(row.game_date),
+                        str(row.scheduled_start),
+                        str(row.away_team),
+                        str(row.home_team),
+                        str(pd.Timestamp(row.scheduled_start) - timedelta(minutes=30)),
+                        "full_game_team_total_away",
+                        "under",
+                        str(away_team_total_line),
+                        "+110",
+                        str(row.scheduled_start),
+                        0,
                     ),
                 ],
             )
@@ -351,17 +412,25 @@ def test_stage3_holdout_walk_forward_reports_old_scraper_total_market_coverage(t
         historical_market_book_name="DraftKings",
     )
 
-    assert report["betting_evidence"]["available"] is False
-    assert report["betting_evidence"]["clv_supported"] is False
+    assert report["betting_evidence"]["available"] is True
+    assert report["betting_evidence"]["clv_supported"] is True
     assert report["betting_evidence"]["clv_basis"] == "opening_vs_closing"
     assert report["betting_evidence"]["historical_market_source"] == "historical_market_archive_old_scraper"
+    assert report["betting_evidence"]["away_team_total_coverage"] == 1.0
+    assert report["betting_evidence"]["away_team_total_closing_coverage"] == 1.0
     assert report["betting_evidence"]["full_game_total_coverage"] == 1.0
     assert report["betting_evidence"]["f5_total_coverage"] == 1.0
     assert report["betting_evidence"]["full_game_total_closing_coverage"] == 1.0
     assert report["betting_evidence"]["f5_total_closing_coverage"] == 1.0
+    assert report["betting_evidence"]["bet_count"] > 0
+    assert report["betting_evidence"]["clv_bet_count"] == report["betting_evidence"]["bet_count"]
+    assert report["betting_evidence"]["clv_coverage"] == 1.0
+    assert report["betting_evidence"]["average_clv"] is not None
+    assert report["betting_evidence"]["roi"] is not None
     assert report["proxy_market_decision_evidence"]["available"] is True
     assert report["proxy_market_decision_evidence"]["coverage"] == 1.0
-    assert report["proxy_market_decision_evidence"]["proxy_only"] is True
+    assert report["proxy_market_decision_evidence"]["proxy_only"] is False
+    assert report["proxy_market_decision_evidence"]["market_anchor_type"] == "direct_away_team_total_line"
 
 
 def test_mcmc_holdout_walk_forward_reads_existing_predictions_csv(tmp_path: Path) -> None:

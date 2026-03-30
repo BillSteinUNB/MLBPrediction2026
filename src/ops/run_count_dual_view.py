@@ -404,6 +404,36 @@ def evaluate_walk_forward_check(
     net_units = _first_present_float(betting_payload, ("net_units", "walk_forward_net_units"))
     max_drawdown = _first_present_float(betting_payload, ("max_drawdown", "walk_forward_max_drawdown"))
     bet_count = _first_present_float(betting_payload, ("bet_count", "walk_forward_bet_count"))
+    clv_supported = betting_payload.get("clv_supported")
+
+    if bet_count is not None and bet_count <= 0:
+        return {
+            "available": True,
+            "passed": False,
+            "reason": "Walk-forward report matched markets, but no qualifying bets were generated.",
+            "details": {
+                "roi": roi,
+                "net_units": net_units,
+                "max_drawdown": max_drawdown,
+                "bet_count": bet_count,
+            },
+        }
+    if clv_supported is False:
+        return {
+            "available": True,
+            "passed": False,
+            "reason": str(
+                betting_payload.get("reason")
+                or "Walk-forward report matched the target market, but closing-line validation is unavailable."
+            ),
+            "details": {
+                "roi": roi,
+                "net_units": net_units,
+                "max_drawdown": max_drawdown,
+                "bet_count": bet_count,
+                "clv_supported": False,
+            },
+        }
 
     neutral_or_better = (roi is not None and roi >= 0.0) or (net_units is not None and net_units >= 0.0)
     not_alarming_drawdown = max_drawdown is None or max_drawdown >= -0.25

@@ -5,6 +5,7 @@ import json
 from src.ops.run_count_dual_view import (
     build_dual_view_payload,
     build_pairwise_disagreement,
+    evaluate_walk_forward_check,
     evaluate_research_lane_promotion,
     load_dual_view_inputs,
     resolve_stage5_inputs,
@@ -219,6 +220,23 @@ def test_stage3_promotion_reads_lane_specific_walk_forward_betting_blocker() -> 
     assert result["second_opinion_promoted"] is True
     assert result["production_promotable"] is False
     assert result["checks"]["neutral_walk_forward_betting_if_available"]["available"] is False
+
+
+def test_walk_forward_check_blocks_zero_bet_reports_even_when_markets_exist() -> None:
+    result = evaluate_walk_forward_check(
+        {
+            "betting_evidence": {
+                "available": True,
+                "bet_count": 0,
+                "clv_supported": False,
+                "reason": "Matched direct away-team-total markets, but no qualifying bets were generated.",
+            },
+        }
+    )
+
+    assert result["available"] is True
+    assert result["passed"] is False
+    assert "no qualifying bets" in result["reason"].lower()
 
 
 def test_stage5_input_resolution_loads_lane_specific_walk_forward_reports(tmp_path) -> None:

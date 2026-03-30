@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 DEFAULT_DB_PATH = Path("data") / "mlb.db"
 BUILDER_SQLITE_CACHE_SIZE_KB = 64_000
 
@@ -83,7 +83,18 @@ SCHEMA_STATEMENTS = (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         game_pk INTEGER NOT NULL,
         book_name TEXT NOT NULL,
-        market_type TEXT NOT NULL CHECK (market_type IN ('f5_ml', 'f5_rl')),
+        market_type TEXT NOT NULL CHECK (
+            market_type IN (
+                'f5_ml',
+                'f5_rl',
+                'f5_total',
+                'full_game_ml',
+                'full_game_rl',
+                'full_game_total',
+                'full_game_team_total_home',
+                'full_game_team_total_away'
+            )
+        ),
         home_odds INTEGER NOT NULL,
         away_odds INTEGER NOT NULL,
         home_point REAL,
@@ -222,6 +233,7 @@ def _column_exists(connection: sqlite3.Connection, table_name: str, column_name:
 
 
 def _apply_migrations(connection: sqlite3.Connection) -> None:
+    _refresh_odds_snapshots_market_type_constraint(connection)
     if _table_exists(connection, "bet_performance") and not _column_exists(
         connection,
         "bet_performance",
@@ -242,6 +254,90 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
         "away_point",
     ):
         connection.execute("ALTER TABLE odds_snapshots ADD COLUMN away_point REAL")
+
+
+def _refresh_odds_snapshots_market_type_constraint(connection: sqlite3.Connection) -> None:
+    if not _table_exists(connection, "odds_snapshots"):
+        return
+    row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'odds_snapshots'"
+    ).fetchone()
+    create_sql = str(row[0]) if row and row[0] is not None else ""
+    required_market_types = (
+        "f5_total",
+        "full_game_ml",
+        "full_game_rl",
+        "full_game_total",
+        "full_game_team_total_home",
+        "full_game_team_total_away",
+    )
+    if all(token in create_sql for token in required_market_types):
+        return
+
+    connection.execute("ALTER TABLE odds_snapshots RENAME TO odds_snapshots_legacy")
+    connection.execute(
+        """
+        CREATE TABLE odds_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_pk INTEGER NOT NULL,
+            book_name TEXT NOT NULL,
+            market_type TEXT NOT NULL CHECK (
+                market_type IN (
+                    'f5_ml',
+                    'f5_rl',
+                    'f5_total',
+                    'full_game_ml',
+                    'full_game_rl',
+                    'full_game_total',
+                    'full_game_team_total_home',
+                    'full_game_team_total_away'
+                )
+            ),
+            home_odds INTEGER NOT NULL,
+            away_odds INTEGER NOT NULL,
+            home_point REAL,
+            away_point REAL,
+            fetched_at TEXT NOT NULL,
+            is_frozen INTEGER NOT NULL DEFAULT 0 CHECK (is_frozen IN (0, 1)),
+            FOREIGN KEY (game_pk) REFERENCES games (game_pk)
+        )
+        """
+    )
+    legacy_columns = {
+        row_info[1]
+        for row_info in connection.execute("PRAGMA table_info(odds_snapshots_legacy)").fetchall()
+    }
+    select_home_point = "home_point" if "home_point" in legacy_columns else "NULL"
+    select_away_point = "away_point" if "away_point" in legacy_columns else "NULL"
+    connection.execute(
+        f"""
+        INSERT INTO odds_snapshots (
+            id,
+            game_pk,
+            book_name,
+            market_type,
+            home_odds,
+            away_odds,
+            home_point,
+            away_point,
+            fetched_at,
+            is_frozen
+        )
+        SELECT
+            id,
+            game_pk,
+            book_name,
+            market_type,
+            home_odds,
+            away_odds,
+            {select_home_point},
+            {select_away_point},
+            fetched_at,
+            is_frozen
+        FROM odds_snapshots_legacy
+        """
+    )
+    connection.execute("DROP TABLE odds_snapshots_legacy")
 
 
 def _patch_data_builder_team_platoon_splits_fetcher() -> None:

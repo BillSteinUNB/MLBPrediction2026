@@ -12,6 +12,8 @@ import numpy as np
 import pandas as pd
 
 from src.clients.historical_odds_client import load_historical_odds_for_games
+from src.clients.odds_client import american_to_implied
+from src.engine.edge_calculator import DEFAULT_EDGE_THRESHOLD, calculate_edge, payout_for_american_odds
 from src.model.data_builder import validate_run_count_training_data
 from src.model.run_count_trainer import _prepare_run_count_frame
 from src.model.run_distribution_metrics import summarize_distribution_metrics
@@ -26,6 +28,7 @@ from src.model.xgboost_trainer import _load_training_dataframe
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RUN_COUNT_WALK_FORWARD_DIR = Path("data/reports/run_count/walk_forward")
 DEFAULT_TARGET_COLUMN = "final_away_score"
+DEFAULT_WALK_FORWARD_BANKROLL_UNITS = 100.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,6 +243,9 @@ def _build_report_payload(
     aggregate_metrics = summarize_distribution_metrics(actual, pmf_matrix, support)
     betting_evidence = _build_betting_evidence(
         holdout_frame=holdout_frame,
+        actual=actual,
+        pmf_matrix=pmf_matrix,
+        support=support,
         market_anchor_coverage=market_anchor_coverage,
         historical_odds_db_path=historical_odds_db_path,
         historical_market_book_name=historical_market_book_name,
@@ -279,6 +285,9 @@ def _build_report_payload(
 def _build_betting_evidence(
     *,
     holdout_frame: pd.DataFrame,
+    actual: np.ndarray,
+    pmf_matrix: np.ndarray,
+    support: np.ndarray,
     market_anchor_coverage: float,
     historical_odds_db_path: str | Path | None,
     historical_market_book_name: str | None,
@@ -291,6 +300,9 @@ def _build_betting_evidence(
         "net_units": None,
         "max_drawdown": None,
         "market_anchor_coverage": float(market_anchor_coverage),
+        "market_type": "full_game_team_total_away",
+        "away_team_total_coverage": 0.0,
+        "away_team_total_closing_coverage": 0.0,
         "full_game_total_coverage": 0.0,
         "f5_total_coverage": 0.0,
         "full_game_total_closing_coverage": 0.0,
@@ -298,12 +310,31 @@ def _build_betting_evidence(
         "clv_supported": False,
         "clv_basis": None,
         "clv_coverage": 0.0,
+        "clv_bet_count": 0,
+        "average_clv": None,
+        "positive_clv_rate": None,
+        "bet_side_counts": {"over": 0, "under": 0},
+        "bet_win_rate": None,
         "historical_market_source": None,
         "reason": "Historical away-run totals or away team totals are not available in the current repo-local data.",
     }
     if historical_odds_db_path is None or holdout_frame.empty:
         return default_payload
 
+    opening_away_team_totals = load_historical_odds_for_games(
+        db_path=historical_odds_db_path,
+        games_frame=holdout_frame,
+        market_type="full_game_team_total_away",
+        book_name=historical_market_book_name,
+        snapshot_selection="opening",
+    )
+    closing_away_team_totals = load_historical_odds_for_games(
+        db_path=historical_odds_db_path,
+        games_frame=holdout_frame,
+        market_type="full_game_team_total_away",
+        book_name=historical_market_book_name,
+        snapshot_selection="latest",
+    )
     full_game_totals = load_historical_odds_for_games(
         db_path=historical_odds_db_path,
         games_frame=holdout_frame,
@@ -332,20 +363,32 @@ def _build_betting_evidence(
         book_name=historical_market_book_name,
         snapshot_selection="latest",
     )
-    if full_game_totals.empty and f5_totals.empty:
-        default_payload["reason"] = "Historical market archive was supplied but no total-market rows matched the holdout frame."
+    if opening_away_team_totals.empty and full_game_totals.empty and f5_totals.empty:
+        default_payload["reason"] = (
+            "Historical market archive was supplied but no away-team-total or companion total-market rows matched the holdout frame."
+        )
         return default_payload
 
     denominator = max(1, len(holdout_frame))
     source_schemas = sorted(
         {
             str(frame["source_schema"].iloc[0])
-            for frame in (full_game_totals, f5_totals)
+            for frame in (opening_away_team_totals, closing_away_team_totals, full_game_totals, f5_totals)
             if not frame.empty and "source_schema" in frame.columns
         }
     )
-    return {
+    payload = {
         **default_payload,
+        "away_team_total_coverage": float(
+            len(opening_away_team_totals["game_pk"].unique()) / denominator
+            if "game_pk" in opening_away_team_totals.columns
+            else 0.0
+        ),
+        "away_team_total_closing_coverage": float(
+            len(closing_away_team_totals["game_pk"].unique()) / denominator
+            if "game_pk" in closing_away_team_totals.columns
+            else 0.0
+        ),
         "full_game_total_coverage": float(
             len(full_game_totals["game_pk"].unique()) / denominator if "game_pk" in full_game_totals.columns else 0.0
         ),
@@ -364,9 +407,23 @@ def _build_betting_evidence(
         ),
         "clv_basis": "opening_vs_closing",
         "historical_market_source": _market_source_name_from_schemas(source_schemas),
-        "reason": (
+    }
+    if opening_away_team_totals.empty:
+        payload["reason"] = (
             "Historical totals matched the holdout frame, but direct away-team-total prices are still unavailable; "
             "promotion betting evidence and per-bet CLV remain blocked."
+        )
+        return payload
+    return {
+        **payload,
+        **_summarize_away_team_total_bets(
+            holdout_frame=holdout_frame,
+            actual=actual,
+            pmf_matrix=pmf_matrix,
+            support=support,
+            opening_market=opening_away_team_totals,
+            closing_market=closing_away_team_totals,
+            historical_market_book_name=historical_market_book_name,
         ),
     }
 
@@ -441,11 +498,25 @@ def _build_proxy_market_decision_evidence(
         }
 
     high_gap_mask = available_mask & (np.abs(model_gap) >= 0.75)
+    direct_away_team_total_available = (
+        "market_full_game_away_team_total_available" in holdout_frame.columns
+        and pd.to_numeric(
+            holdout_frame["market_full_game_away_team_total_available"],
+            errors="coerce",
+        )
+        .fillna(0.0)
+        .gt(0.5)
+        .any()
+    )
     return {
         "available": True,
-        "proxy_only": True,
+        "proxy_only": not direct_away_team_total_available,
         "coverage": coverage,
-        "market_anchor_type": "derived_away_runs_from_full_game_total_and_side_markets",
+        "market_anchor_type": (
+            "direct_away_team_total_line"
+            if direct_away_team_total_available
+            else "derived_away_runs_from_full_game_total_and_side_markets"
+        ),
         "mean_model_minus_market": float(np.mean(model_gap[available_mask])),
         "mean_abs_model_minus_market": float(np.mean(np.abs(model_gap[available_mask]))),
         "mean_actual_minus_market": float(np.mean(actual_gap[available_mask])),
@@ -456,7 +527,9 @@ def _build_proxy_market_decision_evidence(
         ),
         "threshold_summaries": threshold_summaries,
         "reason": (
-            "This is proxy decision evidence against the derived away-run anchor. Direct away-team-total pricing is still missing."
+            "This is proxy decision evidence against the direct away-team-total anchor."
+            if direct_away_team_total_available
+            else "This is proxy decision evidence against the derived away-run anchor. Direct away-team-total pricing is still missing."
         ),
     }
 
@@ -532,6 +605,234 @@ def _build_operational_diagnostics(
         "std": float(np.std(mean_predictions)),
     }
     return diagnostics
+
+
+def _summarize_away_team_total_bets(
+    *,
+    holdout_frame: pd.DataFrame,
+    actual: np.ndarray,
+    pmf_matrix: np.ndarray,
+    support: np.ndarray,
+    opening_market: pd.DataFrame,
+    closing_market: pd.DataFrame,
+    historical_market_book_name: str | None,
+) -> dict[str, Any]:
+    holdout = holdout_frame.reset_index(drop=True).copy()
+    holdout["row_index"] = np.arange(len(holdout), dtype=int)
+    opening = opening_market.rename(
+        columns={
+            "book_name": "opening_book_name",
+            "total_point": "opening_line",
+            "over_odds": "opening_over_odds",
+            "under_odds": "opening_under_odds",
+        }
+    )
+    closing = closing_market.rename(
+        columns={
+            "book_name": "closing_book_name",
+            "total_point": "closing_line",
+            "over_odds": "closing_over_odds",
+            "under_odds": "closing_under_odds",
+        }
+    )
+    merged = holdout.merge(
+        opening[
+            [
+                "game_pk",
+                "opening_book_name",
+                "opening_line",
+                "opening_over_odds",
+                "opening_under_odds",
+            ]
+        ],
+        on="game_pk",
+        how="inner",
+    )
+    if merged.empty:
+        return {
+            "available": False,
+            "clv_supported": False,
+            "reason": "Direct away-team-total rows were found historically, but none matched the holdout rows during scoring.",
+        }
+    merged = merged.merge(
+        closing[
+            [
+                "game_pk",
+                "closing_book_name",
+                "closing_line",
+                "closing_over_odds",
+                "closing_under_odds",
+            ]
+        ],
+        on="game_pk",
+        how="left",
+    )
+
+    bets: list[dict[str, Any]] = []
+    for row in merged.itertuples(index=False):
+        line = _safe_float(row.opening_line)
+        over_odds = _safe_int(row.opening_over_odds)
+        under_odds = _safe_int(row.opening_under_odds)
+        if line is None or over_odds is None or under_odds is None:
+            continue
+
+        row_index = int(row.row_index)
+        over_decision = calculate_edge(
+            game_pk=int(row.game_pk),
+            market_type="full_game_team_total_away",
+            side="over",
+            model_probability=_total_side_model_probability(
+                pmf_row=pmf_matrix[row_index],
+                support=support,
+                line=line,
+                side="over",
+            ),
+            home_odds=over_odds,
+            away_odds=under_odds,
+            home_point=line,
+            away_point=line,
+            book_name=str(row.opening_book_name or historical_market_book_name or "historical"),
+        )
+        under_decision = calculate_edge(
+            game_pk=int(row.game_pk),
+            market_type="full_game_team_total_away",
+            side="under",
+            model_probability=_total_side_model_probability(
+                pmf_row=pmf_matrix[row_index],
+                support=support,
+                line=line,
+                side="under",
+            ),
+            home_odds=over_odds,
+            away_odds=under_odds,
+            home_point=line,
+            away_point=line,
+            book_name=str(row.opening_book_name or historical_market_book_name or "historical"),
+        )
+        candidate = max((over_decision, under_decision), key=lambda decision: float(decision.edge_pct))
+        if not candidate.is_positive_ev:
+            continue
+
+        result = _settle_total_side(
+            actual_runs=int(actual[row_index]),
+            line=line,
+            side=str(candidate.side),
+        )
+        opening_implied_probability = float(american_to_implied(int(candidate.odds_at_bet)))
+        closing_odds = _closing_odds_for_side(
+            closing_over_odds=row.closing_over_odds,
+            closing_under_odds=row.closing_under_odds,
+            side=str(candidate.side),
+        )
+        bets.append(
+            {
+                "game_pk": int(row.game_pk),
+                "scheduled_start": row.scheduled_start if hasattr(row, "scheduled_start") else row.game_date,
+                "side": str(candidate.side),
+                "edge_pct": float(candidate.edge_pct),
+                "profit_units": _profit_units_for_total_bet(result=result, odds=int(candidate.odds_at_bet)),
+                "result": result,
+                "clv": (
+                    float(american_to_implied(int(closing_odds)) - opening_implied_probability)
+                    if closing_odds is not None
+                    else None
+                ),
+            }
+        )
+
+    if not bets:
+        return {
+            "available": True,
+            "bet_count": 0,
+            "roi": None,
+            "net_units": 0.0,
+            "max_drawdown": 0.0,
+            "clv_supported": False,
+            "clv_coverage": 0.0,
+            "clv_bet_count": 0,
+            "average_clv": None,
+            "positive_clv_rate": None,
+            "bet_side_counts": {"over": 0, "under": 0},
+            "bet_win_rate": None,
+            "reason": (
+                f"Direct away-team-total opening markets matched the holdout, but no side cleared the "
+                f"{DEFAULT_EDGE_THRESHOLD:.2%} edge threshold."
+            ),
+        }
+
+    bets_frame = pd.DataFrame(bets).sort_values(["scheduled_start", "game_pk"]).reset_index(drop=True)
+    bankroll = DEFAULT_WALK_FORWARD_BANKROLL_UNITS + bets_frame["profit_units"].cumsum()
+    peak_bankroll = bankroll.cummax()
+    drawdown = ((bankroll - peak_bankroll) / peak_bankroll).fillna(0.0)
+    clv_mask = bets_frame["clv"].notna()
+    bet_count = int(len(bets_frame))
+    net_units = float(bets_frame["profit_units"].sum())
+    return {
+        "available": True,
+        "bet_count": bet_count,
+        "roi": float(net_units / bet_count) if bet_count else None,
+        "net_units": net_units,
+        "max_drawdown": float(drawdown.min()) if not drawdown.empty else 0.0,
+        "clv_supported": bool(clv_mask.any()),
+        "clv_coverage": float(clv_mask.mean()) if bet_count else 0.0,
+        "clv_bet_count": int(clv_mask.sum()),
+        "average_clv": float(bets_frame.loc[clv_mask, "clv"].mean()) if clv_mask.any() else None,
+        "positive_clv_rate": float((bets_frame.loc[clv_mask, "clv"] > 0.0).mean()) if clv_mask.any() else None,
+        "bet_side_counts": {
+            "over": int((bets_frame["side"] == "over").sum()),
+            "under": int((bets_frame["side"] == "under").sum()),
+        },
+        "bet_win_rate": float((bets_frame["result"] == "WIN").mean()),
+        "reason": "Walk-forward betting evidence uses direct away-team-total opening prices and same-market closing CLV.",
+    }
+
+
+def _total_side_model_probability(
+    *,
+    pmf_row: np.ndarray,
+    support: np.ndarray,
+    line: float,
+    side: str,
+) -> float:
+    if side == "over":
+        return float(pmf_row[support > float(line)].sum())
+    if side == "under":
+        return float(pmf_row[support < float(line)].sum())
+    raise ValueError(f"Unsupported total side: {side}")
+
+
+def _settle_total_side(*, actual_runs: int, line: float, side: str) -> str:
+    if side == "over":
+        if actual_runs > line:
+            return "WIN"
+        if actual_runs < line:
+            return "LOSS"
+        return "PUSH"
+    if side == "under":
+        if actual_runs < line:
+            return "WIN"
+        if actual_runs > line:
+            return "LOSS"
+        return "PUSH"
+    raise ValueError(f"Unsupported total side: {side}")
+
+
+def _profit_units_for_total_bet(*, result: str, odds: int) -> float:
+    if result == "WIN":
+        return float(payout_for_american_odds(odds))
+    if result == "LOSS":
+        return -1.0
+    return 0.0
+
+
+def _closing_odds_for_side(
+    *,
+    closing_over_odds: Any,
+    closing_under_odds: Any,
+    side: str,
+) -> int | None:
+    value = closing_over_odds if side == "over" else closing_under_odds
+    return _safe_int(value)
 
 
 def _write_report(
@@ -621,6 +922,17 @@ def _market_source_name_from_schemas(source_schemas: Sequence[str]) -> str | Non
     if resolved == ("old_scraper",):
         return "historical_market_archive_old_scraper"
     return "historical_market_archive_hybrid"
+
+
+def _safe_float(value: Any) -> float | None:
+    if value is None or bool(pd.isna(value)):
+        return None
+    return float(value)
+
+
+def _safe_int(value: Any) -> int | None:
+    resolved = _safe_float(value)
+    return None if resolved is None else int(resolved)
 
 
 __all__ = [

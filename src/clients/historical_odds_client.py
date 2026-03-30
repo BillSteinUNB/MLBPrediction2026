@@ -42,6 +42,9 @@ _COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
     "fetched_at": ("fetched_at", "snapshot_time", "captured_at"),
     "home_point": ("home_point", "home_spread", "point_home", "spread_home"),
     "away_point": ("away_point", "away_spread", "point_away", "spread_away"),
+    "total_point": ("total_point", "point", "line", "total", "team_total"),
+    "over_odds": ("over_odds", "odds_over", "price_over"),
+    "under_odds": ("under_odds", "odds_under", "price_under"),
 }
 
 _MARKET_ALIASES = {
@@ -66,6 +69,18 @@ _MARKET_ALIASES = {
     "full_game_total": "full_game_total",
     "full game total": "full_game_total",
     "totals_full": "full_game_total",
+    "full_game_team_total_home": "full_game_team_total_home",
+    "full game team total home": "full_game_team_total_home",
+    "home team total": "full_game_team_total_home",
+    "home team total full game": "full_game_team_total_home",
+    "team_total_home": "full_game_team_total_home",
+    "home_total": "full_game_team_total_home",
+    "full_game_team_total_away": "full_game_team_total_away",
+    "full game team total away": "full_game_team_total_away",
+    "away team total": "full_game_team_total_away",
+    "away team total full game": "full_game_team_total_away",
+    "team_total_away": "full_game_team_total_away",
+    "away_total": "full_game_team_total_away",
 }
 _TEAM_CODE_ALIASES = {
     "AZ": "ARI",
@@ -136,6 +151,8 @@ MarketTypeLiteral = Literal[
     "full_game_ml",
     "full_game_rl",
     "full_game_total",
+    "full_game_team_total_home",
+    "full_game_team_total_away",
 ]
 SnapshotSelectionLiteral = Literal["latest", "opening"]
 
@@ -160,6 +177,8 @@ def import_historical_odds(
     away_team_column = _resolve_column(frame, "away_team")
     home_odds_column = _resolve_column(frame, "home_odds")
     away_odds_column = _resolve_column(frame, "away_odds")
+    over_odds_column = _resolve_column(frame, "over_odds")
+    under_odds_column = _resolve_column(frame, "under_odds")
     has_required_game_lookup_columns = None not in (
         commence_column,
         home_team_column,
@@ -169,14 +188,12 @@ def import_historical_odds(
         raise ValueError(
             "Historical odds file must include game_pk or all of commence_time, home_team, and away_team"
         )
-    if None in (home_odds_column, away_odds_column):
-        raise ValueError("Historical odds file is missing one or more required odds columns")
-
     market_type_column = _resolve_column(frame, "market_type")
     book_name_column = _resolve_column(frame, "book_name")
     fetched_at_column = _resolve_column(frame, "fetched_at")
     home_point_column = _resolve_column(frame, "home_point")
     away_point_column = _resolve_column(frame, "away_point")
+    total_point_column = _resolve_column(frame, "total_point")
 
     database_path = init_db(db_path)
     snapshots: list[OddsSnapshot] = []
@@ -208,8 +225,39 @@ def import_historical_odds(
                 row.get(market_type_column),
                 default_market_type=default_market_type,
             )
-            home_odds = int(row[home_odds_column])
-            away_odds = int(row[away_odds_column])
+            if _is_total_market_type(market_type):
+                resolved_over_odds_column = over_odds_column or home_odds_column
+                resolved_under_odds_column = under_odds_column or away_odds_column
+                if resolved_over_odds_column is None or resolved_under_odds_column is None:
+                    raise ValueError("Historical total-odds file is missing one or more required over/under odds columns")
+                home_odds = int(row[resolved_over_odds_column])
+                away_odds = int(row[resolved_under_odds_column])
+                total_point = _coerce_nullable_float(
+                    row.get(total_point_column)
+                    if total_point_column is not None
+                    else row.get(home_point_column)
+                    if home_point_column is not None
+                    else row.get(away_point_column)
+                    if away_point_column is not None
+                    else None
+                )
+                home_point = total_point
+                away_point = total_point
+            else:
+                if home_odds_column is None or away_odds_column is None:
+                    raise ValueError("Historical odds file is missing one or more required home/away odds columns")
+                home_odds = int(row[home_odds_column])
+                away_odds = int(row[away_odds_column])
+                home_point = (
+                    _coerce_nullable_float(row.get(home_point_column))
+                    if home_point_column is not None
+                    else None
+                )
+                away_point = (
+                    _coerce_nullable_float(row.get(away_point_column))
+                    if away_point_column is not None
+                    else None
+                )
             if abs(home_odds) > int(max_abs_odds) or abs(away_odds) > int(max_abs_odds):
                 continue
             fetched_at_value = row.get(fetched_at_column) if fetched_at_column else None
@@ -235,12 +283,8 @@ def import_historical_odds(
                     market_type=market_type,
                     home_odds=home_odds,
                     away_odds=away_odds,
-                    home_point=_coerce_nullable_float(row.get(home_point_column))
-                    if home_point_column is not None
-                    else None,
-                    away_point=_coerce_nullable_float(row.get(away_point_column))
-                    if away_point_column is not None
-                    else None,
+                    home_point=home_point,
+                    away_point=away_point,
                     fetched_at=fetched_at,
                     is_frozen=True,
                 )
@@ -376,9 +420,21 @@ def _load_canonical_historical_odds_for_games(
     frame = frame.sort_values(["game_pk", "fetched_at"], ascending=[True, ascending])
     frame = frame.drop_duplicates(subset=["game_pk"], keep="first").copy()
     frame = frame.drop(columns=["scheduled_start", "pregame_cutoff"], errors="ignore")
-    frame["total_point"] = pd.Series(np.nan, index=frame.index, dtype=float)
-    frame["over_odds"] = pd.Series(np.nan, index=frame.index, dtype=float)
-    frame["under_odds"] = pd.Series(np.nan, index=frame.index, dtype=float)
+    if _is_total_market_type(_coerce_market_type_literal(market_type)):
+        frame["total_point"] = pd.to_numeric(frame["home_point"], errors="coerce").where(
+            pd.to_numeric(frame["home_point"], errors="coerce").notna(),
+            pd.to_numeric(frame["away_point"], errors="coerce"),
+        )
+        frame["over_odds"] = pd.to_numeric(frame["home_odds"], errors="coerce")
+        frame["under_odds"] = pd.to_numeric(frame["away_odds"], errors="coerce")
+        frame["home_odds"] = pd.Series(np.nan, index=frame.index, dtype=float)
+        frame["away_odds"] = pd.Series(np.nan, index=frame.index, dtype=float)
+        frame["home_point"] = pd.Series(np.nan, index=frame.index, dtype=float)
+        frame["away_point"] = pd.Series(np.nan, index=frame.index, dtype=float)
+    else:
+        frame["total_point"] = pd.Series(np.nan, index=frame.index, dtype=float)
+        frame["over_odds"] = pd.Series(np.nan, index=frame.index, dtype=float)
+        frame["under_odds"] = pd.Series(np.nan, index=frame.index, dtype=float)
     frame["source_schema"] = "canonical"
     return frame
 
@@ -529,7 +585,20 @@ def _coerce_market_type_literal(value: str) -> MarketTypeLiteral:
         return "full_game_rl"
     if value == "full_game_total":
         return "full_game_total"
+    if value == "full_game_team_total_home":
+        return "full_game_team_total_home"
+    if value == "full_game_team_total_away":
+        return "full_game_team_total_away"
     raise ValueError(f"Unsupported market type: {value}")
+
+
+def _is_total_market_type(value: str | MarketTypeLiteral) -> bool:
+    return str(value) in {
+        "f5_total",
+        "full_game_total",
+        "full_game_team_total_home",
+        "full_game_team_total_away",
+    }
 
 
 def _has_scalar_value(value: Any) -> bool:
