@@ -31,10 +31,15 @@ from src.model.run_distribution_metrics import (
     summarize_distribution_metrics,
     zero_adjusted_negative_binomial_pmf_matrix,
 )
+from src.model.run_research_features import (
+    augment_run_research_features,
+    metadata_to_dict as research_metadata_to_dict,
+)
 from src.model.run_count_trainer import (
     DEFAULT_RUN_COUNT_FEATURE_SELECTION_MODE,
     DEFAULT_RUN_COUNT_FORCED_DELTA_FEATURE_COUNT,
     DEFAULT_RUN_COUNT_MAX_FEATURE_COUNT,
+    RunCountFeatureSelectionResult,
     _compute_holdout_metrics,
     _prepare_run_count_frame,
     _resolve_run_count_candidate_feature_columns,
@@ -73,6 +78,24 @@ DEFAULT_HEAD_PARAM_OVERRIDES: dict[str, float | int] = {
     "reg_alpha": 0.0,
     "reg_lambda": 1.0,
 }
+MU_DELTA_MODE_OFF = "off"
+MU_DELTA_MODE_GAP_ONLY = "gap_only"
+MU_DELTA_MODE_GAP_LINEAR = "gap_linear"
+MU_DELTA_MODE_ANCHOR_BUNDLE = "anchor_bundle"
+MU_DELTA_MODES = (
+    MU_DELTA_MODE_OFF,
+    MU_DELTA_MODE_GAP_ONLY,
+    MU_DELTA_MODE_GAP_LINEAR,
+    MU_DELTA_MODE_ANCHOR_BUNDLE,
+)
+MU_DELTA_GAP_ONLY_FEATURE_COLUMNS = ("market_implied_minus_control_mu",)
+MU_DELTA_ANCHOR_BUNDLE_FEATURE_COLUMNS = (
+    "market_implied_minus_control_mu",
+    "market_anchor_confidence",
+    "market_run_environment_anchor",
+    "market_full_game_total_over_fair_prob",
+    "market_full_game_total_under_fair_prob",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,12 +121,69 @@ class ConstantProbabilityClassifier:
 
 
 @dataclass(frozen=True, slots=True)
+class LinearGapDeltaRegressor:
+    feature_column: str
+    slope: float
+
+    def predict(self, dataframe: pd.DataFrame) -> np.ndarray:
+        if self.feature_column not in dataframe.columns:
+            return np.zeros(len(dataframe), dtype=float)
+        gap = pd.to_numeric(dataframe[self.feature_column], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        return float(self.slope) * gap
+
+
+@dataclass(frozen=True, slots=True)
 class MeanHeadReference:
     estimator: Any
     metadata: dict[str, Any]
     metadata_path: Path
     model_path: Path
     feature_columns: list[str]
+
+
+@dataclass(frozen=True, slots=True)
+class ResearchAdjustedMeanEstimator:
+    base_estimator: Any
+    base_feature_columns: list[str]
+    delta_estimator: Any
+    delta_feature_columns: list[str]
+    delta_blend_weight: float
+    market_confidence_floor: float = 0.25
+    max_delta_fraction: float = 0.35
+    max_delta_abs: float = 1.5
+
+    def predict_control_mean(self, dataframe: pd.DataFrame) -> np.ndarray:
+        return clip_mean_predictions(
+            np.asarray(
+                self.base_estimator.predict(dataframe.loc[:, self.base_feature_columns]),
+                dtype=float,
+            )
+        )
+
+    def predict(self, dataframe: pd.DataFrame) -> np.ndarray:
+        control_mean = self.predict_control_mean(dataframe)
+        if not self.delta_feature_columns:
+            return control_mean
+        feature_frame = _prepare_mu_delta_feature_frame(
+            dataframe,
+            feature_columns=self.delta_feature_columns,
+            control_mean=control_mean,
+        )
+        raw_delta = _predict_regression_values(
+            self.delta_estimator,
+            feature_frame,
+            fallback_value=0.0,
+        )
+        adjusted_mean, _ = _apply_mu_delta(
+            control_mean=control_mean,
+            raw_delta_predictions=raw_delta,
+            blend_weight=float(self.delta_blend_weight),
+            market_anchor_confidence=_extract_market_anchor_confidence(feature_frame),
+            confidence_floor=float(self.market_confidence_floor),
+            max_delta_fraction=float(self.max_delta_fraction),
+            max_delta_abs=float(self.max_delta_abs),
+        )
+        return adjusted_mean
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,15 +200,28 @@ class RunDistributionModel:
     zero_blend_weight: float
     distribution_family: str = DEFAULT_DISTRIBUTION_FAMILY_NAME
 
-    def predict_mean(self, dataframe: pd.DataFrame) -> np.ndarray:
+    def predict_control_mean(self, dataframe: pd.DataFrame) -> np.ndarray:
+        if hasattr(self.mean_estimator, "predict_control_mean"):
+            return clip_mean_predictions(np.asarray(self.mean_estimator.predict_control_mean(dataframe), dtype=float))
         features = dataframe.loc[:, self.mean_feature_columns]
-        return clip_mean_predictions(self.mean_estimator.predict(features))
+        return clip_mean_predictions(np.asarray(self.mean_estimator.predict(features), dtype=float))
+
+    def predict_mean(self, dataframe: pd.DataFrame) -> np.ndarray:
+        if hasattr(self.mean_estimator, "predict"):
+            return clip_mean_predictions(np.asarray(self.mean_estimator.predict(dataframe), dtype=float))
+        features = dataframe.loc[:, self.mean_feature_columns]
+        return clip_mean_predictions(np.asarray(self.mean_estimator.predict(features), dtype=float))
 
     def predict_components(self, dataframe: pd.DataFrame) -> dict[str, np.ndarray]:
+        control_mean = self.predict_control_mean(dataframe)
         mean_predictions = self.predict_mean(dataframe)
         raw_alpha = _predict_dispersion_alpha(
             self.dispersion_estimator,
-            dataframe.loc[:, self.dispersion_feature_columns],
+            _prepare_mu_delta_feature_frame(
+                dataframe,
+                feature_columns=self.dispersion_feature_columns,
+                control_mean=control_mean,
+            ),
             fallback_alpha=float(self.global_negative_binomial_fit["overdispersion_alpha"]),
         )
         alpha = _blend_dispersion_alpha(
@@ -146,7 +239,11 @@ class RunDistributionModel:
         )
         raw_zero_probability = _predict_zero_probability(
             self.zero_estimator,
-            dataframe.loc[:, self.zero_feature_columns],
+            _prepare_mu_delta_feature_frame(
+                dataframe,
+                feature_columns=self.zero_feature_columns,
+                control_mean=control_mean,
+            ),
             fallback_probability=baseline_zero_probability,
         )
         adjusted_zero_probability = _blend_zero_probability(
@@ -156,6 +253,8 @@ class RunDistributionModel:
         )
         return {
             "mu": mean_predictions,
+            "control_mu": control_mean,
+            "mu_delta": mean_predictions - control_mean,
             "overdispersion_alpha": alpha,
             "dispersion": dispersion_size,
             "baseline_zero_probability": baseline_zero_probability,
@@ -215,11 +314,23 @@ def train_run_distribution_model(
     tail_probability: float = DEFAULT_SUPPORT_TAIL_PROBABILITY,
     distribution_report_dir: str | Path = DEFAULT_DISTRIBUTION_REPORT_DIR,
     head_param_overrides: Mapping[str, float | int] | None = None,
+    enable_market_priors: bool = False,
+    historical_odds_db_path: str | Path | None = None,
+    historical_market_book_name: str | None = None,
+    research_lane_name: str = "distribution_v1",
+    mu_delta_mode: str = MU_DELTA_MODE_OFF,
 ) -> RunDistributionTrainingArtifact:
     validated_training_data = validate_run_count_training_data(training_data)
     training_data_inspection = inspect_run_count_training_data(validated_training_data)
     dataset = _load_training_dataframe(validated_training_data)
     frame = _prepare_run_count_frame(dataset, target_column=target_column)
+    research_feature_result = augment_run_research_features(
+        frame,
+        enable_market_priors=enable_market_priors,
+        historical_odds_db_path=historical_odds_db_path,
+        historical_market_book_name=historical_market_book_name,
+    )
+    frame = research_feature_result.dataframe
     train_frame = frame.loc[frame["season"] < int(holdout_season)].copy()
     holdout_frame = frame.loc[frame["season"] == int(holdout_season)].copy()
     if train_frame.empty:
@@ -234,44 +345,135 @@ def train_run_distribution_model(
         holdout_season=holdout_season,
     )
 
-    mean_train = clip_mean_predictions(
+    mean_train_base = clip_mean_predictions(
         mean_head.estimator.predict(train_frame.loc[:, mean_head.feature_columns])
     )
-    mean_holdout = clip_mean_predictions(
+    mean_holdout_base = clip_mean_predictions(
         mean_head.estimator.predict(holdout_frame.loc[:, mean_head.feature_columns])
+    )
+    frame.loc[train_frame.index, "market_implied_minus_control_mu"] = (
+        train_frame["market_implied_full_game_away_runs"].to_numpy(dtype=float) - mean_train_base
+    )
+    frame.loc[holdout_frame.index, "market_implied_minus_control_mu"] = (
+        holdout_frame["market_implied_full_game_away_runs"].to_numpy(dtype=float) - mean_holdout_base
+    )
+    train_frame["market_implied_minus_control_mu"] = (
+        train_frame["market_implied_full_game_away_runs"].to_numpy(dtype=float) - mean_train_base
+    )
+    holdout_frame["market_implied_minus_control_mu"] = (
+        holdout_frame["market_implied_full_game_away_runs"].to_numpy(dtype=float) - mean_holdout_base
     )
     train_actual = train_frame[target_column].astype(int).to_numpy()
     holdout_actual = holdout_frame[target_column].astype(int).to_numpy()
-
-    global_nb_fit = fit_negative_binomial_dispersion(train_actual, mean_train)
-    global_train_support = build_variable_nb_support(
-        actual_counts=train_actual,
-        mean_predictions=mean_train,
-        dispersion_size=np.full(len(mean_train), float(global_nb_fit.dispersion_size)),
-        tail_probability=tail_probability,
-    )
-    global_train_pmf = negative_binomial_pmf_matrix(
-        mean_train,
-        global_train_support,
-        dispersion_size=float(global_nb_fit.dispersion_size),
-    )
-    global_zero_adjustment_fit = fit_zero_adjustment(
-        train_actual,
-        event_probability(global_train_pmf, global_train_support, kind="eq", threshold=0),
-    )
     candidate_resolution = _resolve_run_count_candidate_feature_columns(frame)
     if not candidate_resolution.candidate_columns:
         raise ValueError("Training data does not contain any numeric feature columns for Stage 3 heads")
 
+    mu_delta_target = train_actual.astype(float) - mean_train_base
+    resolved_mu_delta_mode = _resolve_mu_delta_mode(mu_delta_mode)
+    mu_delta_feature_columns = _resolve_mu_delta_feature_columns(
+        mu_delta_mode=resolved_mu_delta_mode,
+        candidate_feature_columns=candidate_resolution.candidate_columns,
+    )
+    mu_delta_selection = _build_mu_delta_selection_result(
+        mu_delta_mode=resolved_mu_delta_mode,
+        feature_columns=mu_delta_feature_columns,
+    )
+
+    resolved_head_params = _resolve_head_params(
+        mean_head.metadata,
+        xgb_n_jobs=xgb_n_jobs,
+        head_param_overrides=head_param_overrides,
+    )
+    if mu_delta_feature_columns:
+        mu_delta_splitter = create_time_series_split(
+            row_count=len(train_frame),
+            requested_splits=time_series_splits,
+        )
+        mu_delta_oof = _generate_mu_delta_oof_predictions(
+            train_frame=train_frame,
+            feature_columns=mu_delta_feature_columns,
+            target_values=mu_delta_target,
+            splitter=mu_delta_splitter,
+            random_state=random_state,
+            estimator_params=resolved_head_params,
+            mu_delta_mode=resolved_mu_delta_mode,
+        )
+        mu_delta_mask = mu_delta_oof.notna().to_numpy()
+        mu_delta_blend_weight = _optimize_mu_delta_blend_weight(
+            actual_counts=train_actual[mu_delta_mask],
+            control_mean=mean_train_base[mu_delta_mask],
+            raw_delta_predictions=mu_delta_oof.loc[mu_delta_oof.notna()].to_numpy(),
+            market_anchor_confidence=_extract_market_anchor_confidence(
+                train_frame.loc[mu_delta_oof.loc[mu_delta_oof.notna()].index]
+            ),
+        )
+        mu_delta_estimator = _fit_mu_delta_estimator(
+            train_frame=train_frame,
+            feature_columns=mu_delta_feature_columns,
+            target_values=mu_delta_target,
+            random_state=random_state,
+            estimator_params=resolved_head_params,
+            mu_delta_mode=resolved_mu_delta_mode,
+        )
+        mean_train, mu_delta_train = _apply_mu_delta(
+            control_mean=mean_train_base,
+            raw_delta_predictions=_predict_regression_values(
+                mu_delta_estimator,
+                _prepare_mu_delta_feature_frame(
+                    train_frame,
+                    feature_columns=mu_delta_feature_columns,
+                    control_mean=mean_train_base,
+                ),
+                fallback_value=0.0,
+            ),
+            blend_weight=mu_delta_blend_weight,
+            market_anchor_confidence=_extract_market_anchor_confidence(train_frame),
+        )
+        mean_holdout, mu_delta_holdout = _apply_mu_delta(
+            control_mean=mean_holdout_base,
+            raw_delta_predictions=_predict_regression_values(
+                mu_delta_estimator,
+                _prepare_mu_delta_feature_frame(
+                    holdout_frame,
+                    feature_columns=mu_delta_feature_columns,
+                    control_mean=mean_holdout_base,
+                ),
+                fallback_value=0.0,
+            ),
+            blend_weight=mu_delta_blend_weight,
+            market_anchor_confidence=_extract_market_anchor_confidence(holdout_frame),
+        )
+    else:
+        mu_delta_blend_weight = 0.0
+        mu_delta_estimator = ConstantValueRegressor(0.0)
+        mu_delta_train = np.zeros(len(train_frame), dtype=float)
+        mu_delta_holdout = np.zeros(len(holdout_frame), dtype=float)
+        mean_train = mean_train_base.copy()
+        mean_holdout = mean_holdout_base.copy()
+    positive_train_mask = train_actual > 0
+    positive_train_frame = train_frame.loc[positive_train_mask].copy()
+    positive_train_actual = train_actual[positive_train_mask]
+    positive_train_mean = mean_train[positive_train_mask]
+    if positive_train_frame.empty:
+        raise ValueError("Stage 3 hurdle training requires at least one positive-count training row")
+
+    global_nb_fit = fit_negative_binomial_dispersion(positive_train_actual, positive_train_mean)
+    global_zero_adjustment_fit = fit_zero_adjustment(
+        train_actual,
+        _variable_negative_binomial_zero_probability(
+            mean_train,
+            np.full(len(mean_train), float(global_nb_fit.dispersion_size), dtype=float),
+        ),
+    )
     dispersion_target = _build_dispersion_training_target(
-        actual_counts=train_actual,
-        mean_predictions=mean_train,
+        actual_counts=positive_train_actual,
+        mean_predictions=positive_train_mean,
         global_alpha=float(global_nb_fit.overdispersion_alpha),
     )
     zero_target = (train_actual == 0).astype(int)
-
     dispersion_selection = _select_head_feature_columns(
-        train_frame=train_frame,
+        train_frame=positive_train_frame,
         candidate_feature_columns=candidate_resolution.candidate_columns,
         target_values=dispersion_target,
         feature_selection_mode=feature_selection_mode,
@@ -286,34 +488,32 @@ def train_run_distribution_model(
         max_feature_count=max_feature_count,
         forced_delta_feature_count=forced_delta_feature_count,
     )
-
-    resolved_head_params = _resolve_head_params(
-        mean_head.metadata,
-        xgb_n_jobs=xgb_n_jobs,
-        head_param_overrides=head_param_overrides,
+    dispersion_splitter = create_time_series_split(
+        row_count=len(positive_train_frame),
+        requested_splits=time_series_splits,
     )
-    splitter = create_time_series_split(
+    zero_splitter = create_time_series_split(
         row_count=len(train_frame),
         requested_splits=time_series_splits,
     )
 
     dispersion_oof = _generate_regression_oof_predictions(
-        train_frame=train_frame,
+        train_frame=positive_train_frame,
         feature_columns=dispersion_selection.feature_columns,
         target_values=dispersion_target,
-        splitter=splitter,
+        splitter=dispersion_splitter,
         random_state=random_state,
         estimator_params=resolved_head_params,
     )
     dispersion_mask = dispersion_oof.notna().to_numpy()
     dispersion_blend_weight = _optimize_dispersion_blend_weight(
-        actual_counts=train_actual[dispersion_mask],
-        mean_predictions=mean_train[dispersion_mask],
+        actual_counts=positive_train_actual[dispersion_mask],
+        mean_predictions=positive_train_mean[dispersion_mask],
         global_alpha=float(global_nb_fit.overdispersion_alpha),
         raw_alpha_predictions=np.exp(dispersion_oof.loc[dispersion_oof.notna()].to_numpy()),
     )
     dispersion_estimator = _fit_dispersion_estimator(
-        train_frame=train_frame,
+        train_frame=positive_train_frame,
         feature_columns=dispersion_selection.feature_columns,
         target_values=dispersion_target,
         random_state=random_state,
@@ -335,27 +535,34 @@ def train_run_distribution_model(
         train_frame=train_frame,
         feature_columns=zero_selection.feature_columns,
         target_values=zero_target,
-        splitter=splitter,
+        splitter=zero_splitter,
         random_state=random_state,
         estimator_params=resolved_head_params,
     )
-    common_oof_mask = dispersion_oof.notna().to_numpy() & zero_oof.notna().to_numpy()
-    blended_train_alpha = _blend_dispersion_alpha(
-        global_alpha=float(global_nb_fit.overdispersion_alpha),
-        raw_alpha_predictions=np.exp(dispersion_oof.loc[common_oof_mask].to_numpy()),
-        blend_weight=dispersion_blend_weight,
+    blended_train_alpha = pd.Series(
+        np.full(len(train_frame), float(global_nb_fit.overdispersion_alpha), dtype=float),
+        index=train_frame.index,
+        dtype=float,
     )
+    valid_dispersion_oof = dispersion_oof.loc[dispersion_oof.notna()]
+    if not valid_dispersion_oof.empty:
+        blended_positive_alpha = _blend_dispersion_alpha(
+            global_alpha=float(global_nb_fit.overdispersion_alpha),
+            raw_alpha_predictions=np.exp(valid_dispersion_oof.to_numpy()),
+            blend_weight=dispersion_blend_weight,
+        )
+        blended_train_alpha.loc[valid_dispersion_oof.index] = blended_positive_alpha
     baseline_zero_oof = _apply_zero_adjustment_delta(
         _variable_negative_binomial_zero_probability(
-            mean_train[common_oof_mask],
-            _alpha_to_dispersion_size(blended_train_alpha),
+            mean_train,
+            _alpha_to_dispersion_size(blended_train_alpha.to_numpy()),
         ),
         delta=float(global_zero_adjustment_fit.delta),
     )
     zero_blend_weight = _optimize_zero_blend_weight(
-        observed_zero=zero_target[common_oof_mask],
+        observed_zero=zero_target,
         baseline_zero_probability=baseline_zero_oof,
-        raw_zero_probability=zero_oof.loc[common_oof_mask].to_numpy(),
+        raw_zero_probability=zero_oof.to_numpy(),
     )
     zero_estimator = _fit_zero_estimator(
         train_frame=train_frame,
@@ -383,11 +590,18 @@ def train_run_distribution_model(
     )
 
     model_version = _build_model_version(_resolve_data_version_hash(dataset))
+    mean_estimator = ResearchAdjustedMeanEstimator(
+        base_estimator=mean_head.estimator,
+        base_feature_columns=list(mean_head.feature_columns),
+        delta_estimator=mu_delta_estimator,
+        delta_feature_columns=list(mu_delta_feature_columns),
+        delta_blend_weight=float(mu_delta_blend_weight),
+    )
     distribution_model = RunDistributionModel(
-        mean_estimator=mean_head.estimator,
+        mean_estimator=mean_estimator,
         dispersion_estimator=dispersion_estimator,
         zero_estimator=zero_estimator,
-        mean_feature_columns=list(mean_head.feature_columns),
+        mean_feature_columns=_merge_feature_columns(mean_head.feature_columns, mu_delta_feature_columns),
         dispersion_feature_columns=list(dispersion_selection.feature_columns),
         zero_feature_columns=list(zero_selection.feature_columns),
         global_negative_binomial_fit=dataclass_to_dict(global_nb_fit),
@@ -420,18 +634,24 @@ def train_run_distribution_model(
         target_column=target_column,
         holdout_predictions=mean_holdout,
     )
+    control_mean_metrics = _compute_holdout_metrics(
+        train_frame=train_frame,
+        holdout_frame=holdout_frame,
+        target_column=target_column,
+        holdout_predictions=mean_holdout_base,
+    )
     control_metrics = evaluate_control_distribution_baseline(
         train_actual=train_actual,
-        train_mean=mean_train,
+        train_mean=mean_train_base,
         holdout_actual=holdout_actual,
-        holdout_mean=mean_holdout,
+        holdout_mean=mean_holdout_base,
         calibration_bin_count=calibration_bin_count,
         tail_probability=tail_probability,
     )
     comparison_to_control = build_control_comparison(
         stage3_mean_metrics=mean_metrics,
         stage3_distribution_metrics=distribution_metrics,
-        control_mean_metrics=mean_metrics,
+        control_mean_metrics=control_mean_metrics,
         control_distribution_metrics=control_metrics["holdout_metrics"],
     )
 
@@ -448,8 +668,54 @@ def train_run_distribution_model(
     distribution_report_json_path = distribution_report_dir_path / f"{model_version}.distribution_eval.json"
     distribution_report_csv_path = distribution_report_dir_path / f"{model_version}.distribution_eval.csv"
     control_comparison_json_path = distribution_report_dir_path / f"{model_version}.vs_control.json"
+    predictions_csv_path = distribution_report_dir_path / f"{model_version}.holdout_predictions.csv"
 
     joblib.dump(distribution_model, model_path)
+
+    holdout_prediction_frame = pd.DataFrame(
+        {
+            "game_pk": holdout_frame["game_pk"].astype(int).to_numpy(),
+            "game_date": holdout_frame["game_date"].astype(str).to_numpy(),
+            "away_team": holdout_frame["away_team"].astype(str).to_numpy(),
+            "home_team": holdout_frame["home_team"].astype(str).to_numpy(),
+            "actual_away_runs": holdout_actual,
+            "control_mean_runs": mean_holdout_base,
+            "stage3_mean_runs": mean_holdout,
+            "mu_delta": mu_delta_holdout,
+            "market_gap_abs": np.abs(
+                holdout_frame["market_implied_full_game_away_runs"].to_numpy(dtype=float) - mean_holdout_base
+            ),
+            "market_anchor_confidence": _extract_market_anchor_confidence(holdout_frame),
+            "market_priors_available": holdout_frame.get(
+                "market_priors_available",
+                pd.Series(np.zeros(len(holdout_frame)), index=holdout_frame.index),
+            ).to_numpy(dtype=float),
+            "dispersion_size": holdout_dispersion_size,
+            "baseline_zero_probability": baseline_zero_holdout,
+            "adjusted_zero_probability": adjusted_zero_holdout,
+            "p_zero_extra": adjusted_zero_holdout - baseline_zero_holdout,
+            "away_run_pmf_json": [
+                json.dumps(
+                    [
+                        {"runs": int(run_value), "probability": float(probability)}
+                        for run_value, probability in zip(support, row_probabilities, strict=True)
+                    ],
+                    separators=(",", ":"),
+                )
+                for row_probabilities in holdout_pmf
+            ],
+        }
+    )
+    slice_summaries = _build_stage3_slice_summaries(
+        holdout_frame=holdout_prediction_frame,
+        actual_counts=holdout_actual,
+        pmf_matrix=holdout_pmf,
+        support=np.asarray(support, dtype=int),
+    )
+    market_feature_variation_summary = _build_market_feature_variation_summary(
+        train_frame=train_frame,
+        holdout_frame=holdout_frame,
+    )
 
     metadata_payload = {
         "model_name": model_name,
@@ -459,34 +725,49 @@ def train_run_distribution_model(
         "holdout_season": int(holdout_season),
         "train_row_count": int(len(train_frame)),
         "holdout_row_count": int(len(holdout_frame)),
+        "count_training_row_count": int(len(positive_train_frame)),
+        "zero_training_row_count": int(len(train_frame)),
+        "count_training_positive_only": True,
         "runtime_versions": collect_runtime_versions(),
         "model_family": "parallel_run_distribution_lane",
         "distribution_family": DEFAULT_DISTRIBUTION_FAMILY_NAME,
         "distribution_lane_stage": 3,
+        "research_lane_name": research_lane_name,
         "mean_head_source_artifact_path": _relative_to_project(mean_head.metadata_path),
         "mean_head_source_model_path": _relative_to_project(mean_head.model_path),
         "mean_head_model_family": mean_head.metadata.get("model_family"),
         "fitted_distribution_family_name": DEFAULT_DISTRIBUTION_FAMILY_NAME,
         "feature_selection_mode": feature_selection_mode,
         "forced_delta_feature_count": int(forced_delta_feature_count),
-        "time_series_splits": int(splitter.n_splits),
-        "feature_columns": list(mean_head.feature_columns),
+        "time_series_splits": int(zero_splitter.n_splits),
+        "feature_columns": list(distribution_model.mean_feature_columns),
+        "research_feature_metadata": research_metadata_to_dict(research_feature_result.metadata),
         "feature_columns_by_head": {
-            "mu": list(mean_head.feature_columns),
+            "control_mu": list(mean_head.feature_columns),
+            "mu_delta": list(mu_delta_feature_columns),
+            "mu": list(distribution_model.mean_feature_columns),
             "dispersion": list(dispersion_selection.feature_columns),
             "p_zero_extra": list(zero_selection.feature_columns),
         },
         "selected_features_by_head": {
-            "mu": list(mean_head.feature_columns),
+            "control_mu": list(mean_head.feature_columns),
+            "mu_delta": list(mu_delta_feature_columns),
+            "mu": list(distribution_model.mean_feature_columns),
             "dispersion": list(dispersion_selection.feature_columns),
             "p_zero_extra": list(zero_selection.feature_columns),
         },
         "feature_selection_diagnostics_by_head": {
+            "mu_delta": _selection_to_payload(mu_delta_selection),
             "dispersion": _selection_to_payload(dispersion_selection),
             "p_zero_extra": _selection_to_payload(zero_selection),
         },
         "head_estimator_params": resolved_head_params,
         "head_feature_importance_rankings": {
+            "mu_delta": _extract_head_feature_importance_rankings(
+                mu_delta_estimator,
+                mu_delta_feature_columns,
+                top_feature_count=top_feature_count,
+            ),
             "dispersion": _extract_head_feature_importance_rankings(
                 dispersion_estimator,
                 dispersion_selection.feature_columns,
@@ -500,12 +781,27 @@ def train_run_distribution_model(
         },
         "global_negative_binomial_fit": dataclass_to_dict(global_nb_fit),
         "global_zero_adjustment_fit": dataclass_to_dict(global_zero_adjustment_fit),
+        "mu_delta_mode": resolved_mu_delta_mode,
+        "mu_delta_enabled": bool(mu_delta_feature_columns),
+        "mu_delta_blend_weight": float(mu_delta_blend_weight),
+        "mu_delta_summary_statistics_holdout": summarize_array(
+            mu_delta_holdout,
+            name="mu_delta",
+        ),
+        "market_feature_variation_summary": market_feature_variation_summary,
         "dispersion_blend_weight": float(dispersion_blend_weight),
         "zero_blend_weight": float(zero_blend_weight),
         "mean_metrics": mean_metrics,
         "distribution_metrics": distribution_metrics,
         "zero_calibration": distribution_metrics["zero_calibration"],
         "tail_calibration": distribution_metrics["tail_calibration"],
+        "slice_summaries": slice_summaries,
+        "output_paths": {
+            "distribution_report_json": _relative_to_project(distribution_report_json_path),
+            "distribution_report_csv": _relative_to_project(distribution_report_csv_path),
+            "vs_control_json": _relative_to_project(control_comparison_json_path),
+            "holdout_predictions_csv": _relative_to_project(predictions_csv_path),
+        },
         "dispersion_summary_statistics_holdout": summarize_array(
             holdout_dispersion_size,
             name="dispersion_size",
@@ -563,6 +859,7 @@ def train_run_distribution_model(
             "distribution_report_json_path": _relative_to_project(distribution_report_json_path),
             "distribution_report_csv_path": _relative_to_project(distribution_report_csv_path),
             "control_comparison_json_path": _relative_to_project(control_comparison_json_path),
+            "holdout_predictions_csv_path": _relative_to_project(predictions_csv_path),
             "mean_metrics": mean_metrics,
             "distribution_metrics": distribution_metrics,
             "comparison_to_control": comparison_to_control,
@@ -582,24 +879,44 @@ def train_run_distribution_model(
         "target_column": target_column,
         "holdout_season": int(holdout_season),
         "distribution_family": DEFAULT_DISTRIBUTION_FAMILY_NAME,
+        "research_lane_name": research_lane_name,
+        "research_feature_metadata": research_metadata_to_dict(research_feature_result.metadata),
         "mean_metrics": mean_metrics,
         "holdout_metrics": distribution_metrics,
         "head_summaries": {
             "mu": {
-                "feature_count": int(len(mean_head.feature_columns)),
-                "feature_columns": list(mean_head.feature_columns),
+                "feature_count": int(len(distribution_model.mean_feature_columns)),
+                "feature_columns": list(distribution_model.mean_feature_columns),
                 "source_artifact_path": _relative_to_project(mean_head.metadata_path),
+            },
+            "mu_delta": {
+                "feature_count": int(len(mu_delta_feature_columns)),
+                "feature_columns": list(mu_delta_feature_columns),
+                "training_row_count": int(len(train_frame)),
+                "blend_weight": float(mu_delta_blend_weight),
+                "mode": resolved_mu_delta_mode,
+                "estimator_family": (
+                    "positive_weighted_gap_linear"
+                    if resolved_mu_delta_mode == MU_DELTA_MODE_GAP_LINEAR
+                    else "xgboost_regressor"
+                ),
             },
             "dispersion": {
                 "feature_count": int(len(dispersion_selection.feature_columns)),
                 "feature_columns": list(dispersion_selection.feature_columns),
+                "training_row_count": int(len(positive_train_frame)),
+                "positive_only": True,
             },
             "p_zero_extra": {
                 "feature_count": int(len(zero_selection.feature_columns)),
                 "feature_columns": list(zero_selection.feature_columns),
+                "training_row_count": int(len(train_frame)),
             },
         },
         "holdout_component_summary": {
+            "control_mean_runs": summarize_array(mean_holdout_base, name="control_mean_runs"),
+            "stage3_mean_runs": summarize_array(mean_holdout, name="stage3_mean_runs"),
+            "mu_delta": summarize_array(mu_delta_holdout, name="mu_delta"),
             "dispersion": summarize_array(holdout_dispersion_size, name="dispersion_size"),
             "overdispersion_alpha": summarize_array(blended_holdout_alpha, name="overdispersion_alpha"),
             "baseline_zero_probability": summarize_array(
@@ -615,6 +932,8 @@ def train_run_distribution_model(
                 name="p_zero_extra",
             ),
         },
+        "market_feature_variation_summary": market_feature_variation_summary,
+        "slice_summaries": slice_summaries,
     }
     distribution_report_json_path.write_text(
         json.dumps(distribution_report_payload, indent=2),
@@ -631,6 +950,7 @@ def train_run_distribution_model(
             )
         ]
     ).to_csv(distribution_report_csv_path, index=False)
+    holdout_prediction_frame.to_csv(predictions_csv_path, index=False)
     control_comparison_json_path.write_text(
         json.dumps(comparison_to_control, indent=2),
         encoding="utf-8",
@@ -1004,6 +1324,53 @@ def _fit_dispersion_estimator(
     return estimator
 
 
+def _fit_mu_delta_estimator(
+    *,
+    train_frame: pd.DataFrame,
+    feature_columns: Sequence[str],
+    target_values: Sequence[float],
+    random_state: int,
+    estimator_params: Mapping[str, float | int],
+    mu_delta_mode: str,
+) -> Any:
+    if mu_delta_mode == MU_DELTA_MODE_GAP_LINEAR:
+        return _fit_linear_gap_delta_estimator(
+            train_frame=train_frame,
+            feature_columns=feature_columns,
+            target_values=target_values,
+        )
+    return _fit_dispersion_estimator(
+        train_frame=train_frame,
+        feature_columns=feature_columns,
+        target_values=target_values,
+        random_state=random_state,
+        estimator_params=estimator_params,
+    )
+
+
+def _fit_linear_gap_delta_estimator(
+    *,
+    train_frame: pd.DataFrame,
+    feature_columns: Sequence[str],
+    target_values: Sequence[float],
+) -> LinearGapDeltaRegressor:
+    if not feature_columns:
+        return LinearGapDeltaRegressor(feature_column="market_implied_minus_control_mu", slope=0.0)
+    feature_column = str(feature_columns[0])
+    gap = pd.to_numeric(train_frame.get(feature_column, 0.0), errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    target = np.asarray(target_values, dtype=float)
+    confidence = _extract_market_anchor_confidence(train_frame)
+    weights = 0.25 + (0.75 * confidence)
+    denominator = float(np.sum(weights * gap * gap))
+    if denominator <= 0.0:
+        return LinearGapDeltaRegressor(feature_column=feature_column, slope=0.0)
+    slope = float(np.sum(weights * gap * target) / denominator)
+    return LinearGapDeltaRegressor(
+        feature_column=feature_column,
+        slope=float(np.clip(slope, 0.0, 0.35)),
+    )
+
+
 def _fit_zero_estimator(
     *,
     train_frame: pd.DataFrame,
@@ -1022,6 +1389,274 @@ def _fit_zero_estimator(
     )
     estimator.fit(train_frame.loc[:, feature_columns], target)
     return estimator
+
+
+def _prepare_mu_delta_feature_frame(
+    dataframe: pd.DataFrame,
+    *,
+    feature_columns: Sequence[str],
+    control_mean: Sequence[float] | np.ndarray,
+) -> pd.DataFrame:
+    feature_frame = dataframe.copy()
+    if "market_implied_minus_control_mu" in feature_columns and "market_implied_minus_control_mu" not in feature_frame.columns:
+        market_implied = feature_frame.get(
+            "market_implied_full_game_away_runs",
+            pd.Series(np.full(len(feature_frame), np.nan, dtype=float), index=feature_frame.index),
+        )
+        feature_frame["market_implied_minus_control_mu"] = (
+            pd.to_numeric(market_implied, errors="coerce").fillna(0.0).to_numpy(dtype=float)
+            - np.asarray(control_mean, dtype=float)
+        )
+    return feature_frame.loc[:, list(feature_columns)].copy()
+
+
+def _predict_regression_values(
+    estimator: Any,
+    feature_frame: pd.DataFrame,
+    *,
+    fallback_value: float,
+) -> np.ndarray:
+    if hasattr(estimator, "predict"):
+        return np.asarray(estimator.predict(feature_frame), dtype=float)
+    return np.full(len(feature_frame), float(fallback_value), dtype=float)
+
+
+def _extract_market_anchor_confidence(
+    dataframe: pd.DataFrame,
+) -> np.ndarray:
+    if "market_anchor_confidence" not in dataframe.columns:
+        return np.zeros(len(dataframe), dtype=float)
+    return np.clip(
+        pd.to_numeric(dataframe["market_anchor_confidence"], errors="coerce").fillna(0.0).to_numpy(dtype=float),
+        0.0,
+        1.0,
+    )
+
+
+def _apply_mu_delta(
+    *,
+    control_mean: Sequence[float] | np.ndarray,
+    raw_delta_predictions: Sequence[float] | np.ndarray,
+    blend_weight: float,
+    market_anchor_confidence: Sequence[float] | np.ndarray,
+    confidence_floor: float = 0.25,
+    max_delta_fraction: float = 0.35,
+    max_delta_abs: float = 1.5,
+) -> tuple[np.ndarray, np.ndarray]:
+    control = clip_mean_predictions(np.asarray(control_mean, dtype=float))
+    raw_delta = np.asarray(raw_delta_predictions, dtype=float)
+    confidence = np.clip(np.asarray(market_anchor_confidence, dtype=float), 0.0, 1.0)
+    resolved_confidence_floor = float(np.clip(confidence_floor, 0.0, 1.0))
+    confidence_scale = resolved_confidence_floor + ((1.0 - resolved_confidence_floor) * confidence)
+    delta_cap = np.minimum(
+        np.maximum(control * float(max_delta_fraction), 0.75),
+        float(max_delta_abs),
+    )
+    clipped_delta = np.clip(raw_delta, -delta_cap, delta_cap)
+    applied_delta = float(np.clip(blend_weight, 0.0, 1.0)) * confidence_scale * clipped_delta
+    adjusted_mean = clip_mean_predictions(control + applied_delta)
+    return adjusted_mean, applied_delta
+
+
+def _optimize_mu_delta_blend_weight(
+    *,
+    actual_counts: Sequence[int] | np.ndarray,
+    control_mean: Sequence[float] | np.ndarray,
+    raw_delta_predictions: Sequence[float] | np.ndarray,
+    market_anchor_confidence: Sequence[float] | np.ndarray,
+) -> float:
+    actual = np.asarray(actual_counts, dtype=float)
+    control = clip_mean_predictions(np.asarray(control_mean, dtype=float))
+    raw_delta = np.asarray(raw_delta_predictions, dtype=float)
+    confidence = np.asarray(market_anchor_confidence, dtype=float)
+
+    def objective(weight: float) -> float:
+        adjusted_mean, _ = _apply_mu_delta(
+            control_mean=control,
+            raw_delta_predictions=raw_delta,
+            blend_weight=float(weight),
+            market_anchor_confidence=confidence,
+        )
+        return float(np.mean((adjusted_mean - actual) ** 2))
+
+    result = minimize_scalar(objective, bounds=(0.0, 1.0), method="bounded")
+    return float(result.x if result.success else 0.0)
+
+
+def _generate_mu_delta_oof_predictions(
+    *,
+    train_frame: pd.DataFrame,
+    feature_columns: Sequence[str],
+    target_values: Sequence[float] | np.ndarray,
+    splitter: Any,
+    random_state: int,
+    estimator_params: Mapping[str, float | int],
+    mu_delta_mode: str,
+) -> pd.Series:
+    if mu_delta_mode == MU_DELTA_MODE_GAP_LINEAR:
+        return _generate_linear_gap_delta_oof_predictions(
+            train_frame=train_frame,
+            feature_columns=feature_columns,
+            target_values=target_values,
+            splitter=splitter,
+        )
+    return _generate_regression_oof_predictions(
+        train_frame=train_frame,
+        feature_columns=feature_columns,
+        target_values=target_values,
+        splitter=splitter,
+        random_state=random_state,
+        estimator_params=estimator_params,
+    )
+
+
+def _generate_linear_gap_delta_oof_predictions(
+    *,
+    train_frame: pd.DataFrame,
+    feature_columns: Sequence[str],
+    target_values: Sequence[float] | np.ndarray,
+    splitter: Any,
+) -> pd.Series:
+    oof_predictions = pd.Series(np.nan, index=train_frame.index, dtype=float)
+    index_array = np.arange(len(train_frame))
+    target = np.asarray(target_values, dtype=float)
+    for train_indices, validation_indices in splitter.split(index_array):
+        fold_train = train_frame.iloc[train_indices]
+        estimator = _fit_linear_gap_delta_estimator(
+            train_frame=fold_train,
+            feature_columns=feature_columns,
+            target_values=target[train_indices],
+        )
+        fold_validation = _prepare_mu_delta_feature_frame(
+            train_frame.iloc[validation_indices],
+            feature_columns=feature_columns,
+            control_mean=np.zeros(len(validation_indices), dtype=float),
+        )
+        oof_predictions.loc[train_frame.index[validation_indices]] = estimator.predict(fold_validation)
+    return oof_predictions
+
+
+def _resolve_mu_delta_mode(
+    mu_delta_mode: str,
+) -> str:
+    resolved = str(mu_delta_mode).strip().lower()
+    if resolved not in MU_DELTA_MODES:
+        raise ValueError(f"Unsupported mu_delta_mode '{mu_delta_mode}'. Expected one of {MU_DELTA_MODES}.")
+    return resolved
+
+
+def _resolve_mu_delta_feature_columns(
+    *,
+    mu_delta_mode: str,
+    candidate_feature_columns: Sequence[str],
+) -> list[str]:
+    candidate_set = {str(column) for column in candidate_feature_columns}
+    if mu_delta_mode == MU_DELTA_MODE_OFF:
+        desired_columns: Sequence[str] = ()
+    elif mu_delta_mode in (MU_DELTA_MODE_GAP_ONLY, MU_DELTA_MODE_GAP_LINEAR):
+        desired_columns = MU_DELTA_GAP_ONLY_FEATURE_COLUMNS
+    else:
+        desired_columns = MU_DELTA_ANCHOR_BUNDLE_FEATURE_COLUMNS
+    return [str(column) for column in desired_columns if str(column) in candidate_set]
+
+
+def _build_mu_delta_selection_result(
+    *,
+    mu_delta_mode: str,
+    feature_columns: Sequence[str],
+) -> RunCountFeatureSelectionResult:
+    resolved_columns = [str(column) for column in feature_columns]
+    explicit_bucket = "explicit_mu_delta_mode"
+    family_decisions = [
+        {
+            "family": "mu_delta_mode",
+            "decision": "included" if resolved_columns else "disabled",
+            "mu_delta_mode": str(mu_delta_mode),
+        }
+    ]
+    return RunCountFeatureSelectionResult(
+        feature_columns=resolved_columns,
+        bucket_counts={explicit_bucket: int(len(resolved_columns))},
+        bucket_targets={explicit_bucket: int(len(resolved_columns))},
+        selected_features_by_bucket={explicit_bucket: list(resolved_columns)},
+        forced_delta_features=[],
+        omitted_top_features_by_bucket={explicit_bucket: []},
+        family_decisions=family_decisions,
+    )
+
+
+def _merge_feature_columns(
+    base_feature_columns: Sequence[str],
+    extra_feature_columns: Sequence[str],
+) -> list[str]:
+    merged: list[str] = []
+    for column in list(base_feature_columns) + list(extra_feature_columns):
+        if column not in merged:
+            merged.append(str(column))
+    return merged
+
+
+def _build_market_feature_variation_summary(
+    *,
+    train_frame: pd.DataFrame,
+    holdout_frame: pd.DataFrame,
+) -> dict[str, dict[str, float | int]]:
+    market_columns = [
+        "market_implied_full_game_away_runs",
+        "market_implied_minus_control_mu",
+        "market_anchor_confidence",
+        "market_run_environment_anchor",
+        "market_full_game_total_over_implied_prob",
+        "market_full_game_total_under_implied_prob",
+    ]
+    summary: dict[str, dict[str, float | int]] = {}
+    for column in market_columns:
+        if column not in train_frame.columns or column not in holdout_frame.columns:
+            continue
+        train_values = pd.to_numeric(train_frame[column], errors="coerce")
+        holdout_values = pd.to_numeric(holdout_frame[column], errors="coerce")
+        summary[column] = {
+            "train_non_null": int(train_values.notna().sum()),
+            "holdout_non_null": int(holdout_values.notna().sum()),
+            "train_unique": int(train_values.nunique(dropna=True)),
+            "holdout_unique": int(holdout_values.nunique(dropna=True)),
+            "train_std": float(train_values.fillna(0.0).std()),
+            "holdout_std": float(holdout_values.fillna(0.0).std()),
+        }
+    return summary
+
+
+def _build_stage3_slice_summaries(
+    *,
+    holdout_frame: pd.DataFrame,
+    actual_counts: np.ndarray,
+    pmf_matrix: np.ndarray,
+    support: np.ndarray,
+) -> dict[str, dict[str, float | int]]:
+    slices = {
+        "actual_zero": holdout_frame["actual_away_runs"].astype(int) == 0,
+        "actual_ge_10": holdout_frame["actual_away_runs"].astype(int) >= 10,
+        "col_home": holdout_frame["home_team"].astype(str) == "COL",
+        "non_col_home": holdout_frame["home_team"].astype(str) != "COL",
+        "high_market_gap": holdout_frame["market_gap_abs"].astype(float) >= 0.75,
+        "market_available": holdout_frame["market_priors_available"].astype(float) > 0.5,
+    }
+    predicted_mean = np.sum(pmf_matrix * support[None, :], axis=1)
+    summary: dict[str, dict[str, float | int]] = {}
+    for slice_name, mask_series in slices.items():
+        mask = mask_series.to_numpy(dtype=bool)
+        if not np.any(mask):
+            continue
+        metrics = summarize_distribution_metrics(actual_counts[mask], pmf_matrix[mask], support)
+        summary[slice_name] = {
+            "row_count": int(np.count_nonzero(mask)),
+            "rmse": float(np.sqrt(np.mean((predicted_mean[mask] - actual_counts[mask]) ** 2))),
+            "mean_crps": float(metrics["mean_crps"]),
+            "mean_negative_log_score": float(metrics["mean_negative_log_score"]),
+            "predicted_mean": float(np.mean(predicted_mean[mask])),
+            "actual_mean": float(np.mean(actual_counts[mask])),
+        }
+    return summary
 
 
 def _generate_regression_oof_predictions(

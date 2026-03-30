@@ -21,6 +21,7 @@ from src.model.run_distribution_trainer import (  # noqa: E402
     DEFAULT_DISTRIBUTION_MODEL_NAME,
     DEFAULT_DISTRIBUTION_REPORT_DIR,
     DEFAULT_TARGET_COLUMN,
+    MU_DELTA_MODES,
     resolve_mean_artifact_metadata_path,
     train_run_distribution_model,
 )
@@ -88,6 +89,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Optional explicit metadata path for the frozen mu head. Defaults to current_control.json selection.",
     )
     parser.add_argument("--distribution-report-dir", default=str(DEFAULT_DISTRIBUTION_REPORT_DIR))
+    parser.add_argument("--enable-market-priors", action="store_true")
+    parser.add_argument("--historical-odds-db", default=None)
+    parser.add_argument("--historical-market-book", default=None)
+    parser.add_argument("--research-lane-name", default="distribution_v1")
+    parser.add_argument("--mu-delta-mode", choices=MU_DELTA_MODES, default="off")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
@@ -109,7 +115,10 @@ def main(argv: list[str] | None = None) -> int:
             f"season_range={args.start_year}-{args.end_year} holdout={args.holdout_season} "
             f"folds={args.folds} feature_selection_mode={args.feature_selection_mode} "
             f"forced_delta_count={args.forced_delta_count} "
-            f"mean_artifact_metadata={mean_artifact_metadata_path}"
+            f"mu_delta_mode={args.mu_delta_mode} "
+            f"mean_artifact_metadata={mean_artifact_metadata_path} "
+            f"enable_market_priors={args.enable_market_priors} "
+            f"historical_odds_db={args.historical_odds_db}"
         )
         return 0
 
@@ -150,6 +159,11 @@ def main(argv: list[str] | None = None) -> int:
         time_series_splits=args.folds,
         xgb_n_jobs=resolved_xgb_workers or int(os.getenv("MLB_XGBOOST_N_JOBS", "1")),
         distribution_report_dir=args.distribution_report_dir,
+        enable_market_priors=args.enable_market_priors,
+        historical_odds_db_path=args.historical_odds_db,
+        historical_market_book_name=args.historical_market_book,
+        research_lane_name=args.research_lane_name,
+        mu_delta_mode=args.mu_delta_mode,
     )
 
     comparison = artifact.comparison_to_control

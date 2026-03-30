@@ -25,6 +25,7 @@ from src.model.run_distribution_trainer import (
     train_run_distribution_model,
     zero_adjusted_negative_binomial_pmf_matrix_by_row,
 )
+from src.model.run_research_features import augment_run_research_features
 
 
 def _training_frame() -> pd.DataFrame:
@@ -208,15 +209,18 @@ def test_train_run_distribution_model_writes_stage3_artifact_and_reports(tmp_pat
     assert artifact.distribution_report_json_path.exists()
     assert artifact.distribution_report_csv_path.exists()
     assert artifact.control_comparison_json_path.exists()
+    assert (tmp_path / "reports" / f"{artifact.model_version}.holdout_predictions.csv").exists()
     assert artifact.model_version
     assert artifact.distribution_metrics["mean_crps"] >= 0.0
 
     loaded_model = joblib.load(artifact.model_path)
     assert isinstance(loaded_model, RunDistributionModel)
-    holdout_frame = frame.loc[frame["season"] == 2025].copy()
+    holdout_frame = augment_run_research_features(frame.loc[frame["season"] == 2025].copy()).dataframe
     components = loaded_model.predict_components(holdout_frame)
     assert set(components) == {
         "mu",
+        "control_mu",
+        "mu_delta",
         "overdispersion_alpha",
         "dispersion",
         "baseline_zero_probability",
@@ -231,17 +235,133 @@ def test_train_run_distribution_model_writes_stage3_artifact_and_reports(tmp_pat
     assert metadata["distribution_lane_stage"] == 3
     assert metadata["distribution_family"] == DEFAULT_DISTRIBUTION_FAMILY_NAME
     assert metadata["fitted_distribution_family_name"] == DEFAULT_DISTRIBUTION_FAMILY_NAME
+    assert metadata["count_training_positive_only"] is True
+    assert metadata["count_training_row_count"] == int(
+        (
+            frame.loc[frame["season"] < 2025, "final_away_score"]
+            .astype(int)
+            .gt(0)
+            .sum()
+        )
+    )
+    assert metadata["zero_training_row_count"] == int((frame["season"] < 2025).sum())
+    assert metadata["research_feature_metadata"]["feature_families"]["ttop"]
+    assert metadata["research_feature_metadata"]["feature_families"]["pitch_archetype"]
+    assert metadata["research_feature_metadata"]["market_priors"]["coverage_pct"] == 0.0
     assert metadata["mean_metrics"]["rmse"] == artifact.holdout_metrics["rmse"]
     assert "distribution_metrics" in metadata
+    assert metadata["mu_delta_mode"] == "off"
+    assert metadata["mu_delta_enabled"] is False
+    assert "mu_delta_blend_weight" in metadata
     assert "zero_calibration" in metadata
     assert "tail_calibration" in metadata
     assert "selected_features_by_head" in metadata
+    assert "mu_delta" in metadata["selected_features_by_head"]
     assert "dispersion_summary_statistics_holdout" in metadata
     assert "zero_mass_summary_statistics_holdout" in metadata
+
+
+def test_train_run_distribution_model_supports_mu_delta_off_mode(tmp_path: Path) -> None:
+    training_path = tmp_path / "training_data.parquet"
+    frame = _training_frame()
+    _write_training_parquet(frame, training_path)
+    mean_metadata_path = _write_mean_artifact(
+        frame=frame,
+        output_dir=tmp_path / "mean_head",
+        holdout_season=2025,
+    )
+
+    artifact = train_run_distribution_model(
+        training_data=training_path,
+        output_dir=tmp_path / "dist_models",
+        mean_artifact_metadata_path=mean_metadata_path,
+        holdout_season=2025,
+        feature_selection_mode="flat",
+        forced_delta_feature_count=0,
+        time_series_splits=3,
+        xgb_n_jobs=1,
+        distribution_report_dir=tmp_path / "reports",
+        mu_delta_mode="off",
+    )
+
+    metadata = json.loads(artifact.metadata_path.read_text(encoding="utf-8"))
+    assert metadata["mu_delta_mode"] == "off"
+    assert metadata["mu_delta_enabled"] is False
+    assert metadata["mu_delta_blend_weight"] == 0.0
+    assert metadata["selected_features_by_head"]["mu_delta"] == []
+    assert metadata["feature_selection_diagnostics_by_head"]["mu_delta"]["feature_columns"] == []
+    assert "market_feature_variation_summary" in metadata
+    assert "slice_summaries" in metadata
+    assert metadata["output_paths"]["holdout_predictions_csv"]
     assert "calibration_bins" in metadata
     assert metadata["calibration_bins"]["shutout_probability"]
     assert metadata["calibration_bins"]["tail_probabilities"]["p_ge_3"]
     assert metadata["comparison_to_control"]["guardrails"]["rmse_within_2pct"] is True
+
+
+def test_train_run_distribution_model_trains_dispersion_head_on_positive_rows_only(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    training_path = tmp_path / "training_data.parquet"
+    frame = _training_frame()
+    _write_training_parquet(frame, training_path)
+    mean_metadata_path = _write_mean_artifact(
+        frame=frame,
+        output_dir=tmp_path / "mean_head",
+        holdout_season=2025,
+    )
+
+    captured: dict[str, object] = {}
+
+    from src.model import run_distribution_trainer as trainer_module
+
+    original_fit = trainer_module._fit_dispersion_estimator
+
+    def _capturing_fit_dispersion_estimator(**kwargs):
+        train_frame = kwargs["train_frame"]
+        captured["row_count"] = int(len(train_frame))
+        captured["targets"] = train_frame["final_away_score"].astype(int).tolist()
+        return original_fit(**kwargs)
+
+    monkeypatch.setattr(
+        trainer_module,
+        "_fit_dispersion_estimator",
+        _capturing_fit_dispersion_estimator,
+    )
+
+    train_run_distribution_model(
+        training_data=training_path,
+        output_dir=tmp_path / "dist_models",
+        mean_artifact_metadata_path=mean_metadata_path,
+        holdout_season=2025,
+        feature_selection_mode="flat",
+        forced_delta_feature_count=0,
+        time_series_splits=3,
+        xgb_n_jobs=1,
+        head_param_overrides={
+            "max_depth": 2,
+            "n_estimators": 20,
+            "learning_rate": 0.1,
+            "subsample": 1.0,
+            "colsample_bytree": 1.0,
+            "min_child_weight": 1,
+            "reg_lambda": 1.0,
+        },
+        distribution_report_dir=tmp_path / "reports",
+    )
+
+    expected_positive_rows = int(
+        (
+            frame.loc[frame["season"] < 2025, "final_away_score"]
+            .astype(int)
+            .gt(0)
+            .sum()
+        )
+    )
+    assert captured["row_count"] == expected_positive_rows
+    assert captured["targets"]
+    assert min(captured["targets"]) > 0
 
 
 def test_build_control_comparison_flags_guardrails() -> None:

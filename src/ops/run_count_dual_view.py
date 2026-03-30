@@ -12,6 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CURRENT_CONTROL_PATH = Path("data/reports/run_count/registry/current_control.json")
 DEFAULT_DISTRIBUTION_REPORT_DIR = Path("data/reports/run_count/distribution_eval")
 DEFAULT_MCMC_REPORT_DIR = Path("data/reports/run_count/mcmc")
+DEFAULT_WALK_FORWARD_REPORT_DIR = Path("data/reports/run_count/walk_forward")
 DEFAULT_DUAL_VIEW_OUTPUT_DIR = Path("data/reports/run_count/dual_view")
 
 MEAN_DISAGREEMENT_THRESHOLD = 0.35
@@ -29,7 +30,8 @@ class ResolvedStage5Inputs:
     mcmc_report_path: Path | None
     mcmc_vs_control_path: Path | None
     mcmc_vs_stage3_path: Path | None
-    walk_forward_report_path: Path | None
+    stage3_walk_forward_report_path: Path | None
+    mcmc_walk_forward_report_path: Path | None
 
 
 def resolve_stage5_inputs(
@@ -42,7 +44,9 @@ def resolve_stage5_inputs(
     mcmc_vs_control_json: str | Path | None = None,
     mcmc_vs_stage3_json: str | Path | None = None,
     mcmc_report_dir: str | Path = DEFAULT_MCMC_REPORT_DIR,
-    walk_forward_report_json: str | Path | None = None,
+    stage3_walk_forward_report_json: str | Path | None = None,
+    mcmc_walk_forward_report_json: str | Path | None = None,
+    walk_forward_report_dir: str | Path = DEFAULT_WALK_FORWARD_REPORT_DIR,
 ) -> ResolvedStage5Inputs:
     resolved_current_control = _resolve_required_path(current_control_path)
     distribution_dir = _resolve_path(distribution_report_dir)
@@ -80,7 +84,17 @@ def resolve_stage5_inputs(
         pattern="*.vs_stage3.json",
         predicate=lambda payload: str(payload.get("challenger_label")) == "stage4_mcmc",
     )
-    resolved_walk_forward = _resolve_optional_path(walk_forward_report_json)
+    walk_forward_dir = _resolve_path(walk_forward_report_dir)
+    resolved_stage3_walk_forward = _resolve_optional_path(stage3_walk_forward_report_json) or _find_latest_json(
+        walk_forward_dir,
+        pattern="*.stage3_walk_forward.json",
+        predicate=lambda payload: str(payload.get("lane_key")) == "best_distribution_lane",
+    )
+    resolved_mcmc_walk_forward = _resolve_optional_path(mcmc_walk_forward_report_json) or _find_latest_json(
+        walk_forward_dir,
+        pattern="*.mcmc_walk_forward.json",
+        predicate=lambda payload: str(payload.get("lane_key")) == "best_mcmc_lane",
+    )
 
     return ResolvedStage5Inputs(
         current_control_path=resolved_current_control,
@@ -89,7 +103,8 @@ def resolve_stage5_inputs(
         mcmc_report_path=resolved_mcmc_report,
         mcmc_vs_control_path=resolved_mcmc_vs_control,
         mcmc_vs_stage3_path=resolved_mcmc_vs_stage3,
-        walk_forward_report_path=resolved_walk_forward,
+        stage3_walk_forward_report_path=resolved_stage3_walk_forward,
+        mcmc_walk_forward_report_path=resolved_mcmc_walk_forward,
     )
 
 
@@ -101,7 +116,8 @@ def build_dual_view_payload(
     mcmc_report: Mapping[str, Any] | None = None,
     mcmc_vs_control: Mapping[str, Any] | None = None,
     mcmc_vs_stage3: Mapping[str, Any] | None = None,
-    walk_forward_report: Mapping[str, Any] | None = None,
+    stage3_walk_forward_report: Mapping[str, Any] | None = None,
+    mcmc_walk_forward_report: Mapping[str, Any] | None = None,
     source_paths: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     control_summary = build_control_lane_summary(
@@ -112,7 +128,7 @@ def build_dual_view_payload(
         lane_key="best_distribution_lane",
         lane_label="Best distribution lane",
         comparison_to_control=stage3_vs_control,
-        walk_forward_report=walk_forward_report,
+        walk_forward_report=stage3_walk_forward_report,
     )
     stage3_summary = build_research_lane_summary(
         lane_key="best_distribution_lane",
@@ -123,6 +139,7 @@ def build_dual_view_payload(
         comparison_to_control=stage3_vs_control,
         comparison_to_best_distribution=None,
         promotion_state=stage3_promotion,
+        walk_forward_report=stage3_walk_forward_report,
     )
 
     lane_summaries = [control_summary, stage3_summary]
@@ -131,7 +148,7 @@ def build_dual_view_payload(
             lane_key="best_mcmc_lane",
             lane_label="Best MCMC lane",
             comparison_to_control=mcmc_vs_control,
-            walk_forward_report=walk_forward_report,
+            walk_forward_report=mcmc_walk_forward_report,
         )
         lane_summaries.append(
             build_research_lane_summary(
@@ -143,6 +160,7 @@ def build_dual_view_payload(
                 comparison_to_control=mcmc_vs_control,
                 comparison_to_best_distribution=mcmc_vs_stage3,
                 promotion_state=mcmc_promotion,
+                walk_forward_report=mcmc_walk_forward_report,
             )
         )
 
@@ -232,6 +250,7 @@ def build_research_lane_summary(
     comparison_to_control: Mapping[str, Any] | None,
     comparison_to_best_distribution: Mapping[str, Any] | None,
     promotion_state: Mapping[str, Any],
+    walk_forward_report: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     holdout_metrics = report_payload.get("holdout_metrics", {})
     prediction_summary = holdout_metrics.get("prediction_summary", {})
@@ -253,6 +272,11 @@ def build_research_lane_summary(
         "distribution_metrics": dict(holdout_metrics),
         "comparison_to_control": dict(comparison_to_control or {}),
         "comparison_to_best_distribution": dict(comparison_to_best_distribution or {}),
+        "walk_forward_betting_evidence": dict((walk_forward_report or {}).get("betting_evidence", {})),
+        "walk_forward_proxy_market_decision_evidence": dict(
+            (walk_forward_report or {}).get("proxy_market_decision_evidence", {})
+        ),
+        "walk_forward_operational_diagnostics": dict((walk_forward_report or {}).get("operational_diagnostics", {})),
         "promotion_state": dict(promotion_state),
     }
 
@@ -358,10 +382,28 @@ def evaluate_walk_forward_check(
             "reason": "No walk-forward betting report was supplied.",
         }
 
-    roi = _first_present_float(walk_forward_report, ("roi", "walk_forward_roi"))
-    net_units = _first_present_float(walk_forward_report, ("net_units", "walk_forward_net_units"))
-    max_drawdown = _first_present_float(walk_forward_report, ("max_drawdown", "walk_forward_max_drawdown"))
-    bet_count = _first_present_float(walk_forward_report, ("bet_count", "walk_forward_bet_count"))
+    betting_payload = walk_forward_report.get("betting_evidence", walk_forward_report)
+    if not isinstance(betting_payload, Mapping):
+        betting_payload = walk_forward_report
+
+    explicitly_available = betting_payload.get("available")
+    if explicitly_available is False:
+        return {
+            "available": False,
+            "passed": None,
+            "reason": str(
+                betting_payload.get("reason")
+                or "Walk-forward report exists, but betting evidence is not available for this lane."
+            ),
+            "details": {
+                "market_anchor_coverage": _first_present_float(betting_payload, ("market_anchor_coverage",)),
+            },
+        }
+
+    roi = _first_present_float(betting_payload, ("roi", "walk_forward_roi"))
+    net_units = _first_present_float(betting_payload, ("net_units", "walk_forward_net_units"))
+    max_drawdown = _first_present_float(betting_payload, ("max_drawdown", "walk_forward_max_drawdown"))
+    bet_count = _first_present_float(betting_payload, ("bet_count", "walk_forward_bet_count"))
 
     neutral_or_better = (roi is not None and roi >= 0.0) or (net_units is not None and net_units >= 0.0)
     not_alarming_drawdown = max_drawdown is None or max_drawdown >= -0.25
@@ -571,13 +613,27 @@ def load_dual_view_inputs(
     else:
         loaded["mcmc_vs_stage3"] = None
 
-    if resolved_inputs.walk_forward_report_path is not None and resolved_inputs.walk_forward_report_path.exists():
-        loaded["walk_forward_report"] = _read_json(resolved_inputs.walk_forward_report_path)
-        loaded["source_paths"]["walk_forward_report_path"] = _relative_to_project(
-            resolved_inputs.walk_forward_report_path
+    if (
+        resolved_inputs.stage3_walk_forward_report_path is not None
+        and resolved_inputs.stage3_walk_forward_report_path.exists()
+    ):
+        loaded["stage3_walk_forward_report"] = _read_json(resolved_inputs.stage3_walk_forward_report_path)
+        loaded["source_paths"]["stage3_walk_forward_report_path"] = _relative_to_project(
+            resolved_inputs.stage3_walk_forward_report_path
         )
     else:
-        loaded["walk_forward_report"] = None
+        loaded["stage3_walk_forward_report"] = None
+
+    if (
+        resolved_inputs.mcmc_walk_forward_report_path is not None
+        and resolved_inputs.mcmc_walk_forward_report_path.exists()
+    ):
+        loaded["mcmc_walk_forward_report"] = _read_json(resolved_inputs.mcmc_walk_forward_report_path)
+        loaded["source_paths"]["mcmc_walk_forward_report_path"] = _relative_to_project(
+            resolved_inputs.mcmc_walk_forward_report_path
+        )
+    else:
+        loaded["mcmc_walk_forward_report"] = None
 
     return loaded
 

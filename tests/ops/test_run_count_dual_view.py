@@ -6,6 +6,8 @@ from src.ops.run_count_dual_view import (
     build_dual_view_payload,
     build_pairwise_disagreement,
     evaluate_research_lane_promotion,
+    load_dual_view_inputs,
+    resolve_stage5_inputs,
     write_dual_view_outputs,
 )
 
@@ -163,7 +165,8 @@ def test_dual_view_payload_marks_stage3_best_and_stage4_exploratory(tmp_path) ->
             },
         },
         mcmc_vs_stage3={},
-        walk_forward_report=None,
+        stage3_walk_forward_report=None,
+        mcmc_walk_forward_report=None,
         source_paths={"stage3_report_path": "data/reports/run_count/distribution_eval/stage3.json"},
     )
 
@@ -176,3 +179,87 @@ def test_dual_view_payload_marks_stage3_best_and_stage4_exploratory(tmp_path) ->
     assert written["lane_summaries"][1]["lane_status"] == "promoted_second_opinion"
     assert written["lane_summaries"][2]["lane_status"] == "exploratory"
     assert output_paths["json"].endswith("current_dual_view.json")
+
+
+def test_stage3_promotion_reads_lane_specific_walk_forward_betting_blocker() -> None:
+    comparison = {
+        "stage3_distribution_metrics": {
+            "zero_calibration": {"p_0": {"absolute_error": 0.01}},
+            "tail_calibration": {
+                "p_ge_3": {"absolute_error": 0.02},
+                "p_ge_5": {"absolute_error": 0.03},
+                "p_ge_10": {"absolute_error": 0.04},
+            },
+        },
+        "improvement_flags": {
+            "beats_control_on_crps": True,
+            "beats_control_on_negative_log_score": True,
+        },
+        "guardrails": {
+            "rmse_within_2pct": True,
+            "mean_bias_within_0_15_runs": True,
+            "tail_calibration_stable": True,
+        },
+    }
+
+    result = evaluate_research_lane_promotion(
+        lane_key="best_distribution_lane",
+        lane_label="Best distribution lane",
+        comparison_to_control=comparison,
+        walk_forward_report={
+            "lane_key": "best_distribution_lane",
+            "betting_evidence": {
+                "available": False,
+                "market_anchor_coverage": 0.0,
+                "reason": "Historical away-run totals or away team totals are not available.",
+            },
+        },
+    )
+
+    assert result["second_opinion_promoted"] is True
+    assert result["production_promotable"] is False
+    assert result["checks"]["neutral_walk_forward_betting_if_available"]["available"] is False
+
+
+def test_stage5_input_resolution_loads_lane_specific_walk_forward_reports(tmp_path) -> None:
+    current_control = tmp_path / "current_control.json"
+    current_control.write_text(json.dumps({"selected_artifact_path": "data/models/control.metadata.json"}), encoding="utf-8")
+
+    stage3_report = tmp_path / "artifact.distribution_eval.json"
+    stage3_report.write_text(
+        json.dumps({"artifact_path": "data/models/away_runs_distribution_model.metadata.json"}),
+        encoding="utf-8",
+    )
+    stage3_vs_control = tmp_path / "artifact.vs_control.json"
+    stage3_vs_control.write_text(json.dumps({"stage3_distribution_metrics": {}}), encoding="utf-8")
+
+    mcmc_dir = tmp_path / "mcmc"
+    mcmc_dir.mkdir()
+    mcmc_report = mcmc_dir / "artifact.mcmc_eval.json"
+    mcmc_report.write_text(json.dumps({"model_name": "full_game_away_runs_mcmc_model"}), encoding="utf-8")
+    mcmc_vs_control = mcmc_dir / "artifact.vs_control.json"
+    mcmc_vs_control.write_text(json.dumps({"challenger_label": "stage4_mcmc"}), encoding="utf-8")
+    mcmc_vs_stage3 = mcmc_dir / "artifact.vs_stage3.json"
+    mcmc_vs_stage3.write_text(json.dumps({"challenger_label": "stage4_mcmc"}), encoding="utf-8")
+
+    walk_forward_dir = tmp_path / "walk_forward"
+    walk_forward_dir.mkdir()
+    (walk_forward_dir / "artifact.stage3_walk_forward.json").write_text(
+        json.dumps({"lane_key": "best_distribution_lane", "betting_evidence": {"available": False}}),
+        encoding="utf-8",
+    )
+    (walk_forward_dir / "artifact.mcmc_walk_forward.json").write_text(
+        json.dumps({"lane_key": "best_mcmc_lane", "betting_evidence": {"available": False}}),
+        encoding="utf-8",
+    )
+
+    resolved = resolve_stage5_inputs(
+        current_control_path=current_control,
+        distribution_report_dir=tmp_path,
+        mcmc_report_dir=mcmc_dir,
+        walk_forward_report_dir=walk_forward_dir,
+    )
+    loaded = load_dual_view_inputs(resolved)
+
+    assert loaded["stage3_walk_forward_report"]["lane_key"] == "best_distribution_lane"
+    assert loaded["mcmc_walk_forward_report"]["lane_key"] == "best_mcmc_lane"

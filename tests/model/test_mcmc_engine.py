@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from src.model.mcmc_engine import (
     BASE_OUT_STATE_COUNT,
     apply_event_to_state,
     decode_state_index,
+    distribution_quantiles,
+    expected_runs_for_game,
+    expected_runs_per_half_inning,
     normalize_event_probabilities,
     simulate_away_game_distribution,
     simulate_half_inning,
     state_index,
+    summarize_distribution_shape,
 )
 
 
@@ -47,6 +52,18 @@ def test_half_inning_with_only_outs_terminates_in_three_plate_appearances() -> N
     assert inning.mean_plate_appearances == 3.0
     assert inning.event_counts["out"] == 24
     assert inning.truncated_half_innings == 0
+
+
+def test_expected_runs_helpers_increase_with_more_positive_event_mass() -> None:
+    conservative = normalize_event_probabilities(
+        {"out": 0.73, "walk_hbp": 0.07, "single": 0.12, "double": 0.04, "triple": 0.01, "home_run": 0.03}
+    )
+    aggressive = normalize_event_probabilities(
+        {"out": 0.63, "walk_hbp": 0.09, "single": 0.16, "double": 0.06, "triple": 0.01, "home_run": 0.05}
+    )
+
+    assert expected_runs_per_half_inning(aggressive) > expected_runs_per_half_inning(conservative)
+    assert expected_runs_for_game(starter_profile=aggressive, bullpen_profile=conservative, starter_innings=5) > 0.0
 
 
 def test_game_distribution_normalizes_and_is_reproducible_with_fixed_seed() -> None:
@@ -87,4 +104,20 @@ def test_game_distribution_normalizes_and_is_reproducible_with_fixed_seed() -> N
     np.testing.assert_allclose(first.pmf.sum(), 1.0, atol=1e-12)
     np.testing.assert_allclose(first.pmf, second.pmf, atol=1e-12)
     np.testing.assert_array_equal(first.simulated_runs, second.simulated_runs)
+    assert first.quantiles["p50"] >= first.quantiles["p25"]
+    assert first.shape_summary["entropy"] > 0.0
     assert first.diagnostics["truncated_half_innings"] == 0
+
+
+def test_distribution_quantiles_and_shape_summary_cover_discrete_run_distribution() -> None:
+    support = np.array([0, 1, 2, 3], dtype=int)
+    probabilities = np.array([0.10, 0.20, 0.30, 0.40], dtype=float)
+
+    quantiles = distribution_quantiles(support, probabilities, quantiles=(0.25, 0.50, 0.75))
+    shape = summarize_distribution_shape(support, probabilities, quantiles=quantiles)
+
+    assert quantiles == {"p25": 1.0, "p50": 2.0, "p75": 3.0}
+    assert shape["variance"] == pytest.approx(1.0)
+    assert shape["stddev"] == pytest.approx(1.0)
+    assert shape["iqr"] == pytest.approx(2.0)
+    assert shape["entropy"] == pytest.approx(1.2798542258)

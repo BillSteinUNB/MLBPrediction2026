@@ -15,6 +15,7 @@ from src.ops.run_count_dual_view import (  # noqa: E402
     DEFAULT_DISTRIBUTION_REPORT_DIR,
     DEFAULT_DUAL_VIEW_OUTPUT_DIR,
     DEFAULT_MCMC_REPORT_DIR,
+    DEFAULT_WALK_FORWARD_REPORT_DIR,
     build_dual_view_payload,
     load_dual_view_inputs,
     resolve_stage5_inputs,
@@ -34,7 +35,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mcmc-report-json", default=None)
     parser.add_argument("--mcmc-vs-control-json", default=None)
     parser.add_argument("--mcmc-vs-stage3-json", default=None)
-    parser.add_argument("--walk-forward-report-json", default=None)
+    parser.add_argument("--walk-forward-report-dir", default=str(DEFAULT_WALK_FORWARD_REPORT_DIR))
+    parser.add_argument("--stage3-walk-forward-report-json", default=None)
+    parser.add_argument("--mcmc-walk-forward-report-json", default=None)
     parser.add_argument("--output-dir", default=str(DEFAULT_DUAL_VIEW_OUTPUT_DIR))
     args = parser.parse_args(argv)
 
@@ -47,7 +50,9 @@ def main(argv: list[str] | None = None) -> int:
         mcmc_vs_control_json=args.mcmc_vs_control_json,
         mcmc_vs_stage3_json=args.mcmc_vs_stage3_json,
         mcmc_report_dir=args.mcmc_report_dir,
-        walk_forward_report_json=args.walk_forward_report_json,
+        stage3_walk_forward_report_json=args.stage3_walk_forward_report_json,
+        mcmc_walk_forward_report_json=args.mcmc_walk_forward_report_json,
+        walk_forward_report_dir=args.walk_forward_report_dir,
     )
     loaded_inputs = load_dual_view_inputs(resolved_inputs)
     payload = build_dual_view_payload(
@@ -57,7 +62,8 @@ def main(argv: list[str] | None = None) -> int:
         mcmc_report=loaded_inputs["mcmc_report"],
         mcmc_vs_control=loaded_inputs["mcmc_vs_control"],
         mcmc_vs_stage3=loaded_inputs["mcmc_vs_stage3"],
-        walk_forward_report=loaded_inputs["walk_forward_report"],
+        stage3_walk_forward_report=loaded_inputs["stage3_walk_forward_report"],
+        mcmc_walk_forward_report=loaded_inputs["mcmc_walk_forward_report"],
         source_paths=loaded_inputs["source_paths"],
     )
     output_paths = write_dual_view_outputs(

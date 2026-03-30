@@ -6,6 +6,8 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
+from src.model.mcmc_engine import distribution_quantiles, summarize_distribution_shape
+
 
 @dataclass(frozen=True, slots=True)
 class AwayRunDistributionSummary:
@@ -14,6 +16,8 @@ class AwayRunDistributionSummary:
     shutout_probability: float
     tail_probabilities: dict[str, float]
     central_intervals: dict[str, dict[str, float | int]]
+    quantiles: dict[str, float]
+    shape_summary: dict[str, float]
 
 
 def normalize_probability_vector(probabilities: Sequence[float] | np.ndarray) -> np.ndarray:
@@ -45,6 +49,7 @@ def summarize_away_run_distribution(
         "p_ge_5": tail_probability(resolved_support, normalized, threshold=5),
         "p_ge_10": tail_probability(resolved_support, normalized, threshold=10),
     }
+    quantiles = distribution_quantiles(resolved_support, normalized, quantiles=(0.25, 0.50, 0.75))
     return AwayRunDistributionSummary(
         away_run_pmf=[
             {"runs": int(run_value), "probability": float(probability)}
@@ -58,6 +63,12 @@ def summarize_away_run_distribution(
             "central_80": central_interval(resolved_support, cdf, nominal_coverage=0.80),
             "central_95": central_interval(resolved_support, cdf, nominal_coverage=0.95),
         },
+        quantiles=quantiles,
+        shape_summary=summarize_distribution_shape(
+            resolved_support,
+            normalized,
+            quantiles=quantiles,
+        ),
     )
 
 
@@ -171,6 +182,7 @@ def flatten_mcmc_report_row(
     distribution_metrics: Mapping[str, Any],
     control_comparison: Mapping[str, Any],
     stage3_comparison: Mapping[str, Any] | None,
+    summary_feature_aggregates: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     row = {
         "model_version": model_version,
@@ -192,6 +204,8 @@ def flatten_mcmc_report_row(
     if stage3_comparison is not None:
         row["beats_stage3_on_crps"] = stage3_comparison["improvement_flags"]["beats_baseline_on_crps"]
         row["beats_stage3_on_negative_log_score"] = stage3_comparison["improvement_flags"]["beats_baseline_on_negative_log_score"]
+    if summary_feature_aggregates is not None:
+        row.update(dict(summary_feature_aggregates))
     return row
 
 

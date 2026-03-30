@@ -57,6 +57,8 @@ class AwayGameSimulationResult:
     expected_runs: float
     shutout_probability: float
     tail_probabilities: dict[str, float]
+    quantiles: dict[str, float]
+    shape_summary: dict[str, float]
     diagnostics: dict[str, object]
 
 
@@ -92,6 +94,54 @@ def normalize_event_probabilities(probabilities: Mapping[str, float]) -> EventPr
         double=float(normalized[3]),
         triple=float(normalized[4]),
         home_run=float(normalized[5]),
+    )
+
+
+def expected_runs_per_half_inning(
+    profile: EventProbabilityProfile | Mapping[str, float],
+) -> float:
+    resolved_profile = (
+        profile if isinstance(profile, EventProbabilityProfile) else normalize_event_probabilities(profile)
+    )
+    transition_matrix = np.zeros((BASE_OUT_STATE_COUNT, BASE_OUT_STATE_COUNT), dtype=float)
+    expected_immediate_runs = np.zeros(BASE_OUT_STATE_COUNT, dtype=float)
+
+    for outs in range(3):
+        for bases in range(8):
+            current_state = state_index(outs=outs, bases=bases)
+            for event_name, event_probability in resolved_profile.as_dict().items():
+                next_outs, next_bases, runs_scored, inning_over = apply_event_to_state(
+                    outs=outs,
+                    bases=bases,
+                    event=event_name,
+                )
+                expected_immediate_runs[current_state] += float(event_probability) * float(runs_scored)
+                if inning_over:
+                    continue
+                next_state = state_index(outs=next_outs, bases=next_bases)
+                transition_matrix[current_state, next_state] += float(event_probability)
+
+    expected_future_runs = np.linalg.solve(
+        np.eye(BASE_OUT_STATE_COUNT, dtype=float) - transition_matrix,
+        expected_immediate_runs,
+    )
+    return float(expected_future_runs[state_index(outs=0, bases=0)])
+
+
+def expected_runs_for_game(
+    *,
+    starter_profile: EventProbabilityProfile | Mapping[str, float],
+    bullpen_profile: EventProbabilityProfile | Mapping[str, float],
+    innings: int = DEFAULT_GAME_INNINGS,
+    starter_innings: int = DEFAULT_STARTER_INNINGS,
+) -> float:
+    resolved_innings = max(1, int(innings))
+    resolved_starter_innings = min(max(0, int(starter_innings)), resolved_innings)
+    starter_expected = expected_runs_per_half_inning(starter_profile)
+    bullpen_expected = expected_runs_per_half_inning(bullpen_profile)
+    return float(
+        (resolved_starter_innings * starter_expected)
+        + ((resolved_innings - resolved_starter_innings) * bullpen_expected)
     )
 
 
@@ -305,6 +355,12 @@ def simulate_away_game_distribution(
         "p_ge_5": float(np.mean(simulated_runs >= 5)),
         "p_ge_10": float(np.mean(simulated_runs >= 10)),
     }
+    quantiles = distribution_quantiles(support, pmf, quantiles=(0.25, 0.50, 0.75))
+    shape_summary = summarize_distribution_shape(
+        support,
+        pmf,
+        quantiles=quantiles,
+    )
 
     return AwayGameSimulationResult(
         support=support,
@@ -313,6 +369,8 @@ def simulate_away_game_distribution(
         expected_runs=float(np.mean(simulated_runs)),
         shutout_probability=float(pmf[0]) if len(pmf) > 0 else 0.0,
         tail_probabilities=tail_probabilities,
+        quantiles=quantiles,
+        shape_summary=shape_summary,
         diagnostics={
             "simulation_count": resolved_simulations,
             "innings": resolved_innings,
@@ -349,6 +407,73 @@ def pad_probability_vector(
     return padded / total
 
 
+def distribution_quantiles(
+    support: Sequence[int] | np.ndarray,
+    probabilities: Sequence[float] | np.ndarray,
+    *,
+    quantiles: Sequence[float] = (0.25, 0.50, 0.75),
+) -> dict[str, float]:
+    resolved_support = np.asarray(list(support), dtype=float)
+    normalized = _normalize_probability_array(probabilities)
+    if len(resolved_support) != len(normalized):
+        raise ValueError("support and probabilities must have matching lengths")
+
+    cdf = np.cumsum(normalized)
+    result: dict[str, float] = {}
+    for quantile in quantiles:
+        resolved_quantile = float(quantile)
+        if resolved_quantile < 0.0 or resolved_quantile > 1.0:
+            raise ValueError("quantiles must be between 0 and 1")
+        index = int(np.argmax(cdf >= resolved_quantile))
+        result[f"p{int(round(resolved_quantile * 100.0))}"] = float(resolved_support[index])
+    return result
+
+
+def summarize_distribution_shape(
+    support: Sequence[int] | np.ndarray,
+    probabilities: Sequence[float] | np.ndarray,
+    *,
+    quantiles: Mapping[str, float] | None = None,
+) -> dict[str, float]:
+    resolved_support = np.asarray(list(support), dtype=float)
+    normalized = _normalize_probability_array(probabilities)
+    if len(resolved_support) != len(normalized):
+        raise ValueError("support and probabilities must have matching lengths")
+
+    expected_value = float(np.dot(resolved_support, normalized))
+    centered = resolved_support - expected_value
+    variance = float(np.dot(centered**2, normalized))
+    resolved_quantiles = (
+        dict(quantiles)
+        if quantiles is not None
+        else distribution_quantiles(resolved_support, normalized, quantiles=(0.25, 0.50, 0.75))
+    )
+    entropy = float(
+        -np.sum(
+            normalized[normalized > 0.0] * np.log(normalized[normalized > 0.0])
+        )
+    )
+    p25 = float(resolved_quantiles.get("p25", expected_value))
+    p75 = float(resolved_quantiles.get("p75", expected_value))
+    return {
+        "variance": variance,
+        "stddev": float(np.sqrt(max(variance, 0.0))),
+        "entropy": entropy,
+        "iqr": float(p75 - p25),
+    }
+
+
+def _normalize_probability_array(probabilities: Sequence[float] | np.ndarray) -> np.ndarray:
+    array = np.asarray(probabilities, dtype=float)
+    if array.ndim != 1:
+        raise ValueError("probabilities must be one-dimensional")
+    clipped = np.clip(array, 0.0, None)
+    total = float(clipped.sum())
+    if total <= 0.0:
+        raise ValueError("probabilities must contain positive mass")
+    return clipped / total
+
+
 __all__ = [
     "AwayGameSimulationResult",
     "BASE_OUT_STATE_COUNT",
@@ -361,9 +486,13 @@ __all__ = [
     "HalfInningSimulationResult",
     "apply_event_to_state",
     "decode_state_index",
+    "distribution_quantiles",
+    "expected_runs_for_game",
+    "expected_runs_per_half_inning",
     "normalize_event_probabilities",
     "pad_probability_vector",
     "simulate_away_game_distribution",
     "simulate_half_inning",
+    "summarize_distribution_shape",
     "state_index",
 ]

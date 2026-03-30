@@ -35,6 +35,11 @@ def test_summarize_away_run_distribution_reports_expected_runs_tails_and_interva
     )
     assert summary.central_intervals["central_80"]["lower_bound"] == 0
     assert summary.central_intervals["central_80"]["upper_bound"] == 3
+    assert summary.quantiles == {"p25": 1.0, "p50": 2.0, "p75": 3.0}
+    assert math.isclose(summary.shape_summary["variance"], 1.0, rel_tol=1e-12)
+    assert math.isclose(summary.shape_summary["stddev"], 1.0, rel_tol=1e-12)
+    assert math.isclose(summary.shape_summary["iqr"], 2.0, rel_tol=1e-12)
+    assert math.isclose(summary.shape_summary["entropy"], 1.2798542258, rel_tol=1e-9)
     assert summary.away_run_pmf[-1] == {"runs": 3, "probability": 0.4}
 
 
