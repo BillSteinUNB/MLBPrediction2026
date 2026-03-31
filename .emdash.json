@@ -1,0 +1,3 @@
+{
+  "shellSetup": "cmd.exe /c \"set PATH=C:\\Users\\bills\\AppData\\Roaming\\npm;C:\\Users\\bills\\bin;E:\\Random Programs\\cursor\\resources\\app\\bin;C:\\Program Files\\cursor\\resources\\app\\bin;%PATH%\""
+}
