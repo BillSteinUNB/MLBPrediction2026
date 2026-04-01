@@ -1,31 +1,27 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./Layout";
-import OverviewPage from "./pages/OverviewPage";
-import LaneExplorerPage from "./pages/LaneExplorerPage";
-import ComparePage from "./pages/ComparePage";
-import RunDetailPage from "./pages/RunDetailPage";
-import PromotionBoardPage from "./pages/PromotionBoardPage";
-import SlatePage from "./pages/SlatePage";
-import LiveSeasonPage from "./pages/LiveSeasonPage";
+import LatestRunPage from "./pages/LatestRunPage";
+import StageCardsPage from "./pages/StageCardsPage";
+import BenchmarkComparePage from "./pages/BenchmarkComparePage";
+import RunLedgerPage from "./pages/RunLedgerPage";
+import BestRunsPage from "./pages/BestRunsPage";
+import PromotionSummaryPage from "./pages/PromotionSummaryPage";
 
-function App() {
+export default function App() {
   return (
-    <BrowserRouter>
+    <Router>
       <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<OverviewPage />} />
-          <Route path="slate" element={<SlatePage />} />
-          <Route path="live-season" element={<LiveSeasonPage />} />
-          <Route path="lanes" element={<LaneExplorerPage />} />
-          <Route path="compare" element={<ComparePage />} />
-          <Route path="runs/:summaryPath" element={<RunDetailPage />} />
-          <Route path="promotions" element={<PromotionBoardPage />} />
-          {/* Redirect unknown paths back to overview */}
-          <Route path="*" element={<Navigate to="/" replace />} />
+        <Route element={<Layout />}>
+          <Route index element={<Navigate to="/research/latest" replace />} />
+          <Route path="research/latest" element={<LatestRunPage />} />
+          <Route path="research/stages" element={<StageCardsPage />} />
+          <Route path="research/benchmark" element={<BenchmarkComparePage />} />
+          <Route path="history/ledger" element={<RunLedgerPage />} />
+          <Route path="history/best" element={<BestRunsPage />} />
+          <Route path="promotion" element={<PromotionSummaryPage />} />
+          <Route path="*" element={<Navigate to="/research/latest" replace />} />
         </Route>
       </Routes>
-    </BrowserRouter>
+    </Router>
   );
 }
-
-export default App;

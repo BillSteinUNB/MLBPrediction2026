@@ -1,95 +1,62 @@
-import React from "react";
-import { DeltaIndicator } from "./DeltaIndicator";
-import { TooltipLabel } from "./TooltipLabel";
-
-export interface MetricCardProps {
-  /** Metric display name (e.g. "ROC AUC") */
-  name: string;
-  /** Raw metric value — will be formatted to 4 decimal places */
-  value: number | null;
-  /** Optional delta vs previous run */
-  delta?: number | null;
-  /**
-   * Direction rule: true for accuracy/roc_auc (higher = better),
-   * false for log_loss/brier/ece/reliability_gap (lower = better).
-   */
-  higherIsBetter?: boolean;
-  /** Optional unit suffix (e.g. "%") */
-  unit?: string;
-}
-
-/* ---- Style tokens (aligned to layout.css variables) ---- */
-const containerStyle: React.CSSProperties = {
-  minWidth: 180,
-  background: "var(--bg-panel)",
-  border: "1px solid var(--border)",
-  borderRadius: 10,
-  padding: 14,
-  boxSizing: "border-box",
-  fontFamily: "Arial, Helvetica, sans-serif",
-  color: "var(--text-h)",
-  display: "grid",
-  gridTemplateRows: "auto 1fr auto",
-  gap: 6,
-};
-
-const nameStyle: React.CSSProperties = {
-  fontSize: 12,
-  fontWeight: 500,
-  color: "var(--text)",
-  margin: 0,
-  textTransform: "uppercase",
-  letterSpacing: "0.04em",
-};
-
-const valueRowStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "baseline",
-  gap: 6,
-};
-
-const valueStyle: React.CSSProperties = {
-  fontSize: 24,
-  fontWeight: 600,
-  color: "var(--text-h)",
-  margin: 0,
-  fontFamily: "ui-monospace, Consolas, monospace",
-};
-
-const unitStyle: React.CSSProperties = {
-  fontSize: 12,
-  color: "var(--muted)",
-  margin: 0,
-};
-
 /**
- * Format a numeric value to 4 decimal places.
- * Returns "—" for null/undefined/NaN values.
+ * MetricCard — Displays a single metric with label, value, optional delta, and optional unit.
+ * Handles null values by showing "—" (never "0").
  */
-function formatValue(val: number | null): string {
-  if (val === null || val === undefined || Number.isNaN(val)) return "\u2014";
-  return val.toFixed(4);
+import type { ReactNode } from 'react';
+import { DeltaBadge } from './DeltaBadge';
+
+interface MetricCardProps {
+  /** Uppercase label shown above the value */
+  label: string;
+  /** Numeric or string value; null renders as "—" */
+  value: number | string | null;
+  /** Unit suffix displayed after the value (e.g. "%") */
+  unit?: string;
+  /** Delta value shown as a badge next to the value */
+  delta?: number | null;
+  /** When true, negative delta is good (for loss metrics like CRPS) */
+  deltaInverted?: boolean;
+  /** Optional icon shown before the label */
+  icon?: ReactNode;
+  /** Decimal places for numeric values (default 3) */
+  precision?: number;
 }
 
-export const MetricCard: React.FC<MetricCardProps> = ({
-  name,
+export function MetricCard({
+  label,
   value,
-  delta,
-  higherIsBetter = true,
   unit,
-}) => {
+  delta,
+  deltaInverted = false,
+  icon,
+  precision = 3,
+}: MetricCardProps) {
+  const formatted =
+    value == null
+      ? '—'
+      : typeof value === 'number'
+        ? value.toFixed(precision)
+        : value;
+
   return (
-    <div style={containerStyle} data-metric={name}>
-      <TooltipLabel label={name} as="p" style={nameStyle} />
-      <div style={valueRowStyle}>
-        <p style={valueStyle}>{formatValue(value)}</p>
-        {unit ? <span style={unitStyle}>{unit}</span> : null}
+    <div className="flex flex-col gap-1.5 rounded-xl bg-well/80 px-4 py-3">
+      <div className="flex items-center gap-2">
+        {icon && <span className="text-ink-dim">{icon}</span>}
+        <span className="text-[11px] font-bold uppercase tracking-widest text-ink-dim">
+          {label}
+        </span>
       </div>
-      {delta !== undefined && delta !== null ? (
-        <DeltaIndicator value={delta} higherIsBetter={higherIsBetter} />
-      ) : null}
+      <div className="flex items-baseline gap-2">
+        <span className="font-heading text-2xl font-extrabold text-ink">
+          {formatted}
+        </span>
+        {unit && value != null && (
+          <span className="text-xs font-medium text-ink-dim">{unit}</span>
+        )}
+        {delta != null && (
+          <DeltaBadge value={delta} inverted={deltaInverted} precision={precision} />
+        )}
+      </div>
     </div>
   );
-};
-
-export default MetricCard;
+}
