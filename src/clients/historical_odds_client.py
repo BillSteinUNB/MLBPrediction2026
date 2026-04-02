@@ -155,6 +155,7 @@ MarketTypeLiteral = Literal[
     "full_game_team_total_away",
 ]
 SnapshotSelectionLiteral = Literal["latest", "opening"]
+_MULTI_DB_SEPARATORS = (";", "|")
 
 
 def import_historical_odds(
@@ -297,7 +298,7 @@ def import_historical_odds(
 
 def load_historical_odds_for_games(
     *,
-    db_path: str | Path,
+    db_path: str | Path | Sequence[str | Path],
     game_pks: Sequence[int] | None = None,
     games_frame: pd.DataFrame | None = None,
     market_type: str = "f5_ml",
@@ -314,28 +315,55 @@ def load_historical_odds_for_games(
     if games_frame is not None and not games_frame.empty and "game_pk" in games_frame.columns:
         resolved_game_pks = [int(game_pk) for game_pk in games_frame["game_pk"].dropna().astype(int).tolist()]
 
-    resolved_db_path = Path(db_path)
-    connection_path = resolved_db_path if resolved_db_path.exists() else init_db(resolved_db_path)
-    with sqlite3.connect(connection_path) as connection:
-        schema_name = _detect_historical_odds_schema(connection)
-        if schema_name == "canonical":
-            return _load_canonical_historical_odds_for_games(
+    requested = _prepare_requested_game_frame(games_frame) if games_frame is not None else pd.DataFrame()
+    frames: list[pd.DataFrame] = []
+    old_scraper_snapshots: list[pd.DataFrame] = []
+    for resolved_db_path in _resolve_historical_db_paths(db_path):
+        connection_path = resolved_db_path if resolved_db_path.exists() else init_db(resolved_db_path)
+        with sqlite3.connect(connection_path) as connection:
+            schema_name = _detect_historical_odds_schema(connection)
+            if schema_name == "canonical":
+                frame = _load_canonical_historical_odds_for_games(
+                    connection=connection,
+                    game_pks=resolved_game_pks,
+                    games_frame=games_frame,
+                    market_type=market_type,
+                    book_name=book_name,
+                    max_abs_odds=max_abs_odds,
+                    snapshot_selection=snapshot_selection,
+                )
+                if not frame.empty:
+                    frame["source_origin"] = "canonical"
+                    frame["source_db_path"] = str(connection_path)
+                    frames.append(frame)
+                continue
+            snapshots = _load_old_scraper_paired_snapshots_for_games(
                 connection=connection,
-                game_pks=resolved_game_pks,
-                games_frame=games_frame,
+                requested=requested,
                 market_type=market_type,
                 book_name=book_name,
                 max_abs_odds=max_abs_odds,
-                snapshot_selection=snapshot_selection,
+                source_db_path=str(connection_path),
             )
-        return _load_old_scraper_historical_odds_for_games(
-            connection=connection,
-            games_frame=games_frame,
-            market_type=market_type,
-            book_name=book_name,
-            max_abs_odds=max_abs_odds,
+            if not snapshots.empty:
+                old_scraper_snapshots.append(snapshots)
+
+    if old_scraper_snapshots:
+        combined_snapshots = pd.concat(old_scraper_snapshots, ignore_index=True)
+        old_frame = _match_requested_games_to_old_scraper_snapshots(
+            requested=requested,
+            snapshots=combined_snapshots,
             snapshot_selection=snapshot_selection,
+            aggregate_consensus=book_name is None,
         )
+        if not old_frame.empty:
+            frames.append(old_frame)
+
+    if not frames:
+        return _empty_loaded_odds_frame()
+    if len(frames) == 1:
+        return frames[0].copy()
+    return _merge_loaded_historical_odds_frames(frames)
 
 
 def _load_canonical_historical_odds_for_games(
@@ -455,13 +483,69 @@ def _load_old_scraper_historical_odds_for_games(
     if requested.empty:
         return _empty_loaded_odds_frame()
 
+    snapshots = _load_old_scraper_paired_snapshots_for_games(
+        connection=connection,
+        requested=requested,
+        market_type=market_type,
+        book_name=book_name,
+        max_abs_odds=max_abs_odds,
+        source_db_path=None,
+    )
+    if snapshots.empty:
+        return _empty_loaded_odds_frame()
+
+    matched = _match_requested_games_to_old_scraper_snapshots(
+        requested=requested,
+        snapshots=snapshots,
+        snapshot_selection=snapshot_selection,
+        aggregate_consensus=book_name is None,
+    )
+    if matched.empty:
+        return _empty_loaded_odds_frame()
+    return matched
+
+
+def _load_old_scraper_paired_snapshots_for_games(
+    *,
+    connection: sqlite3.Connection,
+    requested: pd.DataFrame,
+    market_type: str,
+    book_name: str | None,
+    max_abs_odds: int,
+    source_db_path: str | None,
+) -> pd.DataFrame:
     min_date = (requested["request_game_date"].min() - timedelta(days=2)).isoformat()
     max_date = (requested["request_game_date"].max() + timedelta(days=2)).isoformat()
-    query = """
+    odds_columns = _table_columns(connection, "odds")
+    has_commence_time_utc = "commence_time_utc" in odds_columns
+    has_commence_time = "commence_time" in odds_columns
+    has_fetched_at = "fetched_at" in odds_columns
+    commence_time_utc_expr = _first_non_empty_sql(
+        *(
+            expression
+            for expression in (
+                "commence_time_utc" if has_commence_time_utc else None,
+                "commence_time" if has_commence_time else None,
+            )
+            if expression is not None
+        )
+    )
+    fetched_at_expr = _first_non_empty_sql(
+        *(
+            expression
+            for expression in (
+                "fetched_at" if has_fetched_at else None,
+                "commence_time_utc" if has_commence_time_utc else None,
+                "commence_time" if has_commence_time else None,
+            )
+            if expression is not None
+        )
+    )
+    query = f"""
         SELECT
             event_id,
             game_date,
-            COALESCE(NULLIF(commence_time_utc, ''), NULLIF(commence_time, '')) AS commence_time_utc,
+            {commence_time_utc_expr} AS commence_time_utc,
             away_team,
             home_team,
             bookmaker AS book_name,
@@ -469,7 +553,7 @@ def _load_old_scraper_historical_odds_for_games(
             side,
             point,
             price,
-            COALESCE(NULLIF(fetched_at, ''), COALESCE(NULLIF(commence_time_utc, ''), NULLIF(commence_time, ''))) AS fetched_at,
+            {fetched_at_expr} AS fetched_at,
             COALESCE(is_opening, 0) AS is_opening
         FROM odds
         WHERE market_type = ?
@@ -488,19 +572,9 @@ def _load_old_scraper_historical_odds_for_games(
         raw,
         market_type=_coerce_market_type_literal(market_type),
         max_abs_odds=max_abs_odds,
+        source_db_path=source_db_path,
     )
-    if paired.empty:
-        return _empty_loaded_odds_frame()
-
-    matched = _match_requested_games_to_old_scraper_snapshots(
-        requested=requested,
-        snapshots=paired,
-        snapshot_selection=snapshot_selection,
-        aggregate_consensus=book_name is None,
-    )
-    if matched.empty:
-        return _empty_loaded_odds_frame()
-    return matched
+    return paired
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -639,6 +713,20 @@ def _table_exists(connection: sqlite3.Connection, table_name: str) -> bool:
     return row is not None
 
 
+def _table_columns(connection: sqlite3.Connection, table_name: str) -> set[str]:
+    rows = connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {str(row[1]) for row in rows if len(row) > 1}
+
+
+def _first_non_empty_sql(*column_names: str) -> str:
+    if not column_names:
+        return "NULL"
+    expressions = [f"NULLIF({column_name}, '')" for column_name in column_names]
+    if len(expressions) == 1:
+        return expressions[0]
+    return f"COALESCE({', '.join(expressions)})"
+
+
 def _empty_loaded_odds_frame() -> pd.DataFrame:
     return pd.DataFrame(
         columns=[
@@ -654,6 +742,8 @@ def _empty_loaded_odds_frame() -> pd.DataFrame:
             "under_odds",
             "fetched_at",
             "source_schema",
+            "source_origin",
+            "source_db_path",
         ]
     )
 
@@ -721,6 +811,7 @@ def _pair_old_scraper_market_rows(
     *,
     market_type: MarketTypeLiteral,
     max_abs_odds: int,
+    source_db_path: str | None,
 ) -> pd.DataFrame:
     working = raw.copy()
     working["price"] = pd.to_numeric(working["price"], errors="coerce")
@@ -746,7 +837,17 @@ def _pair_old_scraper_market_rows(
     )
     working["home_team_norm"] = working["home_team"].map(_normalize_team_code)
     working["away_team_norm"] = working["away_team"].map(_normalize_team_code)
+    working["source_origin"] = working["book_name"].map(_classify_old_scraper_book_origin)
+    working["source_db_path"] = source_db_path
     working = working.dropna(subset=["home_team_norm", "away_team_norm"]).copy()
+
+    if market_type in {"f5_rl", "full_game_rl"}:
+        working["point_key"] = working["point"].abs()
+    elif _is_total_market_type(market_type):
+        working["point_key"] = working["point"]
+    else:
+        # pivot_table drops rows when an index key is NaN, so give ML a stable sentinel.
+        working["point_key"] = 0.0
 
     index_columns = [
         "event_id",
@@ -757,8 +858,11 @@ def _pair_old_scraper_market_rows(
         "away_team_norm",
         "home_team_norm",
         "book_name",
+        "source_origin",
+        "source_db_path",
         "market_type",
         "snapshot_time",
+        "point_key",
     ]
     prices = (
         working.pivot_table(index=index_columns, columns="side", values="price", aggfunc="last")
@@ -788,6 +892,22 @@ def _pair_old_scraper_market_rows(
         how="left",
     )
     snapshots["fetched_at"] = snapshots["snapshot_time"]
+    for column in (
+        "price_home",
+        "price_away",
+        "price_over",
+        "price_under",
+        "point_home",
+        "point_away",
+        "point_over",
+        "point_under",
+        "opening_home",
+        "opening_away",
+        "opening_over",
+        "opening_under",
+    ):
+        if column not in snapshots.columns:
+            snapshots[column] = np.nan
 
     if market_type in {"f5_ml", "full_game_ml", "f5_rl", "full_game_rl"}:
         snapshots = snapshots.rename(
@@ -806,6 +926,11 @@ def _pair_old_scraper_market_rows(
         snapshots["total_point"] = np.nan
         snapshots["over_odds"] = np.nan
         snapshots["under_odds"] = np.nan
+        snapshots["line_present"] = np.where(
+            market_type.endswith("rl"),
+            snapshots["home_point"].notna() & snapshots["away_point"].notna(),
+            True,
+        )
         snapshots["opening_rank"] = np.where(
             snapshots[["home_is_opening", "away_is_opening"]].fillna(0).max(axis=1) > 0,
             0,
@@ -833,6 +958,7 @@ def _pair_old_scraper_market_rows(
         snapshots["away_odds"] = np.nan
         snapshots["home_point"] = np.nan
         snapshots["away_point"] = np.nan
+        snapshots["line_present"] = snapshots["total_point"].notna()
         snapshots["opening_rank"] = np.where(
             snapshots[["over_is_opening", "under_is_opening"]].fillna(0).max(axis=1) > 0,
             0,
@@ -864,7 +990,10 @@ def _pair_old_scraper_market_rows(
             "under_odds",
             "fetched_at",
             "opening_rank",
+            "line_present",
             "source_schema",
+            "source_origin",
+            "source_db_path",
         ]
     ]
 
@@ -921,20 +1050,26 @@ def _match_requested_games_to_old_scraper_snapshots(
     )
     opening_rank = pd.to_numeric(merged["opening_rank"], errors="coerce").fillna(1)
     opening_snapshot_mask = opening_rank.eq(0)
+    line_present = pd.to_numeric(merged.get("line_present"), errors="coerce").fillna(0).astype(bool)
     if snapshot_selection == "opening":
         # Old scraper backfills store fetch time as scrape time, not archived market time.
         # The dedicated opener column is still explicitly pregame, so keep opener rows
         # when present while leaving latest/closing selection strict on real timestamps.
-        group_has_opening = opening_rank.groupby([merged["_request_id"], merged["event_id"]]).transform("min").eq(0)
+        eligible_opening_mask = opening_snapshot_mask & (
+            True
+            if str(merged["market_type"].iloc[0]).endswith("ml")
+            else line_present
+        )
+        group_has_opening = eligible_opening_mask.groupby([merged["_request_id"], merged["event_id"]]).transform("max")
         merged = merged.loc[~group_has_opening | opening_snapshot_mask].copy()
         opening_rank = pd.to_numeric(merged["opening_rank"], errors="coerce").fillna(1)
         opening_snapshot_mask = opening_rank.eq(0)
+        line_present = pd.to_numeric(merged.get("line_present"), errors="coerce").fillna(0).astype(bool)
 
-    eligibility_mask = (
-        merged["fetched_at"].notna()
-        & merged["effective_cutoff"].notna()
-        & (merged["fetched_at"] <= merged["effective_cutoff"])
-    )
+    # Old scraper archives do not preserve true snapshot capture time.
+    # `fetched_at` is the backfill scrape time, so using it as a historical
+    # pregame cutoff incorrectly drops valid archived rows.
+    eligibility_mask = pd.Series(True, index=merged.index)
     if snapshot_selection == "opening":
         eligibility_mask = eligibility_mask | opening_snapshot_mask
 
@@ -942,15 +1077,23 @@ def _match_requested_games_to_old_scraper_snapshots(
     if merged.empty:
         return _empty_loaded_odds_frame()
 
+    merged["source_priority"] = merged.get("source_origin", pd.Series(index=merged.index)).map(
+        _historical_source_priority
+    ).fillna(99)
     if snapshot_selection == "opening":
+        merged["line_priority"] = np.where(
+            merged["market_type"].astype(str).str.endswith("ml"),
+            0,
+            np.where(line_present, 0, 1),
+        )
         merged = merged.sort_values(
-            ["_request_id", "event_id", "book_name", "opening_rank", "snapshot_time"],
-            ascending=[True, True, True, True, True],
+            ["_request_id", "event_id", "book_name", "source_priority", "line_priority", "opening_rank", "snapshot_time"],
+            ascending=[True, True, True, True, True, True, True],
         )
     else:
         merged = merged.sort_values(
-            ["_request_id", "event_id", "book_name", "snapshot_time", "opening_rank"],
-            ascending=[True, True, True, False, True],
+            ["_request_id", "event_id", "book_name", "source_priority", "snapshot_time", "opening_rank"],
+            ascending=[True, True, True, True, False, True],
         )
     merged = merged.drop_duplicates(
         subset=["_request_id", "event_id", "book_name"],
@@ -966,10 +1109,13 @@ def _match_requested_games_to_old_scraper_snapshots(
             .reset_index(drop=True)
         )
         merged["book_name"] = "consensus"
+        merged["source_priority"] = merged.get("source_origin", pd.Series(index=merged.index)).map(
+            _historical_source_priority
+        ).fillna(99)
 
     merged = merged.sort_values(
-        ["_request_id", "date_matches", "delta_hours", "fetched_at"],
-        ascending=[True, False, True, False],
+        ["_request_id", "source_priority", "date_matches", "delta_hours", "fetched_at"],
+        ascending=[True, True, False, True, False],
     )
     matched = merged.drop_duplicates(subset=["_request_id"], keep="first").copy()
     if matched.empty:
@@ -990,6 +1136,8 @@ def _match_requested_games_to_old_scraper_snapshots(
             "under_odds",
             "fetched_at",
             "source_schema",
+            "source_origin",
+            "source_db_path",
         ]
     ].copy()
     if result["game_pk"].isna().all():
@@ -1147,8 +1295,100 @@ def _aggregate_old_scraper_consensus_snapshot(group: pd.DataFrame) -> pd.Series:
         "away_point": _average_numeric(group.get("away_point")),
         "total_point": _average_numeric(group.get("total_point")),
         "source_schema": first_row.get("source_schema", "old_scraper"),
+        "source_origin": _aggregate_source_origins(group.get("source_origin")),
+        "source_db_path": _aggregate_source_db_paths(group.get("source_db_path")),
     }
     return pd.Series(payload)
+
+
+def _resolve_historical_db_paths(db_path: str | Path | Sequence[str | Path]) -> list[Path]:
+    if isinstance(db_path, (str, Path)):
+        raw_values = [db_path]
+    else:
+        raw_values = list(db_path)
+    resolved: list[Path] = []
+    seen: set[str] = set()
+    for raw_value in raw_values:
+        if raw_value is None:
+            continue
+        if isinstance(raw_value, Path):
+            candidates = [raw_value]
+        else:
+            text = str(raw_value).strip()
+            if not text:
+                continue
+            candidates = [Path(text)]
+            for separator in _MULTI_DB_SEPARATORS:
+                if separator in text:
+                    candidates = [Path(part.strip()) for part in text.split(separator) if part.strip()]
+                    break
+        for candidate in candidates:
+            normalized = str(candidate)
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            resolved.append(candidate)
+    return resolved
+
+
+def _classify_old_scraper_book_origin(book_name: Any) -> str:
+    text = str(book_name or "").strip()
+    if text.startswith("OddsPortal:"):
+        return "oddsportal"
+    return "legacy_old_scraper"
+
+
+def _aggregate_source_origins(values: pd.Series | None) -> str:
+    if values is None:
+        return "unknown"
+    origins = sorted({str(value).strip() for value in values if str(value).strip()})
+    if not origins:
+        return "unknown"
+    if len(origins) == 1:
+        return origins[0]
+    return "hybrid_old_scraper"
+
+
+def _aggregate_source_db_paths(values: pd.Series | None) -> str | None:
+    if values is None:
+        return None
+    paths = sorted({str(value).strip() for value in values if str(value).strip()})
+    if not paths:
+        return None
+    return ";".join(paths)
+
+
+def _historical_source_priority(value: Any) -> int:
+    text = str(value or "").strip()
+    if text == "canonical":
+        return 0
+    if text == "oddsportal":
+        return 1
+    if text == "hybrid_old_scraper":
+        return 2
+    if text == "legacy_old_scraper":
+        return 3
+    return 99
+
+
+def _merge_loaded_historical_odds_frames(frames: Sequence[pd.DataFrame]) -> pd.DataFrame:
+    combined = pd.concat([frame.copy() for frame in frames if not frame.empty], ignore_index=True)
+    if combined.empty:
+        return _empty_loaded_odds_frame()
+    combined["source_priority"] = combined.get("source_origin", pd.Series(index=combined.index)).map(
+        _historical_source_priority
+    ).fillna(99)
+    combined["fetched_at"] = pd.to_datetime(combined["fetched_at"], utc=True, errors="coerce", format="mixed")
+    key_columns = ["game_pk"] if "game_pk" in combined.columns and combined["game_pk"].notna().any() else None
+    if key_columns is None:
+        key_columns = [
+            column
+            for column in ("market_type", "book_name", "source_origin", "source_db_path")
+            if column in combined.columns
+        ]
+    combined = combined.sort_values(["source_priority", "fetched_at"], ascending=[True, False])
+    merged = combined.drop_duplicates(subset=key_columns, keep="first").copy()
+    return merged.drop(columns=["source_priority"], errors="ignore")
 
 
 def _average_numeric(values: pd.Series | None) -> float | None:
