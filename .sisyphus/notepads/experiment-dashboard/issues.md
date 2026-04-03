@@ -1,1 +1,0 @@
-- 2026-03-21: `pytest` executable is not on PATH in this environment; tests must run via `python -m pytest`.

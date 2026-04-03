@@ -1,9 +1,0 @@
-# Feature engineering notes
-
-- `fetch_batting_stats()` in `src/clients/statcast_client.py` returns season-level FanGraphs leaderboards keyed by season/min_pa only; it is **not** date-scoped and is unsafe for historical lineup-weighted backfills unless an as-of player snapshot source is added.
-- `fetch_fielding_stats()` and `fetch_catcher_framing()` also return season snapshots rather than dated game-level defense histories, so true anti-leakage 30/60-game defense windows require a different source or persisted as-of snapshots.
-- `fetch_team_game_logs(log_type="pitching")` caches pitching logs separately from batting logs and flattens Baseball Reference MultiIndex columns into `Pitching_*` names such as `Pitching_Date` and `Pitching_IR`; downstream bullpen code must normalize against those names.
-- Canonical weather convention: `WeatherData.wind_direction_deg` stores meteorological **source-direction** degrees from OpenWeather. Relative to center-field orientation, `180°` means wind blowing out (positive factor), `0°` means blowing in (negative factor).
-- Baseline/Pythagorean features can source historical final and F5 runs directly from SQLite `games.final_home_runs`, `games.final_away_runs`, `games.f5_home_runs`, and `games.f5_away_runs`; they do not need pybaseball team-game-log scraping when those columns are populated.
-- Odds backfill now extracts event venue metadata (`venue`, `stadium`, or `site`) when available and defers `is_abs_active` until the real venue is known, so neutral-site ABS exceptions such as Mexico City can be handled safely during synthetic game-row creation.
-- Remaining odds refresh caveat: `_refresh_synthetic_game_row()` still falls back to the home team's default park when a later odds payload omits venue metadata, so a previously corrected neutral-site row can lose its explicit venue string even though deferred ABS state is preserved.

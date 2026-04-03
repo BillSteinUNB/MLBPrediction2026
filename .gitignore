@@ -55,6 +55,7 @@ data/autoresearch/**
 .sisyphus/
 .factory/
 .meteostat-cache/
+.emdash.json
 .pytest-cache-local/
 .pytest-tmp/
 .pytest_tmp/

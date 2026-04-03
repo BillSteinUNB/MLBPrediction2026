@@ -1,1 +1,0 @@
-- 2026-03-21: Implemented adapter-level mtime cache keyed by resolved models directory path and directory `st_mtime`; cache stores parsed `RunSummary` objects and is invalidated on directory timestamp change.
