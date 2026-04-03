@@ -4,7 +4,7 @@ This file is the repo-local MLB research reference for the away-run roadmap in `
 
 ## Important Repo Note
 
-- Root `ResearchInformation.md` is now a pointer to the MLB modeling docs and Stage 5 dual-view outputs.
+- `docs/research/ResearchInformation.md` is the pointer to the MLB modeling docs and Stage 5 dual-view outputs.
 - The old unrelated Micro-SaaS material was archived to `archive/research/ResearchInformation.micro_saas.md`.
 - Use this file and the roadmap when the task is about away-run modeling.
 

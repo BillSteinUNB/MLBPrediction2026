@@ -24,7 +24,7 @@ This plan assumes the following research claims are directionally correct and wo
 
 Important repo note:
 
-- The root file [ResearchInformation.md](/C:/Users/bills/Documents/Personal%20Code/MLBPrediction2026/ResearchInformation.md) is currently **not** MLB modeling research. It appears to be unrelated Micro-SaaS material.
+- The repo now uses [docs/research/ResearchInformation.md](/C:/Users/bills/Documents/Personal%20Code/MLBPrediction2026/docs/research/ResearchInformation.md) as the research landing page. The unrelated Micro-SaaS material lives under `archive/research/ResearchInformation.micro_saas.md`.
 - Future agents must **not** treat that file as the source of truth for this roadmap.
 - Stage 1 and Stage 5 include specific cleanup work to fix this repo confusion.
 
@@ -194,7 +194,7 @@ Stage 1 must do all of the following:
 The Stage 1 agent must execute work in this order:
 
 1. Read [ORCHESTRATOR_HANDOFF.md](/C:/Users/bills/Documents/Personal%20Code/MLBPrediction2026/docs/ORCHESTRATOR_HANDOFF.md)
-2. Read [MODEL_COMPARISON_TRACKER.md](/C:/Users/bills/Documents/Personal%20Code/MLBPrediction2026/MODEL_COMPARISON_TRACKER.md)
+2. Read [docs/research/MODEL_COMPARISON_TRACKER.md](/C:/Users/bills/Documents/Personal%20Code/MLBPrediction2026/docs/research/MODEL_COMPARISON_TRACKER.md)
 3. Inspect the existing top-level repo layout
 4. Create the new docs and report directories
 5. Implement `scripts/report_run_count_research_state.py`
@@ -272,7 +272,7 @@ Must contain:
 Must contain:
 
 - the accepted MLB research assumptions from this roadmap
-- a note that root `ResearchInformation.md` is unrelated and should not be treated as MLB research
+- a note that `docs/research/ResearchInformation.md` is the current research landing page and the unrelated material is archived
 - a concise rationale for:
   - distribution scoring
   - overdispersion / zero mass
@@ -288,7 +288,7 @@ Must contain:
 - "safe to ignore for most agents" list
 - current high-signal files for away-run research:
   - `docs/ORCHESTRATOR_HANDOFF.md`
-  - `MODEL_COMPARISON_TRACKER.md`
+  - `docs/research/MODEL_COMPARISON_TRACKER.md`
   - `src/model/run_count_trainer.py`
   - `src/model/data_builder.py`
   - `src/pipeline/daily.py`
@@ -490,7 +490,7 @@ The Stage 1 agent must report:
 2. registry row count
 3. selected control artifact
 4. any metadata inconsistencies found
-5. whether the root `ResearchInformation.md` mismatch was documented
+5. whether the research landing page and archive split were documented
 
 ---
 
@@ -781,7 +781,7 @@ Stage 5 must:
 
 1. Create `docs/INDEX.md` driven navigation if not already present.
 2. Move or archive confusing non-MLB research material:
-   - root `ResearchInformation.md` should either be replaced with actual MLB research or moved under `archive/`
+   - the research landing page should live under `docs/research/` and non-MLB material should stay under `archive/`
 3. Reorganize tests into subfolders:
    - `tests/model/`
    - `tests/ops/`

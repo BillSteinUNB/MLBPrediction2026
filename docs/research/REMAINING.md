@@ -67,8 +67,8 @@ This document tracks all incomplete items from the MLB F5 Betting Prediction Sys
 **Issue:** Integrity/anti-leakage tests validate synthetic fixture, not real training-data builder or cached dataset.
 **Required Fix:** Point tests at actual cached training artifact or builder path for real regression coverage.
 **Files Affected:**
-- `tests/test_data_integrity.py`
-- `tests/test_antileak.py`
+- `tests/pipeline/test_data_integrity.py`
+- `tests/model/test_antileak.py`
 
 ### fix-t30-clv-bookmaker-refresh
 **Status:** `pending`
@@ -82,7 +82,7 @@ This document tracks all incomplete items from the MLB F5 Betting Prediction Sys
 **Files Affected:**
 - `src/ops/performance_tracker.py`
 - `src/engine/bankroll.py` (placement flow)
-- `tests/test_performance_tracker.py`
+- `tests/ops/test_performance_tracker.py`
 
 ### fix-t31-breaker-retry-composition
 **Status:** `pending`
@@ -94,8 +94,8 @@ This document tracks all incomplete items from the MLB F5 Betting Prediction Sys
 **Files Affected:**
 - `src/ops/error_handler.py`
 - `src/pipeline/daily.py` (fetch wrappers)
-- `tests/test_error_handler.py`
-- `tests/test_pipeline_error_handling.py`
+- `tests/ops/test_error_handler.py`
+- `tests/pipeline/test_pipeline_error_handling.py`
 
 ---
 
@@ -148,13 +148,13 @@ This document tracks all incomplete items from the MLB F5 Betting Prediction Sys
 3. **Run remaining fixes manually (if workers timeout):**
    ```bash
    # Fix t28: Real training tests
-   pytest tests/test_data_integrity.py tests/test_antileak.py -v
+   pytest tests/pipeline/test_data_integrity.py tests/model/test_antileak.py -v
    
    # Fix t30: CLV bookmaker
-   pytest tests/test_performance_tracker.py -v
+   pytest tests/ops/test_performance_tracker.py -v
    
    # Fix t31: Breaker/retry composition  
-   pytest tests/test_error_handler.py tests/test_pipeline_error_handling.py -v
+   pytest tests/ops/test_error_handler.py tests/pipeline/test_pipeline_error_handling.py -v
    ```
 
 4. **Validate automation assertions:**
@@ -166,7 +166,7 @@ This document tracks all incomplete items from the MLB F5 Betting Prediction Sys
    python scripts/setup_env.py
    
    # Log rotation
-   ls -la logs/
+   ls -la archive/logs/
    ```
 
 ---

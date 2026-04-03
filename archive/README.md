@@ -1,12 +1,23 @@
 # Archive
 
-This directory holds superseded manual-training wrappers that were kept for reference instead of being deleted.
+This directory holds material that is intentionally preserved but is not part of the active repo workflow.
+
+Current archive buckets include:
+
+- `logs/`
+  - historical log bundles removed from the active top-level tree.
+- `experiments/`
+  - preserved scratch artifacts and archived investigation outputs.
+- `subprojects/`
+  - unrelated or retired subprojects moved out of the active repo tree.
+- `repo_root_scratch/`
+  - historical cleanup leftovers and one-off root experiments.
 
 Current archived manual run-count wrappers:
-- `scripts/manual_run_count/train_single_model.py`
-- `scripts/manual_run_count/rebuild_and_train_single_model.py`
-- `scripts/manual_run_count/rebuild_training_smoke.py`
-- `scripts/manual_run_count/build_working_parquet_model_1.ps1`
+- `archive/scripts/manual_run_count/train_single_model.py`
+- `archive/scripts/manual_run_count/rebuild_and_train_single_model.py`
+- `archive/scripts/manual_run_count/rebuild_training_smoke.py`
+- `archive/scripts/manual_run_count/build_working_parquet_model_1.ps1`
 
 The current manual workflow is:
 - build parquet: [`scripts/build_parquet.py`](/C:/Users/bills/Documents/Personal%20Code/MLBPrediction2026/scripts/build_parquet.py)

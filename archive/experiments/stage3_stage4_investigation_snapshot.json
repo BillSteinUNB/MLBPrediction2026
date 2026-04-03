@@ -1,0 +1,1251 @@
+{
+  "coverage_by_season": [
+    {
+      "season": 2021,
+      "rows": 2429,
+      "market_priors_available": 1.0,
+      "market_anchor_confidence": 0.9992095512556607,
+      "market_implied_full_game_away_runs_mean": 4.2089616360298
+    },
+    {
+      "season": 2022,
+      "rows": 2430,
+      "market_priors_available": 0.9991769547325103,
+      "market_anchor_confidence": 0.9991769547325103,
+      "market_implied_full_game_away_runs_mean": 4.1276129709543685
+    },
+    {
+      "season": 2023,
+      "rows": 2430,
+      "market_priors_available": 0.9987654320987654,
+      "market_anchor_confidence": 0.9987160493827161,
+      "market_implied_full_game_away_runs_mean": 4.106513657145397
+    },
+    {
+      "season": 2024,
+      "rows": 2427,
+      "market_priors_available": 0.9909353110836424,
+      "market_anchor_confidence": 0.9773382777091059,
+      "market_implied_full_game_away_runs_mean": 4.1244842617585125
+    },
+    {
+      "season": 2025,
+      "rows": 2430,
+      "market_priors_available": 0.9897119341563786,
+      "market_anchor_confidence": 0.9893333333333333,
+      "market_implied_full_game_away_runs_mean": 4.1653730276650265
+    }
+  ],
+  "selected_market_features": {
+    "dispersion": [
+      "market_anchor_confidence",
+      "market_f5_total_under_implied_prob",
+      "market_implied_minus_control_mu"
+    ],
+    "zero": [
+      "market_away_run_share_anchor",
+      "market_f5_away_fair_prob",
+      "market_f5_away_implied_prob",
+      "market_f5_home_fair_prob",
+      "market_f5_home_implied_prob",
+      "market_f5_rl_away_point",
+      "market_f5_rl_home_point",
+      "market_full_game_away_fair_prob",
+      "market_full_game_away_implied_prob",
+      "market_full_game_home_fair_prob",
+      "market_full_game_home_implied_prob",
+      "market_full_game_rl_away_point",
+      "market_full_game_rl_home_point",
+      "market_implied_f5_away_runs",
+      "market_implied_full_game_away_runs",
+      "market_implied_minus_control_mu",
+      "market_run_environment_anchor"
+    ]
+  },
+  "selected_market_feature_correlations": [
+    {
+      "feature": "market_anchor_confidence",
+      "train_std": 0.0653130970456735,
+      "hold_std": 0.10119809252974643,
+      "train_nunique": 6,
+      "hold_nunique": 5,
+      "corr_zero_train": -0.0003092439574736541,
+      "corr_residual_train": 0.009308503441601156,
+      "corr_abs_residual_train": 0.010919645587367304,
+      "corr_disp_target_train": 0.01300723606084417
+    },
+    {
+      "feature": "market_away_run_share_anchor",
+      "train_std": 0.11971695871458404,
+      "hold_std": 0.10641176523183477,
+      "train_nunique": 2963,
+      "hold_nunique": 704,
+      "corr_zero_train": -0.07313971044367615,
+      "corr_residual_train": 0.04655024674291544,
+      "corr_abs_residual_train": 0.0804145706268669,
+      "corr_disp_target_train": -0.0014149039016741226
+    },
+    {
+      "feature": "market_f5_away_fair_prob",
+      "train_std": 0.0890725711502867,
+      "hold_std": 0.077065603420175,
+      "train_nunique": 515,
+      "hold_nunique": 81,
+      "corr_zero_train": -0.0808508229180502,
+      "corr_residual_train": 0.05327917918454297,
+      "corr_abs_residual_train": 0.08603657895585995,
+      "corr_disp_target_train": 0.005016677363532492
+    },
+    {
+      "feature": "market_f5_away_implied_prob",
+      "train_std": 0.09427467652229517,
+      "hold_std": 0.08154217837071634,
+      "train_nunique": 150,
+      "hold_nunique": 56,
+      "corr_zero_train": -0.08146127589330088,
+      "corr_residual_train": 0.05579319974731622,
+      "corr_abs_residual_train": 0.08682765038440873,
+      "corr_disp_target_train": 0.005467911331242379
+    },
+    {
+      "feature": "market_f5_home_fair_prob",
+      "train_std": 0.0890725711502867,
+      "hold_std": 0.07706560342017502,
+      "train_nunique": 514,
+      "hold_nunique": 81,
+      "corr_zero_train": 0.08085082291805017,
+      "corr_residual_train": -0.053279179184542974,
+      "corr_abs_residual_train": -0.0860365789558599,
+      "corr_disp_target_train": -0.005016677363532501
+    },
+    {
+      "feature": "market_f5_home_implied_prob",
+      "train_std": 0.09420363922422038,
+      "hold_std": 0.0813955638049052,
+      "train_nunique": 152,
+      "hold_nunique": 59,
+      "corr_zero_train": 0.07916444379642258,
+      "corr_residual_train": -0.04959044112660222,
+      "corr_abs_residual_train": -0.08312026952838154,
+      "corr_disp_target_train": -0.004081430946168066
+    },
+    {
+      "feature": "market_f5_rl_away_point",
+      "train_std": 0.7981732234896027,
+      "hold_std": 0.5871458530973518,
+      "train_nunique": 7,
+      "hold_nunique": 6,
+      "corr_zero_train": 0.054330461267506486,
+      "corr_residual_train": -0.024926945084406824,
+      "corr_abs_residual_train": -0.06416260639106904,
+      "corr_disp_target_train": 0.007864217733710821
+    },
+    {
+      "feature": "market_f5_rl_home_point",
+      "train_std": 0.7981732234896027,
+      "hold_std": 0.5871458530973518,
+      "train_nunique": 7,
+      "hold_nunique": 6,
+      "corr_zero_train": -0.054330461267506486,
+      "corr_residual_train": 0.024926945084406824,
+      "corr_abs_residual_train": 0.06416260639106904,
+      "corr_disp_target_train": -0.007864217733710821
+    },
+    {
+      "feature": "market_f5_total_under_implied_prob",
+      "train_std": 0.020403128071788002,
+      "hold_std": 0.02098114565882624,
+      "train_nunique": 45,
+      "hold_nunique": 13,
+      "corr_zero_train": 0.007730873486779661,
+      "corr_residual_train": 0.00648972745477514,
+      "corr_abs_residual_train": 0.019474190993153045,
+      "corr_disp_target_train": 0.015774537496270967
+    },
+    {
+      "feature": "market_full_game_away_fair_prob",
+      "train_std": 0.09456592698787093,
+      "hold_std": 0.08722113891505377,
+      "train_nunique": 289,
+      "hold_nunique": 104,
+      "corr_zero_train": -0.08097227838808467,
+      "corr_residual_train": 0.05091025959804294,
+      "corr_abs_residual_train": 0.08701029326277812,
+      "corr_disp_target_train": 0.007386945607226821
+    },
+    {
+      "feature": "market_full_game_away_implied_prob",
+      "train_std": 0.0989063436117265,
+      "hold_std": 0.09118705252834294,
+      "train_nunique": 156,
+      "hold_nunique": 71,
+      "corr_zero_train": -0.0811664937186576,
+      "corr_residual_train": 0.05216135493440209,
+      "corr_abs_residual_train": 0.087634865651115,
+      "corr_disp_target_train": 0.008188342577568505
+    },
+    {
+      "feature": "market_full_game_home_fair_prob",
+      "train_std": 0.09456592698787092,
+      "hold_std": 0.08722113891505377,
+      "train_nunique": 289,
+      "hold_nunique": 104,
+      "corr_zero_train": 0.08097227838808466,
+      "corr_residual_train": -0.05091025959804292,
+      "corr_abs_residual_train": -0.08701029326277812,
+      "corr_disp_target_train": -0.007386945607226794
+    },
+    {
+      "feature": "market_full_game_home_implied_prob",
+      "train_std": 0.09891545089331102,
+      "hold_std": 0.09119052282328587,
+      "train_nunique": 155,
+      "hold_nunique": 66,
+      "corr_zero_train": 0.08054459609246098,
+      "corr_residual_train": -0.04953925373075388,
+      "corr_abs_residual_train": -0.0861022554548008,
+      "corr_disp_target_train": -0.006605262851767242
+    },
+    {
+      "feature": "market_full_game_rl_away_point",
+      "train_std": 1.5304277796488361,
+      "hold_std": 1.5439213517305173,
+      "train_nunique": 6,
+      "hold_nunique": 5,
+      "corr_zero_train": 0.06584125469802182,
+      "corr_residual_train": -0.048648647012158784,
+      "corr_abs_residual_train": -0.07104211769241726,
+      "corr_disp_target_train": 6.256016647880597e-05
+    },
+    {
+      "feature": "market_full_game_rl_home_point",
+      "train_std": 1.5304277796488361,
+      "hold_std": 1.5439213517305173,
+      "train_nunique": 6,
+      "hold_nunique": 5,
+      "corr_zero_train": -0.06584125469802182,
+      "corr_residual_train": 0.048648647012158784,
+      "corr_abs_residual_train": 0.07104211769241726,
+      "corr_disp_target_train": -6.256016647880597e-05
+    },
+    {
+      "feature": "market_implied_f5_away_runs",
+      "train_std": 0.682180053266482,
+      "hold_std": 0.5863821904471596,
+      "train_nunique": 5807,
+      "hold_nunique": 1709,
+      "corr_zero_train": -0.07062200293496322,
+      "corr_residual_train": 0.042820262756215303,
+      "corr_abs_residual_train": 0.07791640612730202,
+      "corr_disp_target_train": -0.0032576699031753855
+    },
+    {
+      "feature": "market_implied_full_game_away_runs",
+      "train_std": 1.3990719971575623,
+      "hold_std": 1.2858750561114034,
+      "train_nunique": 5484,
+      "hold_nunique": 1539,
+      "corr_zero_train": -0.07242182502334872,
+      "corr_residual_train": 0.047858879560076055,
+      "corr_abs_residual_train": 0.07910556524853922,
+      "corr_disp_target_train": -0.001047014922172628
+    },
+    {
+      "feature": "market_implied_minus_control_mu",
+      "train_std": 1.0865160791660546,
+      "hold_std": 1.026799380474139,
+      "train_nunique": 9716,
+      "hold_nunique": 2430,
+      "corr_zero_train": -0.02595329907613934,
+      "corr_residual_train": -0.009486404118349268,
+      "corr_abs_residual_train": 0.015214314740462235,
+      "corr_disp_target_train": -0.02122083936862702
+    },
+    {
+      "feature": "market_run_environment_anchor",
+      "train_std": 0.2946077812817982,
+      "hold_std": 0.2757828160542535,
+      "train_nunique": 4108,
+      "hold_nunique": 1297,
+      "corr_zero_train": -0.07126611138308403,
+      "corr_residual_train": 0.046999852199034214,
+      "corr_abs_residual_train": 0.07469165374877428,
+      "corr_disp_target_train": -0.005929968015137868
+    }
+  ],
+  "stage3_component_summary": {
+    "current": {
+      "dispersion_mean": 6.160070719450906,
+      "dispersion_std": 0.0628240623279653,
+      "baseline_zero_mean": 0.07276829041194585,
+      "adjusted_zero_mean": 0.07276829041194585,
+      "p_zero_extra_mean": 3.141063084073231e-20,
+      "dispersion_blend_weight": 0.10902368411359839,
+      "zero_blend_weight": 0.0
+    },
+    "previous": {
+      "dispersion_mean": 6.031209019137775,
+      "dispersion_std": 0.22508645891343046,
+      "baseline_zero_mean": 0.0739989033750174,
+      "adjusted_zero_mean": 0.0739989033750174,
+      "p_zero_extra_mean": -7.13877973653007e-20,
+      "dispersion_blend_weight": 0.15097600667075273,
+      "zero_blend_weight": 0.0
+    },
+    "neutralized_current_model_effect": {
+      "mean_abs_dispersion_change": 0.015244347225497543,
+      "max_abs_dispersion_change": 0.23473496986913034,
+      "mean_abs_adjusted_zero_change": 0.00012171359169536017,
+      "max_abs_adjusted_zero_change": 0.001509229618814202,
+      "delta_mean_crps_current_minus_neutralized": -4.76106904370166e-05,
+      "delta_mean_nls_current_minus_neutralized": -9.856442429168055e-05
+    }
+  },
+  "stage3_avg_predictions": {
+    "control": {
+      "mu_mean": 4.341167117163562,
+      "var_mean": 9.74201154868106,
+      "p0_mean": 0.07089664337544693,
+      "p3_mean": 0.6796032397586912,
+      "p5_mean": 0.40659392170123965,
+      "p10_mean": 0.06982229432360992
+    },
+    "stage3_curr": {
+      "mu_mean": 4.257446627928475,
+      "var_mean": 7.996285071706523,
+      "p0_mean": 0.07276829041194585,
+      "p3_mean": 0.7010177860142812,
+      "p5_mean": 0.40959282897221005,
+      "p10_mean": 0.05228380134013665
+    },
+    "stage3_prev": {
+      "mu_mean": 4.255005858715673,
+      "var_mean": 8.059163632246857,
+      "p0_mean": 0.0739989033750174,
+      "p3_mean": 0.699310164787399,
+      "p5_mean": 0.40919379299305814,
+      "p10_mean": 0.05281361924306211
+    },
+    "stage3_curr_neutralized": {
+      "mu_mean": 4.257629122838235,
+      "var_mean": 7.991297971180505,
+      "p0_mean": 0.07268129203793092,
+      "p3_mean": 0.7011526320281806,
+      "p5_mean": 0.4096325091291233,
+      "p10_mean": 0.05223794576101891
+    }
+  },
+  "stage4_avg_predictions": {
+    "stage4_curr": {
+      "mu_mean": 4.4169679012345675,
+      "var_mean": 10.604302376131688,
+      "p0_mean": 0.1552329218106996,
+      "p3_mean": 0.5737127572016462,
+      "p5_mean": 0.368482304526749,
+      "p10_mean": 0.11727037037037039
+    },
+    "stage4_prev": {
+      "mu_mean": 4.371603292181071,
+      "var_mean": 10.412457081481481,
+      "p0_mean": 0.15005720164609054,
+      "p3_mean": 0.578601646090535,
+      "p5_mean": 0.3695168724279836,
+      "p10_mean": 0.11231604938271607
+    }
+  },
+  "stage4_control_drift": {
+    "mu_drift_mean": 0.007016534719741995,
+    "mu_drift_abs_mean": 1.9782751027323093,
+    "mu_drift_abs_p90": 3.3696811870574925,
+    "mu_drift_corr_with_market_gap": 0.20340223761470516,
+    "var_minus_stage3_mean": 2.6080173044251644,
+    "p0_minus_stage3_mean": 0.08246463139875373,
+    "p10_minus_stage3_mean": 0.06498656903023374
+  },
+  "mcmc_bundle_factor_summary": {
+    "current": {
+      "run_environment_factor": {
+        "mean": 0.9901570338821619,
+        "std": 0.04487278566186015,
+        "min": 0.8731069664864525,
+        "p25": 0.9577665274744672,
+        "median": 0.985806422149667,
+        "p75": 1.0200980798273005,
+        "max": 1.1485005863172268
+      },
+      "offense_factor": {
+        "mean": 0.9920687015670456,
+        "std": 0.09328213407769881,
+        "min": 0.7452770583827926,
+        "p25": 0.9242067226022357,
+        "median": 0.9899375105518737,
+        "p75": 1.0544211296137838,
+        "max": 1.2757398428971005
+      },
+      "power_factor": {
+        "mean": 1.175919133422969,
+        "std": 0.485801712621403,
+        "min": 0.55,
+        "p25": 0.6487243240106801,
+        "median": 1.158243962613177,
+        "p75": 1.6548739157950927,
+        "max": 1.9
+      },
+      "starter_pitching_factor": {
+        "mean": 1.0283441292508366,
+        "std": 0.11481862951962934,
+        "min": 0.68,
+        "p25": 0.9599564354358596,
+        "median": 1.0092093016063883,
+        "p75": 1.0889049026910043,
+        "max": 1.45
+      },
+      "bullpen_pitching_factor": {
+        "mean": 0.9998774296343068,
+        "std": 0.060267679783336144,
+        "min": 0.7417769923512074,
+        "p25": 0.965874413332431,
+        "median": 0.9980776510182161,
+        "p75": 1.0332644359769416,
+        "max": 1.35
+      }
+    },
+    "neutral": {
+      "run_environment_factor": {
+        "mean": 0.9945450102916491,
+        "std": 0.03218466479217284,
+        "min": 0.8846529331026634,
+        "p25": 0.9731749278903211,
+        "median": 0.9932240976456941,
+        "p75": 1.014118170493322,
+        "max": 1.1728552970728168
+      },
+      "offense_factor": {
+        "mean": 0.9952325156019636,
+        "std": 0.08303333195699508,
+        "min": 0.7705024943308192,
+        "p25": 0.9390061591189454,
+        "median": 0.9932621234090919,
+        "p75": 1.049694604510027,
+        "max": 1.286034734676557
+      },
+      "power_factor": {
+        "mean": 1.175919133422969,
+        "std": 0.485801712621403,
+        "min": 0.55,
+        "p25": 0.6487243240106801,
+        "median": 1.158243962613177,
+        "p75": 1.6548739157950927,
+        "max": 1.9
+      },
+      "starter_pitching_factor": {
+        "mean": 1.0283444627136178,
+        "std": 0.11481838221135428,
+        "min": 0.68,
+        "p25": 0.9599564354358596,
+        "median": 1.0092093016063883,
+        "p75": 1.0889049026910043,
+        "max": 1.45
+      },
+      "bullpen_pitching_factor": {
+        "mean": 0.9998662272013589,
+        "std": 0.06022688817784676,
+        "min": 0.7416517384049782,
+        "p25": 0.9659544290125437,
+        "median": 0.9980282061874719,
+        "p75": 1.0332875246011253,
+        "max": 1.35
+      }
+    }
+  },
+  "slice_stats": [
+    {
+      "slice": "low_market_gap",
+      "rows": 802,
+      "stage3_crps_delta_vs_prev": 0.00022788205691147358,
+      "stage3_nls_delta_vs_prev": 0.0005591488431955632,
+      "stage4_crps_delta_vs_prev": 0.10962509975062341,
+      "stage4_nls_delta_vs_prev": -0.05714405084714697,
+      "market_gap_abs_mean": 0.4479874461396742,
+      "anchor_conf_mean": 0.9744139650872818
+    },
+    {
+      "slice": "mid_market_gap",
+      "rows": 826,
+      "stage3_crps_delta_vs_prev": -0.0002909688439066716,
+      "stage3_nls_delta_vs_prev": 0.0001736576654925664,
+      "stage4_crps_delta_vs_prev": 0.05820042251815979,
+      "stage4_nls_delta_vs_prev": 0.06825469959056216,
+      "market_gap_abs_mean": 0.9336384129519572,
+      "anchor_conf_mean": 0.9960290556900727
+    },
+    {
+      "slice": "high_market_gap",
+      "rows": 802,
+      "stage3_crps_delta_vs_prev": 0.0009359736060849702,
+      "stage3_nls_delta_vs_prev": 0.0023012880756458523,
+      "stage4_crps_delta_vs_prev": 8.248254364087735e-05,
+      "stage4_nls_delta_vs_prev": -0.020691482157068744,
+      "market_gap_abs_mean": 1.469228076958452,
+      "anchor_conf_mean": 0.997356608478803
+    },
+    {
+      "slice": "low_anchor_conf",
+      "rows": 2430,
+      "stage3_crps_delta_vs_prev": 0.000285214805208328,
+      "stage3_nls_delta_vs_prev": 0.0010030912101266153,
+      "stage4_crps_delta_vs_prev": 0.05599137037037035,
+      "stage4_nls_delta_vs_prev": -0.0024879488097023163,
+      "market_gap_abs_mean": 0.9501202381164667,
+      "anchor_conf_mean": 0.9893333333333333
+    },
+    {
+      "slice": "mid_anchor_conf",
+      "rows": 0,
+      "stage3_crps_delta_vs_prev": NaN,
+      "stage3_nls_delta_vs_prev": NaN,
+      "stage4_crps_delta_vs_prev": NaN,
+      "stage4_nls_delta_vs_prev": NaN,
+      "market_gap_abs_mean": NaN,
+      "anchor_conf_mean": NaN
+    },
+    {
+      "slice": "high_anchor_conf",
+      "rows": 0,
+      "stage3_crps_delta_vs_prev": NaN,
+      "stage3_nls_delta_vs_prev": NaN,
+      "stage4_crps_delta_vs_prev": NaN,
+      "stage4_nls_delta_vs_prev": NaN,
+      "market_gap_abs_mean": NaN,
+      "anchor_conf_mean": NaN
+    },
+    {
+      "slice": "actual_zero",
+      "rows": 192,
+      "stage3_crps_delta_vs_prev": 0.009261869697556433,
+      "stage3_nls_delta_vs_prev": 0.01569112108640745,
+      "stage4_crps_delta_vs_prev": 0.009592437500000077,
+      "stage4_nls_delta_vs_prev": -0.17844380531777074,
+      "market_gap_abs_mean": 0.993011428984451,
+      "anchor_conf_mean": 0.9972916666666666
+    },
+    {
+      "slice": "actual_ge10",
+      "rows": 218,
+      "stage3_crps_delta_vs_prev": 0.0015639704013393875,
+      "stage3_nls_delta_vs_prev": 0.014648688927286357,
+      "stage4_crps_delta_vs_prev": 0.03415513302752286,
+      "stage4_nls_delta_vs_prev": 0.04510943701092721,
+      "market_gap_abs_mean": 0.8574030925973524,
+      "anchor_conf_mean": 0.9719266055045871
+    }
+  ],
+  "worst_stage4_vs_prev": [
+    {
+      "game_pk": 777604,
+      "game_date": "2025-06-07",
+      "away_team": "NYM",
+      "home_team": "COL",
+      "actual_away_runs": 8,
+      "control_mu": 6.380889892578125,
+      "stage4_curr_mu": 21.402,
+      "stage4_prev_mu": 20.081000000000003,
+      "stage4_delta_crps_vs_prev": 1.360913,
+      "stage4_delta_nls_vs_prev": 0.11778303565638382,
+      "market_implied_full_game_away_runs": 6.975130434782608,
+      "market_implied_minus_control_mu": 0.5942405422044832,
+      "market_anchor_confidence": 1.0,
+      "stage4_curr_p0": 0.0,
+      "stage4_curr_p10": 0.9430000000000003
+    },
+    {
+      "game_pk": 777817,
+      "game_date": "2025-05-22",
+      "away_team": "PHI",
+      "home_team": "COL",
+      "actual_away_runs": 2,
+      "control_mu": 5.940515041351318,
+      "stage4_curr_mu": 16.153000000000002,
+      "stage4_prev_mu": 14.506,
+      "stage4_delta_crps_vs_prev": 1.3102749999999972,
+      "stage4_delta_nls_vs_prev": 1.0116009116784799,
+      "market_implied_full_game_away_runs": 6.687916954319838,
+      "market_implied_minus_control_mu": 0.7474019129685194,
+      "market_anchor_confidence": 1.0,
+      "stage4_curr_p0": 0.001,
+      "stage4_curr_p10": 0.811
+    },
+    {
+      "game_pk": 777768,
+      "game_date": "2025-05-25",
+      "away_team": "NYY",
+      "home_team": "COL",
+      "actual_away_runs": 5,
+      "control_mu": 6.143279552459717,
+      "stage4_curr_mu": 15.008,
+      "stage4_prev_mu": 13.382000000000001,
+      "stage4_delta_crps_vs_prev": 1.2960740000000017,
+      "stage4_delta_nls_vs_prev": 0.7884573603642706,
+      "market_implied_full_game_away_runs": 6.967255426289286,
+      "market_implied_minus_control_mu": 0.8239758738295695,
+      "market_anchor_confidence": 1.0,
+      "stage4_curr_p0": 0.003,
+      "stage4_curr_p10": 0.7680000000000002
+    },
+    {
+      "game_pk": 777802,
+      "game_date": "2025-05-23",
+      "away_team": "NYY",
+      "home_team": "COL",
+      "actual_away_runs": 2,
+      "control_mu": 6.709522247314453,
+      "stage4_curr_mu": 14.427,
+      "stage4_prev_mu": 13.052,
+      "stage4_delta_crps_vs_prev": 1.2425830000000015,
+      "stage4_delta_nls_vs_prev": 0.8266785731844672,
+      "market_implied_full_game_away_runs": 6.975130434782608,
+      "market_implied_minus_control_mu": 0.26560818746815507,
+      "market_anchor_confidence": 1.0,
+      "stage4_curr_p0": 0.0,
+      "stage4_curr_p10": 0.7400000000000001
+    },
+    {
+      "game_pk": 777534,
+      "game_date": "2025-06-12",
+      "away_team": "SF",
+      "home_team": "COL",
+      "actual_away_runs": 7,
+      "control_mu": 5.878629684448242,
+      "stage4_curr_mu": 17.445,
+      "stage4_prev_mu": 16.109,
+      "stage4_delta_crps_vs_prev": 1.0862339999999993,
+      "stage4_delta_nls_vs_prev": 0.43078291609245456,
+      "market_implied_full_game_away_runs": 6.50257607929312,
+      "market_implied_minus_control_mu": 0.6239463948448778,
+      "market_anchor_confidence": 1.0,
+      "stage4_curr_p0": 0.0,
+      "stage4_curr_p10": 0.8550000000000002
+    },
+    {
+      "game_pk": 778035,
+      "game_date": "2025-05-06",
+      "away_team": "LAD",
+      "home_team": "MIA",
+      "actual_away_runs": 4,
+      "control_mu": 6.115630626678467,
+      "stage4_curr_mu": 12.468,
+      "stage4_prev_mu": 10.983,
+      "stage4_delta_crps_vs_prev": 1.0853670000000015,
+      "stage4_delta_nls_vs_prev": 0.7563260821814772,
+      "market_implied_full_game_away_runs": 6.549853708115996,
+      "market_implied_minus_control_mu": 0.43422308143752897,
+      "market_anchor_confidence": 1.0,
+      "stage4_curr_p0": 0.002,
+      "stage4_curr_p10": 0.6410000000000001
+    },
+    {
+      "game_pk": 776660,
+      "game_date": "2025-08-20",
+      "away_team": "LAD",
+      "home_team": "COL",
+      "actual_away_runs": 3,
+      "control_mu": 6.62101411819458,
+      "stage4_curr_mu": 20.503,
+      "stage4_prev_mu": 19.240000000000002,
+      "stage4_delta_crps_vs_prev": 1.0822370000000028,
+      "stage4_delta_nls_vs_prev": 0.6931471805599454,
+      "market_implied_full_game_away_runs": 6.955501625135428,
+      "market_implied_minus_control_mu": 0.3344875069408477,
+      "market_anchor_confidence": 1.0,
+      "stage4_curr_p0": 0.0,
+      "stage4_curr_p10": 0.9220000000000003
+    },
+    {
+      "game_pk": 777955,
+      "game_date": "2025-05-11",
+      "away_team": "SD",
+      "home_team": "COL",
+      "actual_away_runs": 3,
+      "control_mu": 5.968180179595947,
+      "stage4_curr_mu": 22.032,
+      "stage4_prev_mu": 20.474000000000004,
+      "stage4_delta_crps_vs_prev": 1.0586959999999994,
+      "stage4_delta_nls_vs_prev": -29.240459028362647,
+      "market_implied_full_game_away_runs": 6.896869565217392,
+      "market_implied_minus_control_mu": 0.9286893856214444,
+      "market_anchor_confidence": 1.0,
+      "stage4_curr_p0": 0.0,
+      "stage4_curr_p10": 0.9330000000000003
+    },
+    {
+      "game_pk": 776693,
+      "game_date": "2025-08-18",
+      "away_team": "LAD",
+      "home_team": "COL",
+      "actual_away_runs": 3,
+      "control_mu": 6.541608810424805,
+      "stage4_curr_mu": 20.814,
+      "stage4_prev_mu": 19.531000000000002,
+      "stage4_delta_crps_vs_prev": 1.0561530000000001,
+      "stage4_delta_nls_vs_prev": -0.4054651081081637,
+      "market_implied_full_game_away_runs": 6.683632884752843,
+      "market_implied_minus_control_mu": 0.1420240743280381,
+      "market_anchor_confidence": 1.0,
+      "stage4_curr_p0": 0.0,
+      "stage4_curr_p10": 0.9390000000000003
+    },
+    {
+      "game_pk": 777269,
+      "game_date": "2025-07-02",
+      "away_team": "HOU",
+      "home_team": "COL",
+      "actual_away_runs": 5,
+      "control_mu": 6.040680408477783,
+      "stage4_curr_mu": 15.527000000000001,
+      "stage4_prev_mu": 14.259,
+      "stage4_delta_crps_vs_prev": 1.0413040000000002,
+      "stage4_delta_nls_vs_prev": -0.14660347419187536,
+      "market_implied_full_game_away_runs": 6.916498374864572,
+      "market_implied_minus_control_mu": 0.8758179663867889,
+      "market_anchor_confidence": 1.0,
+      "stage4_curr_p0": 0.0,
+      "stage4_curr_p10": 0.8170000000000003
+    }
+  ],
+  "worst_stage4_vs_stage3": [
+    {
+      "game_pk": 777955,
+      "game_date": "2025-05-11",
+      "away_team": "SD",
+      "home_team": "COL",
+      "actual_away_runs": 3,
+      "control_mu": 5.968180179595947,
+      "stage4_curr_mu": 22.032,
+      "stage3_curr_var": 12.080452018755041,
+      "stage4_curr_var": 81.946976,
+      "stage4_curr_p0": 0.0,
+      "stage3_curr_p0": 0.029943659322218184,
+      "stage4_curr_p10": 0.9330000000000003,
+      "stage4_minus_stage3_crps": 12.454329285737522,
+      "market_implied_full_game_away_runs": 6.896869565217392,
+      "market_implied_minus_control_mu": 0.9286893856214444,
+      "market_anchor_confidence": 1.0
+    },
+    {
+      "game_pk": 777399,
+      "game_date": "2025-06-22",
+      "away_team": "ARI",
+      "home_team": "COL",
+      "actual_away_runs": 2,
+      "control_mu": 6.255797386169434,
+      "stage4_curr_mu": 21.493000000000002,
+      "stage3_curr_var": 12.920642247203748,
+      "stage4_curr_var": 78.607951,
+      "stage4_curr_p0": 0.0,
+      "stage3_curr_p0": 0.025940868345454577,
+      "stage4_curr_p10": 0.9280000000000004,
+      "stage4_minus_stage3_crps": 12.195366648910028,
+      "market_implied_full_game_away_runs": 6.500732122055768,
+      "market_implied_minus_control_mu": 0.24493473588633474,
+      "market_anchor_confidence": 1.0
+    },
+    {
+      "game_pk": 776693,
+      "game_date": "2025-08-18",
+      "away_team": "LAD",
+      "home_team": "COL",
+      "actual_away_runs": 3,
+      "control_mu": 6.541608810424805,
+      "stage4_curr_mu": 20.814,
+      "stage3_curr_var": 13.801322017089893,
+      "stage4_curr_var": 65.091404,
+      "stage4_curr_p0": 0.0,
+      "stage3_curr_p0": 0.022639857249429036,
+      "stage4_curr_p10": 0.9390000000000003,
+      "stage4_minus_stage3_crps": 11.45832754860384,
+      "market_implied_full_game_away_runs": 6.683632884752843,
+      "market_implied_minus_control_mu": 0.1420240743280381,
+      "market_anchor_confidence": 1.0
+    },
+    {
+      "game_pk": 776660,
+      "game_date": "2025-08-20",
+      "away_team": "LAD",
+      "home_team": "COL",
+      "actual_away_runs": 3,
+      "control_mu": 6.62101411819458,
+      "stage4_curr_mu": 20.503,
+      "stage3_curr_var": 13.957997493015576,
+      "stage4_curr_var": 64.317991,
+      "stage4_curr_p0": 0.0,
+      "stage3_curr_p0": 0.021461058069332684,
+      "stage4_curr_p10": 0.9220000000000003,
+      "stage4_minus_stage3_crps": 11.119007099803909,
+      "market_implied_full_game_away_runs": 6.955501625135428,
+      "market_implied_minus_control_mu": 0.3344875069408477,
+      "market_anchor_confidence": 1.0
+    },
+    {
+      "game_pk": 776730,
+      "game_date": "2025-08-15",
+      "away_team": "ARI",
+      "home_team": "COL",
+      "actual_away_runs": 3,
+      "control_mu": 6.493993759155273,
+      "stage4_curr_mu": 20.242,
+      "stage3_curr_var": 13.602056909171472,
+      "stage4_curr_var": 64.01943599999998,
+      "stage4_curr_p0": 0.0,
+      "stage3_curr_p0": 0.022948529417703527,
+      "stage4_curr_p10": 0.9210000000000003,
+      "stage4_minus_stage3_crps": 10.992400776341528,
+      "market_implied_full_game_away_runs": 5.901606469870344,
+      "market_implied_minus_control_mu": -0.5923872892849298,
+      "market_anchor_confidence": 1.0
+    },
+    {
+      "game_pk": 776854,
+      "game_date": "2025-08-05",
+      "away_team": "TOR",
+      "home_team": "COL",
+      "actual_away_runs": 10,
+      "control_mu": 6.323877811431885,
+      "stage4_curr_mu": 27.817,
+      "stage3_curr_var": 13.143366058852479,
+      "stage4_curr_var": 97.257511,
+      "stage4_curr_p0": 0.0,
+      "stage3_curr_p0": 0.025175803755812253,
+      "stage4_curr_p10": 0.9830000000000004,
+      "stage4_minus_stage3_crps": 9.84393020475358,
+      "market_implied_full_game_away_runs": 6.9425760792931195,
+      "market_implied_minus_control_mu": 0.6186982678612347,
+      "market_anchor_confidence": 1.0
+    },
+    {
+      "game_pk": 777410,
+      "game_date": "2025-06-21",
+      "away_team": "ARI",
+      "home_team": "COL",
+      "actual_away_runs": 5,
+      "control_mu": 6.685453414916992,
+      "stage4_curr_mu": 20.375999999999998,
+      "stage3_curr_var": 14.150173464948972,
+      "stage4_curr_var": 73.25062399999999,
+      "stage4_curr_p0": 0.0,
+      "stage3_curr_p0": 0.020784031611951918,
+      "stage4_curr_p10": 0.9160000000000003,
+      "stage4_minus_stage3_crps": 9.651954969270657,
+      "market_implied_full_game_away_runs": 6.439330598152156,
+      "market_implied_minus_control_mu": -0.24612281676483594,
+      "market_anchor_confidence": 1.0
+    },
+    {
+      "game_pk": 778161,
+      "game_date": "2025-04-26",
+      "away_team": "CIN",
+      "home_team": "COL",
+      "actual_away_runs": 6,
+      "control_mu": 5.846044063568115,
+      "stage4_curr_mu": 21.205,
+      "stage3_curr_var": 11.834838849231335,
+      "stage4_curr_var": 74.216975,
+      "stage4_curr_p0": 0.0,
+      "stage3_curr_p0": 0.03247531553181191,
+      "stage4_curr_p10": 0.9410000000000004,
+      "stage4_minus_stage3_crps": 9.607097097323836,
+      "market_implied_full_game_away_runs": 5.939255535046301,
+      "market_implied_minus_control_mu": 0.09321147147818554,
+      "market_anchor_confidence": 1.0
+    },
+    {
+      "game_pk": 778266,
+      "game_date": "2025-04-20",
+      "away_team": "WSH",
+      "home_team": "COL",
+      "actual_away_runs": 1,
+      "control_mu": 5.585775852203369,
+      "stage4_curr_mu": 17.288,
+      "stage3_curr_var": 11.118177112409452,
+      "stage4_curr_var": 57.541056,
+      "stage4_curr_p0": 0.001,
+      "stage3_curr_p0": 0.03722480159279671,
+      "stage4_curr_p10": 0.8460000000000002,
+      "stage4_minus_stage3_crps": 9.327947149421721,
+      "market_implied_full_game_away_runs": 5.609730295540926,
+      "market_implied_minus_control_mu": 0.023954443337556697,
+      "market_anchor_confidence": 1.0
+    },
+    {
+      "game_pk": 776742,
+      "game_date": "2025-08-14",
+      "away_team": "ARI",
+      "home_team": "COL",
+      "actual_away_runs": 8,
+      "control_mu": 6.450311183929443,
+      "stage4_curr_mu": 23.361,
+      "stage3_curr_var": 13.604889827542564,
+      "stage4_curr_var": 75.100679,
+      "stage4_curr_p0": 0.0,
+      "stage3_curr_p0": 0.02400607716966064,
+      "stage4_curr_p10": 0.9630000000000003,
+      "stage4_minus_stage3_crps": 9.294604203956041,
+      "market_implied_full_game_away_runs": 5.80635489529521,
+      "market_implied_minus_control_mu": -0.6439562886342332,
+      "market_anchor_confidence": 1.0
+    }
+  ],
+  "worst_stage4_mu_drift": [
+    {
+      "game_pk": 776854,
+      "game_date": "2025-08-05",
+      "away_team": "TOR",
+      "home_team": "COL",
+      "actual_away_runs": 10,
+      "control_mu": 6.323877811431885,
+      "stage4_curr_mu": 27.817,
+      "stage4_mu_minus_control": 21.493122188568115,
+      "stage4_curr_p0": 0.0,
+      "stage4_curr_p10": 0.9830000000000004,
+      "market_implied_full_game_away_runs": 6.9425760792931195,
+      "market_implied_minus_control_mu": 0.6186982678612347,
+      "market_anchor_confidence": 1.0
+    },
+    {
+      "game_pk": 776742,
+      "game_date": "2025-08-14",
+      "away_team": "ARI",
+      "home_team": "COL",
+      "actual_away_runs": 8,
+      "control_mu": 6.450311183929443,
+      "stage4_curr_mu": 23.361,
+      "stage4_mu_minus_control": 16.910688816070557,
+      "stage4_curr_p0": 0.0,
+      "stage4_curr_p10": 0.9630000000000003,
+      "market_implied_full_game_away_runs": 5.80635489529521,
+      "market_implied_minus_control_mu": -0.6439562886342332,
+      "market_anchor_confidence": 1.0
+    },
+    {
+      "game_pk": 777955,
+      "game_date": "2025-05-11",
+      "away_team": "SD",
+      "home_team": "COL",
+      "actual_away_runs": 3,
+      "control_mu": 5.968180179595947,
+      "stage4_curr_mu": 22.032,
+      "stage4_mu_minus_control": 16.063819820404053,
+      "stage4_curr_p0": 0.0,
+      "stage4_curr_p10": 0.9330000000000003,
+      "market_implied_full_game_away_runs": 6.896869565217392,
+      "market_implied_minus_control_mu": 0.9286893856214444,
+      "market_anchor_confidence": 1.0
+    },
+    {
+      "game_pk": 778148,
+      "game_date": "2025-04-27",
+      "away_team": "CIN",
+      "home_team": "COL",
+      "actual_away_runs": 8,
+      "control_mu": 6.373174667358398,
+      "stage4_curr_mu": 22.137999999999998,
+      "stage4_mu_minus_control": 15.7648253326416,
+      "stage4_curr_p0": 0.0,
+      "stage4_curr_p10": 0.9330000000000004,
+      "market_implied_full_game_away_runs": 5.680759063440738,
+      "market_implied_minus_control_mu": -0.6924156039176603,
+      "market_anchor_confidence": 1.0
+    },
+    {
+      "game_pk": 776467,
+      "game_date": "2025-09-03",
+      "away_team": "SF",
+      "home_team": "COL",
+      "actual_away_runs": 10,
+      "control_mu": 6.316922664642334,
+      "stage4_curr_mu": 21.808,
+      "stage4_mu_minus_control": 15.491077335357666,
+      "stage4_curr_p0": 0.0,
+      "stage4_curr_p10": 0.9420000000000003,
+      "market_implied_full_game_away_runs": 6.916498374864572,
+      "market_implied_minus_control_mu": 0.5995757102222381,
+      "market_anchor_confidence": 1.0
+    },
+    {
+      "game_pk": 778161,
+      "game_date": "2025-04-26",
+      "away_team": "CIN",
+      "home_team": "COL",
+      "actual_away_runs": 6,
+      "control_mu": 5.846044063568115,
+      "stage4_curr_mu": 21.205,
+      "stage4_mu_minus_control": 15.358955936431883,
+      "stage4_curr_p0": 0.0,
+      "stage4_curr_p10": 0.9410000000000004,
+      "market_implied_full_game_away_runs": 5.939255535046301,
+      "market_implied_minus_control_mu": 0.09321147147818554,
+      "market_anchor_confidence": 1.0
+    },
+    {
+      "game_pk": 777399,
+      "game_date": "2025-06-22",
+      "away_team": "ARI",
+      "home_team": "COL",
+      "actual_away_runs": 2,
+      "control_mu": 6.255797386169434,
+      "stage4_curr_mu": 21.493000000000002,
+      "stage4_mu_minus_control": 15.237202613830569,
+      "stage4_curr_p0": 0.0,
+      "stage4_curr_p10": 0.9280000000000004,
+      "market_implied_full_game_away_runs": 6.500732122055768,
+      "market_implied_minus_control_mu": 0.24493473588633474,
+      "market_anchor_confidence": 1.0
+    },
+    {
+      "game_pk": 777604,
+      "game_date": "2025-06-07",
+      "away_team": "NYM",
+      "home_team": "COL",
+      "actual_away_runs": 8,
+      "control_mu": 6.380889892578125,
+      "stage4_curr_mu": 21.402,
+      "stage4_mu_minus_control": 15.021110107421876,
+      "stage4_curr_p0": 0.0,
+      "stage4_curr_p10": 0.9430000000000003,
+      "market_implied_full_game_away_runs": 6.975130434782608,
+      "market_implied_minus_control_mu": 0.5942405422044832,
+      "market_anchor_confidence": 1.0
+    },
+    {
+      "game_pk": 776693,
+      "game_date": "2025-08-18",
+      "away_team": "LAD",
+      "home_team": "COL",
+      "actual_away_runs": 3,
+      "control_mu": 6.541608810424805,
+      "stage4_curr_mu": 20.814,
+      "stage4_mu_minus_control": 14.272391189575195,
+      "stage4_curr_p0": 0.0,
+      "stage4_curr_p10": 0.9390000000000003,
+      "market_implied_full_game_away_runs": 6.683632884752843,
+      "market_implied_minus_control_mu": 0.1420240743280381,
+      "market_anchor_confidence": 1.0
+    },
+    {
+      "game_pk": 777379,
+      "game_date": "2025-06-24",
+      "away_team": "LAD",
+      "home_team": "COL",
+      "actual_away_runs": 9,
+      "control_mu": 6.214386463165283,
+      "stage4_curr_mu": 20.411,
+      "stage4_mu_minus_control": 14.196613536834718,
+      "stage4_curr_p0": 0.0,
+      "stage4_curr_p10": 0.9260000000000004,
+      "market_implied_full_game_away_runs": 6.55642983971732,
+      "market_implied_minus_control_mu": 0.342043376552037,
+      "market_anchor_confidence": 1.0
+    }
+  ],
+  "avg_pmf_top_mass": {
+    "control": [
+      [
+        3,
+        0.14329046982295346
+      ],
+      [
+        2,
+        0.13960893863852647
+      ],
+      [
+        4,
+        0.12971884823449803
+      ],
+      [
+        1,
+        0.10989117822733538
+      ],
+      [
+        5,
+        0.10810738501221033
+      ],
+      [
+        6,
+        0.08498448505521494
+      ],
+      [
+        0,
+        0.07089664337544689
+      ],
+      [
+        7,
+        0.06398373235665478
+      ],
+      [
+        8,
+        0.04660913675874242
+      ],
+      [
+        9,
+        0.03308688819480718
+      ],
+      [
+        10,
+        0.02300895955646439
+      ],
+      [
+        11,
+        0.01573639858812127
+      ]
+    ],
+    "stage3_curr": [
+      [
+        3,
+        0.14986034686304087
+      ],
+      [
+        4,
+        0.14156461017903035
+      ],
+      [
+        2,
+        0.1342907522488349
+      ],
+      [
+        5,
+        0.11931452926552293
+      ],
+      [
+        6,
+        0.09255939909091299
+      ],
+      [
+        1,
+        0.09192317132493817
+      ],
+      [
+        0,
+        0.07276829041194595
+      ],
+      [
+        7,
+        0.06743451383738282
+      ],
+      [
+        8,
+        0.04678375077896754
+      ],
+      [
+        9,
+        0.031216834659287564
+      ],
+      [
+        10,
+        0.020183186884299452
+      ],
+      [
+        11,
+        0.01271652178435065
+      ]
+    ],
+    "stage4_curr": [
+      [
+        0,
+        0.15523292181069917
+      ],
+      [
+        1,
+        0.14070452674897116
+      ],
+      [
+        2,
+        0.13034979423868315
+      ],
+      [
+        3,
+        0.11209218106995886
+      ],
+      [
+        4,
+        0.09313827160493839
+      ],
+      [
+        5,
+        0.07520987654321
+      ],
+      [
+        6,
+        0.06014485596707819
+      ],
+      [
+        7,
+        0.04784362139917692
+      ],
+      [
+        8,
+        0.037948148148148196
+      ],
+      [
+        9,
+        0.030065432098765547
+      ],
+      [
+        10,
+        0.02370576131687239
+      ],
+      [
+        11,
+        0.018826337448559646
+      ]
+    ],
+    "stage4_prev": [
+      [
+        0,
+        0.1500572016460902
+      ],
+      [
+        1,
+        0.13982962962962972
+      ],
+      [
+        2,
+        0.1315115226337446
+      ],
+      [
+        3,
+        0.11407242798353887
+      ],
+      [
+        4,
+        0.09501234567901252
+      ],
+      [
+        5,
+        0.07728847736625527
+      ],
+      [
+        6,
+        0.06182633744855947
+      ],
+      [
+        7,
+        0.049183127572016525
+      ],
+      [
+        8,
+        0.03862962962962976
+      ],
+      [
+        9,
+        0.030273251028806715
+      ],
+      [
+        10,
+        0.023885596707818958
+      ],
+      [
+        11,
+        0.01868106995884776
+      ]
+    ]
+  }
+}

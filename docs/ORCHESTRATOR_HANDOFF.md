@@ -28,7 +28,7 @@ Do not assume the latest run number from this document. The run number may have 
 
 ### High-signal files
 
-- `MODEL_COMPARISON_TRACKER.md`
+- `docs/research/MODEL_COMPARISON_TRACKER.md`
   - human-maintained history of major modeling runs
   - best place to understand what changed run-to-run
 
@@ -61,9 +61,9 @@ Do not assume the latest run number from this document. The run number may have 
 
 ### Common test files
 
-- `tests/test_run_count_trainer.py`
-- `tests/test_data_builder.py`
-- `tests/test_single_model_profiles.py`
+- `tests/model/test_run_count_trainer.py`
+- `tests/pipeline/test_data_builder.py`
+- `tests/model/test_single_model_profiles.py`
 
 ## Where The Latest State Lives
 
@@ -86,7 +86,7 @@ Do not trust only chat history. Inspect the filesystem.
 
 ### Current narrative / run history
 
-- `MODEL_COMPARISON_TRACKER.md`
+- `docs/research/MODEL_COMPARISON_TRACKER.md`
 
 If the tracker and artifacts disagree, trust the artifact files first, then update the tracker if requested.
 
@@ -161,7 +161,7 @@ What an agent should edit:
 
 What an agent should not casually change:
 - Do not add rebuild behavior to the train command
-- Do not switch to old scripts like `scripts/train_single_model.py` or `scripts/rebuild_and_train_single_model.py`
+- Do not switch to old scripts like `archive/scripts/manual_run_count/train_single_model.py` or `archive/scripts/manual_run_count/rebuild_and_train_single_model.py`
 - Do not add extra trainer flags unless the user is explicitly asking for a modeling change
 
 Preferred behavior for future agents:
@@ -170,6 +170,20 @@ Preferred behavior for future agents:
 - Keep PowerShell backtick formatting when giving multi-line commands
 - If the user only wants a fresh parquet, give only the build command
 - If the user wants to train on an existing parquet, give only the train command
+
+### Research-lane command source
+
+For Stage 3 distribution, Stage 4 MCMC, and walk-forward evidence commands, use:
+
+- `docs/runbooks/RUN_COUNT_RESEARCH_WORKFLOW.md`
+
+Keep the same PowerShell backtick formatting there. Current manual worker settings to preserve on this machine are:
+
+- `--FeatureWorker 10`
+- `--XGBWork 4`
+- `--OptunaWork 3`
+
+Do not invent worker flags for scripts that do not expose them.
 
 ### Current best comparable manual-training baseline
 
@@ -293,7 +307,7 @@ How future agents should use this:
 
 ### Important command-format preference
 
-When giving multi-line commands, format them with **PowerShell backtick continuation**. The user explicitly prefers this and may be pasting commands directly.
+When sending commands to the user, default to **vertically stacked PowerShell commands with backtick continuation**. Do **not** send single-line commands unless the user explicitly asks for a one-line version. The user's terminal/paste flow may auto-break long single-line commands, so the multiline backtick form is the canonical format for this repo handoff.
 
 Example:
 
@@ -303,7 +317,7 @@ Example:
   --profile fast
 ```
 
-Do not debate this preference. If the user asks for backticks, include them.
+Do not debate this preference. If the user asks for commands, send them in this stacked backtick format by default.
 
 ### Practical shell notes
 
@@ -313,7 +327,7 @@ Do not debate this preference. If the user asks for backticks, include them.
 
 ## Typical Modeling Workflow
 
-1. Inspect `MODEL_COMPARISON_TRACKER.md`
+1. Inspect `docs/research/MODEL_COMPARISON_TRACKER.md`
 2. Inspect newest experiment artifact in `data/models/`
 3. Compare holdout metrics against recent comparable runs
 4. Decide whether the issue is:
@@ -461,7 +475,7 @@ Current expectation for a healthy manual local-only build:
 Suggested first steps for a new agent:
 
 1. Read this file
-2. Read `MODEL_COMPARISON_TRACKER.md`
+2. Read `docs/research/MODEL_COMPARISON_TRACKER.md`
 3. Inspect `git status`
 4. Inspect the newest folder under `data/models/`
 5. Read the newest `*.metadata.json`
@@ -478,7 +492,7 @@ I am resuming work in the MLBPrediction2026 repo as the orchestration agent.
 
 Start by reading:
 1. docs/ORCHESTRATOR_HANDOFF.md
-2. MODEL_COMPARISON_TRACKER.md
+2. docs/research/MODEL_COMPARISON_TRACKER.md
 
 Then inspect:
 - git status

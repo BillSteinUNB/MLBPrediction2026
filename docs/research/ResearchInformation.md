@@ -1,12 +1,13 @@
 # Research Information
 
-This root file is now a repo pointer for MLB work.
+This file is the research landing page for MLB work.
 
 For away-run research, start here:
 
 - `docs/INDEX.md`
 - `docs/research/MLB_RUN_MODEL_RESEARCH_ASSUMPTIONS.md`
 - `docs/roadmaps/AWAY_RUN_RESEARCH_5_STAGE_PLAN.md`
+- `docs/research/MODEL_COMPARISON_TRACKER.md`
 - `data/reports/run_count/dual_view/current_dual_view.md`
 
 Current Stage 5 state:

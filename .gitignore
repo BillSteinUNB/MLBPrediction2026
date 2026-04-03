@@ -1,13 +1,20 @@
 .env
 .venv/
+venv/
+env/
 __pycache__/
+**/__pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
 .coverage
+.coverage.*
 htmlcov/
 *.egg-info/
 data/*.db
+*.db-wal
+*.db-shm
 temp_autoresearch/
 data/logs/
 data/raw/
@@ -15,20 +22,47 @@ temp_backtest_probe/
 temp_log_rotation_validation/
 
 # Large data artifacts
-*.parquet
 *.joblib
-*.csv
 temp_backtest_*/
 tmp_*
-data/models/*/
-data/experiments/*/
-data/autoresearch/
 temp_*/
 test-*.png
 nul
 
+# Versioned data boundaries
+# Keep ignores scoped to data subtrees so future tracked artifacts can be
+# intentionally allowlisted without relying on global file-type rules.
+data/models/**
+!data/models/.gitkeep
+
+data/training/**
+!data/training/.gitkeep
+!data/training/*.metadata.json
+
+data/reports/**
+!data/reports/run_count/README.md
+!data/reports/run_count/registry/current_control.json
+!data/reports/run_count/registry/full_game_away_runs_registry.json
+!data/reports/run_count/dual_view/current_dual_view.json
+!data/reports/run_count/dual_view/current_dual_view.md
+
+data/experiments/**
+!data/experiments/dashboard_catalog.json
+
+data/autoresearch/**
+
 # Local workflow artifacts
-.sisyphus/evidence/
+.sisyphus/
+.factory/
+.meteostat-cache/
+.pytest-cache-local/
+.pytest-tmp/
+.pytest_tmp/
+.pytest_tmp_*/
+pytest-cache-files-*/
+tmp_pytest_run_*/
+.uv-cache/
+.uv-python/
 
 # Dashboard frontend
 dashboard/node_modules/
@@ -40,3 +74,10 @@ OddsScraper/data/
 OddsScraper/*.log
 OddsScraper/__pycache__/
 flashscore_page.html
+
+# Runtime logs and pid files
+*.pid
+*.stdout.log
+*.stderr.log
+scraper.log
+vite_pid.txt
