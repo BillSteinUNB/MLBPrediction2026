@@ -256,6 +256,16 @@ class SlateInputStatus(BaseModel):
     consensus_full_game_home_spread_odds: Optional[int] = None
     consensus_full_game_away_spread: Optional[float] = None
     consensus_full_game_away_spread_odds: Optional[int] = None
+    full_game_total: Optional[float] = None
+    full_game_total_over_odds: Optional[int] = None
+    full_game_total_under_odds: Optional[int] = None
+    full_game_total_book: Optional[str] = None
+    bet365_full_game_total: Optional[float] = None
+    bet365_full_game_total_over_odds: Optional[int] = None
+    bet365_full_game_total_under_odds: Optional[int] = None
+    consensus_full_game_total: Optional[float] = None
+    consensus_full_game_total_over_odds: Optional[int] = None
+    consensus_full_game_total_under_odds: Optional[int] = None
     weather_available: bool = False
 
 
@@ -276,6 +286,7 @@ class SlateGame(BaseModel):
     paper_fallback: bool = False
     input_status: Optional[SlateInputStatus] = None
     narrative: Optional[str] = None
+    candidate_decisions: List[SlateDecision] = []
 
 
 class SlateResponse(BaseModel):
@@ -286,6 +297,14 @@ class SlateResponse(BaseModel):
     mode: str
     dry_run: bool
     model_version: str
+    release_name: Optional[str] = None
+    release_version: Optional[str] = None
+    model_display_name: Optional[str] = None
+    strategy_name: Optional[str] = None
+    strategy_version: Optional[str] = None
+    technical_model_version: Optional[str] = None
+    research_baseline_label: Optional[str] = None
+    policy_summary: Optional[str] = None
     pick_count: int
     no_pick_count: int
     error_count: int
@@ -317,6 +336,9 @@ class LiveSeasonSummaryResponse(BaseModel):
     paper_fallback_picks: int
     flat_profit_units: float
     flat_roi: Optional[float] = None
+    official_units_risked: Optional[float] = None
+    official_profit_units: Optional[float] = None
+    official_roi: Optional[float] = None
     play_of_day_count: int
     play_of_day_graded_picks: int
     play_of_day_wins: int
@@ -370,6 +392,7 @@ class LiveSeasonGameResponse(BaseModel):
     edge_pct: Optional[float] = None
     ev: Optional[float] = None
     kelly_stake: Optional[float] = None
+    bet_units: Optional[float] = None
     forced_market_type: Optional[str] = None
     forced_side: Optional[str] = None
     forced_source_model: Optional[str] = None
@@ -387,9 +410,75 @@ class LiveSeasonGameResponse(BaseModel):
     actual_status: Optional[str] = None
     actual_f5_home_score: Optional[int] = None
     actual_f5_away_score: Optional[int] = None
+    actual_final_home_score: Optional[int] = None
+    actual_final_away_score: Optional[int] = None
     settled_result: Optional[str] = None
     flat_profit_loss: Optional[float] = None
     forced_settled_result: Optional[str] = None
     forced_flat_profit_loss: Optional[float] = None
     settled_at: Optional[str] = None
     narrative: Optional[str] = None
+
+
+class LiveSeasonCaptureResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    pipeline_date: str
+    season: int
+    captured: bool
+    already_captured: bool
+    settled_rows: int
+    tracked_games: int
+    run_id: Optional[str] = None
+    pick_count: Optional[int] = None
+    notification_type: Optional[str] = None
+
+
+class LiveSeasonManualBetRequest(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    season: int
+    pipeline_date: str
+    game_pk: int
+    matchup: str
+    market_type: str
+    side: str
+    odds_at_bet: int
+    line_at_bet: Optional[float] = None
+    fair_probability: Optional[float] = None
+    model_probability: Optional[float] = None
+    edge_pct: Optional[float] = None
+    ev: Optional[float] = None
+    kelly_stake: Optional[float] = None
+    bet_units: float
+    book_name: Optional[str] = None
+    model_version: Optional[str] = None
+    source_model: Optional[str] = None
+    source_model_version: Optional[str] = None
+    input_status: Optional[Dict[str, Any]] = None
+    narrative: Optional[str] = None
+
+
+class LiveSeasonDashboardResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    season: int
+    pipeline_date: str
+    release_name: str
+    release_version: str
+    model_display_name: str
+    strategy_name: str
+    strategy_version: str
+    technical_model_version: str
+    research_baseline_label: str
+    policy_summary: str
+    summary: LiveSeasonSummaryResponse
+    manual_summary: LiveSeasonSummaryResponse
+    forced_summary: LiveSeasonSummaryResponse
+    today_games: List[LiveSeasonGameResponse] = []
+    historical_games: List[LiveSeasonGameResponse] = []
+    manual_today_games: List[LiveSeasonGameResponse] = []
+    manual_historical_games: List[LiveSeasonGameResponse] = []
+    forced_today_games: List[LiveSeasonGameResponse] = []
+    forced_historical_games: List[LiveSeasonGameResponse] = []
+    capture: Optional[LiveSeasonCaptureResponse] = None

@@ -79,6 +79,11 @@ from src.features.defense import (
 from src.features.offense import (
     DEFAULT_MIN_PERIODS as DEFAULT_OFFENSE_MIN_PERIODS,
     DEFAULT_REGRESSION_WEIGHT as DEFAULT_OFFENSE_REGRESSION_WEIGHT,
+    LEAGUE_BAT_SPEED_BASELINE,
+    LEAGUE_BAT_TRACKING_COVERAGE_BASELINE,
+    LEAGUE_SQUARED_UP_RATE_PROXY_BASELINE,
+    LEAGUE_SWING_LENGTH_BASELINE,
+    LEAGUE_SWING_PATH_TILT_BASELINE,
     LEAGUE_WOBA_BASELINE,
     LEAGUE_WRC_PLUS_BASELINE,
     compute_offensive_features,
@@ -142,6 +147,11 @@ _OFFENSE_FEATURE_DEFAULTS = {
     "woba_minus_xwoba": 0.0,
     "iso": 0.0,
     "barrel_pct": 7.0,
+    "bat_speed": LEAGUE_BAT_SPEED_BASELINE,
+    "swing_length": LEAGUE_SWING_LENGTH_BASELINE,
+    "swing_path_tilt": LEAGUE_SWING_PATH_TILT_BASELINE,
+    "squared_up_rate_proxy": LEAGUE_SQUARED_UP_RATE_PROXY_BASELINE,
+    "bat_tracking_coverage": LEAGUE_BAT_TRACKING_COVERAGE_BASELINE,
     "babip": 0.0,
     "k_pct": 0.0,
     "bb_pct": 0.0,
@@ -158,7 +168,9 @@ _DEFENSE_FEATURE_DEFAULTS = {
     "drs": 0.0,
     "oaa": 0.0,
     "defensive_efficiency": DEFAULT_DEFENSIVE_EFFICIENCY,
+    "raw_framing": 0.0,
     "adjusted_framing": 0.0,
+    "framing_retention_proxy": 1.0,
 }
 _BULLPEN_FEATURE_DEFAULTS = {
     "pitch_count": 0.0,
@@ -191,6 +203,10 @@ _UMPIRE_FEATURE_DEFAULTS = {
     "total_runs_avg": 8.8,
     "f5_total_runs_avg": 4.5,
     "sample_size": 0.0,
+    "abs_active_share": 0.0,
+    "abs_active_sample_size": 0.0,
+    "abs_total_runs_avg": 8.8,
+    "abs_f5_total_runs_avg": 4.5,
 }
 _SCHEDULE_FEATURE_DEFAULTS = {
     "park_runs_factor": 1.0,
@@ -804,8 +820,10 @@ def build_live_feature_frame(
 
     target_day = _coerce_date(target_date)
     prepared_schedule = _prepare_schedule_frame(schedule, require_final_scores=False)
+    game_dates = pd.to_datetime(prepared_schedule["game_date"], errors="coerce").dt.date
+    scheduled_dates = pd.to_datetime(prepared_schedule["scheduled_start"], errors="coerce").dt.date
     prepared_schedule = prepared_schedule.loc[
-        pd.to_datetime(prepared_schedule["game_date"], errors="coerce").dt.date == target_day
+        (game_dates == target_day) | (scheduled_dates == target_day)
     ].reset_index(drop=True)
     if prepared_schedule.empty:
         return pd.DataFrame(columns=["game_pk"])
@@ -2937,18 +2955,18 @@ def _build_schedule_context_lookup(schedule: pd.DataFrame) -> dict[int, dict[str
         home_team = str(game["home_team"])
         away_team = str(game["away_team"])
         scheduled_start = pd.Timestamp(game["scheduled_start"])
-        current_timezone_offset = _TEAM_TIMEZONE_OFFSETS.get(home_team, -5)
+        home_timezone_offset = _TEAM_TIMEZONE_OFFSETS.get(home_team, -5)
 
         home_context = _team_schedule_context(
             current_team=home_team,
             current_start=scheduled_start,
-            current_timezone_offset=current_timezone_offset,
+            current_timezone_offset=home_timezone_offset,
             previous_game=team_previous_game.get(home_team),
         )
         away_context = _team_schedule_context(
             current_team=away_team,
             current_start=scheduled_start,
-            current_timezone_offset=current_timezone_offset,
+            current_timezone_offset=home_timezone_offset,
             previous_game=team_previous_game.get(away_team),
         )
         lookup[game_pk] = {
@@ -2960,11 +2978,11 @@ def _build_schedule_context_lookup(schedule: pd.DataFrame) -> dict[int, dict[str
 
         team_previous_game[home_team] = {
             "scheduled_start": scheduled_start,
-            "timezone_offset": current_timezone_offset,
+            "timezone_offset": home_timezone_offset,
         }
         team_previous_game[away_team] = {
             "scheduled_start": scheduled_start,
-            "timezone_offset": current_timezone_offset,
+            "timezone_offset": home_timezone_offset,
         }
 
     return lookup
@@ -3030,6 +3048,11 @@ def _resolve_weather_features(
         venue=str(game["venue"]),
         is_dome=is_dome,
         precipitation_probability=weather.precipitation_probability,
+        scheduled_start=(
+            pd.Timestamp(game["scheduled_start"]).to_pydatetime()
+            if game.get("scheduled_start") is not None
+            else None
+        ),
     )
     return {
         "weather_temp_factor": float(adjustment.temp_factor),

@@ -6,6 +6,9 @@ import {
   List,
   Star,
   BadgeCheck,
+  CalendarDays,
+  BarChart3,
+  PanelRightOpen,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -23,12 +26,21 @@ interface NavGroup {
 }
 
 const sections = [
+  { name: "Season", path: "/season", defaultPath: "/season/picks" },
   { name: "Research", path: "/research", defaultPath: "/research/latest" },
   { name: "History", path: "/history", defaultPath: "/history/ledger" },
   { name: "Promotion", path: "/promotion", defaultPath: "/promotion" },
 ] as const;
 
 const navGroups: NavGroup[] = [
+  {
+    section: "Season",
+    links: [
+      { name: "Today Picks", path: "/season/picks", icon: CalendarDays },
+      { name: "Tracking", path: "/season/tracking", icon: BarChart3 },
+      { name: "Slate", path: "/season/slate", icon: PanelRightOpen },
+    ],
+  },
   {
     section: "Research",
     links: [
@@ -53,6 +65,7 @@ const navGroups: NavGroup[] = [
 ];
 
 const mobileNavItems: (NavItem & { matchPrefix: string })[] = [
+  { name: "Season", path: "/season/picks", matchPrefix: "/season", icon: CalendarDays },
   { name: "Research", path: "/research/latest", matchPrefix: "/research", icon: LayoutDashboard },
   { name: "History", path: "/history/ledger", matchPrefix: "/history", icon: List },
   { name: "Promotion", path: "/promotion", matchPrefix: "/promotion", icon: BadgeCheck },

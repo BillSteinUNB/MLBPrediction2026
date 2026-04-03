@@ -75,14 +75,16 @@ from src.pipeline.narrative import generate_game_narrative
 logger = logging.getLogger(__name__)
 
 DEFAULT_PROJECTED_F5_TOTAL_RUNS = 4.6
-DEFAULT_OFFICIAL_MIN_BET_ODDS = -175
-DEFAULT_OFFICIAL_MAX_BET_ODDS = 150
-DEFAULT_OFFICIAL_MAX_TRUSTED_EDGE = 0.15
-DEFAULT_OFFICIAL_VALUE_PLAY_MIN_EDGE = 0.06
+DEFAULT_OFFICIAL_MIN_BET_ODDS = -250
+DEFAULT_OFFICIAL_MAX_BET_ODDS = 180
+DEFAULT_OFFICIAL_MAX_TRUSTED_EDGE = 0.225
+DEFAULT_OFFICIAL_VALUE_PLAY_MIN_EDGE = 0.15
 DEFAULT_OFFICIAL_RL_SELECTION_PENALTY = 0.02
-DEFAULT_OFFICIAL_EDGE_SCALE_CAP = 0.05
-DEFAULT_OFFICIAL_MIN_UNITS = 0.25
-DEFAULT_OFFICIAL_MAX_UNITS = 3.0
+DEFAULT_OFFICIAL_EDGE_SCALE_CAP = 0.075
+DEFAULT_OFFICIAL_MIN_UNITS = 0.5
+DEFAULT_OFFICIAL_MAX_UNITS = 5.0
+DEFAULT_OFFICIAL_RL_MIN_BET_ODDS = -140
+DEFAULT_OFFICIAL_RL_MAX_BET_ODDS = 105
 DEFAULT_OFFICIAL_ML_MARKET_BASE_MULTIPLIER = 0.70
 DEFAULT_OFFICIAL_ML_MARKET_PLUS_MONEY_MULTIPLIER = 1.0
 DEFAULT_OFFICIAL_ML_MARKET_HIGH_EDGE_THRESHOLD = 0.10
@@ -100,6 +102,7 @@ DEFAULT_RUN_COUNT_EXPERIMENT = os.getenv(
 LIVE_ODDS_CACHE_TTL_MINUTES = 15
 FULL_GAME_ODDS_CACHE_TTL_MINUTES = 30
 LIVE_ODDS_CACHE_RETENTION_DAYS = 7
+LINEUP_STALE_TTL_MINUTES = 90
 SCRAPER_ODDS_DB_PATH = Path("OddsScraper") / "data" / "mlb_odds.db"
 SCRAPER_MARKET_STATE_PATH = Path("OddsScraper") / "data" / "live_market_state.json"
 WINDOWS_MARKET_SYNC_STATE_PATH = Path("OddsScraper") / "data" / "windows_market_sync_state.json"
@@ -193,6 +196,7 @@ class GameProcessingResult:
     paper_fallback: bool = False
     input_status: dict[str, Any] | None = None
     narrative: str | None = None
+    candidate_decisions: list[BetDecision] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -214,6 +218,11 @@ class GameProcessingResult:
             "paper_fallback": self.paper_fallback,
             "input_status": self.input_status,
             "narrative": self.narrative,
+            "candidate_decisions": (
+                [decision.model_dump(mode="json") for decision in self.candidate_decisions]
+                if self.candidate_decisions
+                else []
+            ),
         }
 
 
@@ -245,6 +254,16 @@ class DailyPipelineResult:
             "notification_payload": self.notification_payload,
             "games": [game.to_dict() for game in self.games],
         }
+
+
+@dataclass(frozen=True, slots=True)
+class SlateRuntimeInputs:
+    schedule: pd.DataFrame
+    lineups: list[Lineup]
+    odds: list[OddsSnapshot]
+    full_game_odds_context: dict[int, dict[str, Any]]
+    inference_frame: pd.DataFrame
+    refresh: bool = False
 
 
 def _slate_response_payload(result: DailyPipelineResult) -> dict[str, Any]:
@@ -351,7 +370,6 @@ class ArtifactOrFallbackPredictionEngine:
                 )
                 if run_count_ml_home is not None and run_count_ml_away is not None:
                     ml_home_probability = run_count_ml_home
-                    rl_home_probability = run_count_ml_home
 
         full_game_ml_home_probability: float | None = None
         full_game_ml_away_probability: float | None = None
@@ -1275,43 +1293,73 @@ def run_daily_pipeline(
     if not historical_games.empty:
         _upsert_games(database_path, historical_games)
     _upsert_games(database_path, schedule)
-
-    lineups = lineups_fetcher(pipeline_day.isoformat())
-    odds = odds_fetcher(pipeline_day, mode, database_path)
-    full_game_odds_context = full_game_odds_fetcher(pipeline_day, mode, database_path)
-    _persist_odds_snapshots(database_path, odds)
-    if dry_run:
-        existing_f5_games = {
-            snapshot.game_pk for snapshot in odds if snapshot.market_type == "f5_ml"
-        }
-        estimated_odds = [
-            snapshot
-            for snapshot in build_estimated_f5_ml_snapshots(full_game_odds_context)
-            if snapshot.game_pk not in existing_f5_games
-        ]
-        if estimated_odds:
-            logger.info(
-                "Added %s preview-only estimated F5 odds snapshots from full-game markets",
-                len(estimated_odds),
-            )
-            odds = sorted(
-                [*odds, *estimated_odds],
-                key=lambda snapshot: (snapshot.game_pk, snapshot.book_name, snapshot.market_type),
-            )
-
-    inference_frame = feature_frame_builder(
-        target_date=pipeline_day,
+    initial_inputs = _build_slate_runtime_inputs(
+        pipeline_day=pipeline_day,
+        mode=mode,
+        dry_run=dry_run,
+        database_path=database_path,
         schedule=schedule,
         historical_games=historical_games,
-        lineups=lineups,
-        db_path=database_path,
+        lineups_fetcher=lineups_fetcher,
+        odds_fetcher=odds_fetcher,
+        full_game_odds_fetcher=full_game_odds_fetcher,
+        feature_frame_builder=feature_frame_builder,
         weather_fetcher=weather_fetcher,
+        refresh=False,
     )
+    baseline_inputs: SlateRuntimeInputs | None = None
+    active_inputs = initial_inputs
+    if mode == "prod":
+        refreshed_schedule = schedule_fetcher(pipeline_day, mode)
+        if not refreshed_schedule.empty:
+            _upsert_games(database_path, refreshed_schedule)
+            baseline_inputs = initial_inputs
+            active_inputs = _build_slate_runtime_inputs(
+                pipeline_day=pipeline_day,
+                mode=mode,
+                dry_run=dry_run,
+                database_path=database_path,
+                schedule=refreshed_schedule,
+                historical_games=historical_games,
+                lineups_fetcher=lineups_fetcher,
+                odds_fetcher=odds_fetcher,
+                full_game_odds_fetcher=full_game_odds_fetcher,
+                feature_frame_builder=feature_frame_builder,
+                weather_fetcher=weather_fetcher,
+                refresh=True,
+            )
+
+    schedule = active_inputs.schedule
+    lineups = active_inputs.lineups
+    odds = active_inputs.odds
+    full_game_odds_context = active_inputs.full_game_odds_context
+    inference_frame = active_inputs.inference_frame
 
     run_id = _build_run_id(pipeline_day)
     lineups_by_game_team = {(lineup.game_pk, lineup.team): lineup for lineup in lineups}
     odds_by_game = _group_odds_by_game(odds)
     schedule_lookup = {int(row["game_pk"]): row for row in schedule.to_dict(orient="records")}
+    baseline_schedule_lookup = (
+        {
+            int(row["game_pk"]): row
+            for row in baseline_inputs.schedule.to_dict(orient="records")
+        }
+        if baseline_inputs is not None
+        else {}
+    )
+    baseline_lineups_by_game_team = (
+        {(lineup.game_pk, lineup.team): lineup for lineup in baseline_inputs.lineups}
+        if baseline_inputs is not None
+        else {}
+    )
+    baseline_odds_by_game = (
+        _group_odds_by_game(baseline_inputs.odds) if baseline_inputs is not None else {}
+    )
+    baseline_inference_lookup = (
+        _build_inference_row_lookup(baseline_inputs.inference_frame)
+        if baseline_inputs is not None
+        else {}
+    )
 
     current_bankroll, peak_bankroll, drawdown_pct = _load_bankroll_state(
         database_path,
@@ -1341,7 +1389,18 @@ def run_daily_pipeline(
                 lineups_by_game_team=lineups_by_game_team,
                 odds_by_game=odds_by_game,
                 full_game_odds_context_by_game=full_game_odds_context,
+                baseline_schedule_lookup=baseline_schedule_lookup,
+                baseline_lineups_by_game_team=baseline_lineups_by_game_team,
+                baseline_odds_by_game=baseline_odds_by_game,
+                baseline_inference_lookup=baseline_inference_lookup,
+                recheck_performed=baseline_inputs is not None,
             )
+            row_frame, umpire_neutralized = _neutralize_missing_umpire_features(row_frame)
+            if input_status is not None:
+                input_status["umpire_neutralized"] = bool(umpire_neutralized)
+                input_status["umpire_fallback_mode"] = (
+                    "neutralized_defaults" if umpire_neutralized else None
+                )
 
             prediction = prediction_engine.predict(row_frame)
             _upsert_prediction(database_path, prediction)
@@ -1360,8 +1419,12 @@ def run_daily_pipeline(
                 inference_row=inference_row,
                 lineups_by_game_team=lineups_by_game_team,
                 odds_by_game=odds_by_game,
+                full_game_odds_context_by_game=full_game_odds_context,
+                after_refresh=baseline_inputs is not None,
             )
-            lineup_only_block = bool(validation_reasons) and set(validation_reasons) <= {
+            lineup_only_block = bool(validation_reasons) and {
+                _base_validation_reason(reason) for reason in validation_reasons
+            } <= {
                 "lineup unavailable"
             }
             allow_paper_fallback = (
@@ -1379,6 +1442,7 @@ def run_daily_pipeline(
                         forced_decision=forced_decision,
                         no_pick_reason="; ".join(validation_reasons),
                         input_status=input_status,
+                        candidate_decisions=candidate_decisions,
                     )
                 )
                 continue
@@ -1402,6 +1466,7 @@ def run_daily_pipeline(
                         forced_decision=forced_decision,
                         no_pick_reason="kill-switch active",
                         input_status=input_status,
+                        candidate_decisions=candidate_decisions,
                     )
                 )
                 continue
@@ -1418,6 +1483,7 @@ def run_daily_pipeline(
                         forced_decision=forced_decision,
                         no_pick_reason="edge below threshold",
                         input_status=input_status,
+                        candidate_decisions=candidate_decisions,
                     )
                 )
                 continue
@@ -1435,6 +1501,7 @@ def run_daily_pipeline(
                     forced_decision=forced_decision,
                     paper_fallback=allow_paper_fallback,
                     input_status=input_status,
+                    candidate_decisions=candidate_decisions,
                 )
             )
         except Exception as exc:
@@ -1747,7 +1814,7 @@ def _eligible_f5_refresh_game_pks(
 
     game_pk_lookup = _load_repo_game_pk_lookup(repo_db_path=repo_db_path, target_date=target_date)
     if not game_pk_lookup:
-        return set()
+        return None
 
     sync_state = _load_windows_market_sync_state(sync_state_path)
     fingerprint_state = sync_state.setdefault("full_game_fingerprints", {})
@@ -1966,6 +2033,7 @@ def _default_feature_frame_builder(
     lineups: Sequence[Lineup],
     db_path: str | Path,
     weather_fetcher: Callable[..., Any] | None,
+    refresh: bool = False,
 ) -> pd.DataFrame:
     database_path = Path(db_path)
     return build_live_feature_frame(
@@ -1974,8 +2042,98 @@ def _default_feature_frame_builder(
         historical_games=historical_games,
         db_path=database_path,
         lineups=lineups,
+        refresh=refresh,
         weather_fetcher=weather_fetcher,
     )
+
+
+def _build_slate_runtime_inputs(
+    *,
+    pipeline_day: date,
+    mode: Mode,
+    dry_run: bool,
+    database_path: str | Path,
+    schedule: pd.DataFrame,
+    historical_games: pd.DataFrame,
+    lineups_fetcher: LineupsFetcher,
+    odds_fetcher: OddsFetcher,
+    full_game_odds_fetcher: FullGameOddsContextFetcher,
+    feature_frame_builder: FeatureFrameBuilder,
+    weather_fetcher: Callable[..., Any] | None,
+    refresh: bool,
+) -> SlateRuntimeInputs:
+    lineups = lineups_fetcher(pipeline_day.isoformat())
+    odds = odds_fetcher(pipeline_day, mode, database_path)
+    full_game_odds_context = full_game_odds_fetcher(pipeline_day, mode, database_path)
+    _persist_odds_snapshots(database_path, odds)
+
+    resolved_odds = list(odds)
+    if dry_run:
+        existing_f5_games = {
+            snapshot.game_pk for snapshot in resolved_odds if snapshot.market_type == "f5_ml"
+        }
+        estimated_odds = [
+            snapshot
+            for snapshot in build_estimated_f5_ml_snapshots(full_game_odds_context)
+            if snapshot.game_pk not in existing_f5_games
+        ]
+        if estimated_odds:
+            logger.info(
+                "Added %s preview-only estimated F5 odds snapshots from full-game markets",
+                len(estimated_odds),
+            )
+            resolved_odds = sorted(
+                [*resolved_odds, *estimated_odds],
+                key=lambda snapshot: (snapshot.game_pk, snapshot.book_name, snapshot.market_type),
+            )
+
+    inference_frame = _invoke_feature_frame_builder(
+        feature_frame_builder=feature_frame_builder,
+        target_date=pipeline_day,
+        schedule=schedule,
+        historical_games=historical_games,
+        lineups=lineups,
+        db_path=database_path,
+        weather_fetcher=weather_fetcher,
+        refresh=refresh,
+    )
+    return SlateRuntimeInputs(
+        schedule=schedule.copy().reset_index(drop=True),
+        lineups=list(lineups),
+        odds=resolved_odds,
+        full_game_odds_context=dict(full_game_odds_context),
+        inference_frame=inference_frame,
+        refresh=refresh,
+    )
+
+
+def _invoke_feature_frame_builder(
+    *,
+    feature_frame_builder: FeatureFrameBuilder,
+    target_date: date,
+    schedule: pd.DataFrame,
+    historical_games: pd.DataFrame,
+    lineups: Sequence[Lineup],
+    db_path: str | Path,
+    weather_fetcher: Callable[..., Any] | None,
+    refresh: bool,
+) -> pd.DataFrame:
+    kwargs = {
+        "target_date": target_date,
+        "schedule": schedule,
+        "historical_games": historical_games,
+        "lineups": lineups,
+        "db_path": db_path,
+        "weather_fetcher": weather_fetcher,
+        "refresh": refresh,
+    }
+    try:
+        return feature_frame_builder(**kwargs)
+    except TypeError as exc:
+        if "refresh" not in str(exc):
+            raise
+        kwargs.pop("refresh", None)
+        return feature_frame_builder(**kwargs)
 
 
 def _parse_schedule_game(game: dict[str, Any]) -> dict[str, Any] | None:
@@ -2350,11 +2508,13 @@ def _latest_scraper_market_rows(
         if game_pk is None:
             continue
         point = float(row["point"]) if row["point"] is not None else None
+        market_type = str(row["market_type"])
+        point_key = abs(point) if market_type in {"f5_rl", "full_game_rl"} and point is not None else point
         key = (
             int(game_pk),
             str(row["bookmaker"]),
-            str(row["market_type"]),
-            point,
+            market_type,
+            point_key,
             str(row["side"]),
         )
         if key not in latest:
@@ -2802,18 +2962,31 @@ def _group_odds_by_game(snapshots: Sequence[OddsSnapshot]) -> dict[int, list[Odd
     return grouped
 
 
+def _build_inference_row_lookup(inference_frame: pd.DataFrame) -> dict[int, pd.Series]:
+    if inference_frame.empty or "game_pk" not in inference_frame.columns:
+        return {}
+    lookup: dict[int, pd.Series] = {}
+    for _, row in inference_frame.drop_duplicates(subset=["game_pk"], keep="last").iterrows():
+        lookup[int(row["game_pk"])] = row.copy()
+    return lookup
+
+
 def _validation_no_pick_reason(
     *,
     game: dict[str, Any],
     inference_row: pd.Series,
     lineups_by_game_team: dict[tuple[int, str], Lineup],
     odds_by_game: dict[int, list[OddsSnapshot]],
+    full_game_odds_context_by_game: dict[int, dict[str, Any]],
+    after_refresh: bool = False,
 ) -> str | None:
     reasons = _collect_validation_reasons(
         game=game,
         inference_row=inference_row,
         lineups_by_game_team=lineups_by_game_team,
         odds_by_game=odds_by_game,
+        full_game_odds_context_by_game=full_game_odds_context_by_game,
+        after_refresh=after_refresh,
     )
     return "; ".join(reasons) if reasons else None
 
@@ -2824,33 +2997,23 @@ def _collect_validation_reasons(
     inference_row: pd.Series,
     lineups_by_game_team: dict[tuple[int, str], Lineup],
     odds_by_game: dict[int, list[OddsSnapshot]],
+    full_game_odds_context_by_game: dict[int, dict[str, Any]],
+    after_refresh: bool = False,
 ) -> list[str]:
     game_pk = int(game["game_pk"])
     reasons: list[str] = []
-
-    for side, starter_key in (("home", "home_starter_id"), ("away", "away_starter_id")):
-        team = str(game[f"{side}_team"])
-        lineup = lineups_by_game_team.get((game_pk, team))
-        if lineup is None or not lineup.players:
-            reasons.append("lineup unavailable")
-            break
-        if (
-            lineup.starting_pitcher_id
-            or lineup.projected_starting_pitcher_id
-            or _optional_int(game.get(starter_key))
-        ) is None:
-            reasons.append("starter unavailable")
-            break
-
-    if not odds_by_game.get(game_pk):
-        reasons.append("f5 odds unavailable")
+    full_game_context = full_game_odds_context_by_game.get(game_pk, {})
+    if not bool(full_game_context.get("full_game_odds_available")):
+        reasons.append("full-game odds unavailable")
 
     if (not bool(game.get("is_dome", False))) and float(
         inference_row.get("weather_data_missing", 0.0) or 0.0
     ) >= 1.0:
         reasons.append("weather unavailable")
 
-    return reasons
+    if not after_refresh:
+        return reasons
+    return [f"{reason} after refresh" for reason in reasons]
 
 
 def _build_input_status(
@@ -2860,6 +3023,11 @@ def _build_input_status(
     lineups_by_game_team: dict[tuple[int, str], Lineup],
     odds_by_game: dict[int, list[OddsSnapshot]],
     full_game_odds_context_by_game: dict[int, dict[str, Any]],
+    baseline_schedule_lookup: Mapping[int, dict[str, Any]] | None = None,
+    baseline_lineups_by_game_team: Mapping[tuple[int, str], Lineup] | None = None,
+    baseline_odds_by_game: Mapping[int, list[OddsSnapshot]] | None = None,
+    baseline_inference_lookup: Mapping[int, pd.Series] | None = None,
+    recheck_performed: bool = False,
 ) -> dict[str, Any]:
     game_pk = int(game["game_pk"])
     home_lineup = lineups_by_game_team.get((game_pk, str(game["home_team"])))
@@ -2869,8 +3037,24 @@ def _build_input_status(
     odds_sources = sorted({_odds_source_label(snapshot.book_name) for snapshot in snapshots})
     f5_ml_summary = _summarize_snapshot_market(snapshots, market_type="f5_ml")
     f5_rl_summary = _summarize_snapshot_market(snapshots, market_type="f5_rl")
-
-    return {
+    baseline_game = (baseline_schedule_lookup or {}).get(game_pk)
+    baseline_home_lineup = (baseline_lineups_by_game_team or {}).get((game_pk, str(game["home_team"])))
+    baseline_away_lineup = (baseline_lineups_by_game_team or {}).get((game_pk, str(game["away_team"])))
+    baseline_snapshots = (baseline_odds_by_game or {}).get(game_pk, [])
+    baseline_inference_row = (baseline_inference_lookup or {}).get(game_pk)
+    lineup_age_minutes = _max_age_minutes(
+        [
+            home_lineup.as_of_timestamp if home_lineup is not None else None,
+            away_lineup.as_of_timestamp if away_lineup is not None else None,
+        ]
+    )
+    odds_age_minutes = _max_age_minutes([snapshot.fetched_at for snapshot in snapshots])
+    feature_frame_age_minutes = _age_minutes(inference_row.get("as_of_timestamp"))
+    weather_missing = (
+        (not bool(game.get("is_dome", False)))
+        and float(inference_row.get("weather_data_missing", 0.0) or 0.0) >= 1.0
+    )
+    status = {
         "home_lineup_available": bool(home_lineup and home_lineup.players),
         "home_lineup_confirmed": bool(home_lineup and home_lineup.confirmed),
         "home_lineup_source": home_lineup.source if home_lineup is not None else None,
@@ -2919,11 +3103,169 @@ def _build_input_status(
         "consensus_full_game_home_spread_odds": full_game_context.get("consensus_full_game_home_spread_odds"),
         "consensus_full_game_away_spread": full_game_context.get("consensus_full_game_away_spread"),
         "consensus_full_game_away_spread_odds": full_game_context.get("consensus_full_game_away_spread_odds"),
-        "weather_available": not (
+        "weather_available": not weather_missing,
+        "lineup_age_minutes": lineup_age_minutes,
+        "lineups_stale": lineup_age_minutes is None or lineup_age_minutes > LINEUP_STALE_TTL_MINUTES,
+        "odds_age_minutes": odds_age_minutes,
+        "odds_stale": odds_age_minutes is None or odds_age_minutes > LIVE_ODDS_CACHE_TTL_MINUTES,
+        "feature_frame_age_minutes": feature_frame_age_minutes,
+        "feature_frame_stale": (
+            feature_frame_age_minutes is None
+            or feature_frame_age_minutes > FULL_GAME_ODDS_CACHE_TTL_MINUTES
+        ),
+        "weather_refresh_required": bool(
             (not bool(game.get("is_dome", False)))
-            and float(inference_row.get("weather_data_missing", 0.0) or 0.0) >= 1.0
+            and (
+                weather_missing
+                or feature_frame_age_minutes is None
+                or feature_frame_age_minutes > FULL_GAME_ODDS_CACHE_TTL_MINUTES
+            )
+        ),
+        "umpire_available": float(inference_row.get("plate_umpire_known", 0.0) or 0.0) >= 1.0,
+        "umpire_neutralized": False,
+        "umpire_fallback_mode": None,
+        "prelock_recheck_performed": bool(recheck_performed),
+        "lineup_changed_during_recheck": bool(
+            recheck_performed
+            and (
+                _lineup_player_ids(home_lineup) != _lineup_player_ids(baseline_home_lineup)
+                or _lineup_player_ids(away_lineup) != _lineup_player_ids(baseline_away_lineup)
+            )
+        ),
+        "starter_changed_during_recheck": bool(
+            recheck_performed
+            and (
+                _resolve_lineup_or_schedule_starter_id(game, home_lineup, "home")
+                != _resolve_lineup_or_schedule_starter_id(baseline_game, baseline_home_lineup, "home")
+                or _resolve_lineup_or_schedule_starter_id(game, away_lineup, "away")
+                != _resolve_lineup_or_schedule_starter_id(baseline_game, baseline_away_lineup, "away")
+            )
+        ),
+        "weather_changed_during_recheck": bool(
+            recheck_performed and _weather_signature(inference_row) != _weather_signature(baseline_inference_row)
+        ),
+        "odds_changed_during_recheck": bool(
+            recheck_performed and _odds_market_signature(snapshots) != _odds_market_signature(baseline_snapshots)
+        ),
+        "scheduled_start_changed_during_recheck": bool(
+            recheck_performed
+            and _schedule_value(game, "scheduled_start") != _schedule_value(baseline_game, "scheduled_start")
+        ),
+        "game_status_changed_during_recheck": bool(
+            recheck_performed
+            and _normalize_game_status(_schedule_value(game, "status"))
+            != _normalize_game_status(_schedule_value(baseline_game, "status"))
         ),
     }
+    return status
+
+
+def _lineup_player_ids(lineup: Lineup | None) -> tuple[int, ...]:
+    if lineup is None:
+        return ()
+    players = sorted(lineup.players, key=lambda player: player.batting_order)
+    return tuple(int(player.player_id) for player in players)
+
+
+def _resolve_lineup_or_schedule_starter_id(
+    game: Mapping[str, Any] | None,
+    lineup: Lineup | None,
+    side: Literal["home", "away"],
+) -> int | None:
+    if lineup is not None:
+        lineup_starter = lineup.starting_pitcher_id or lineup.projected_starting_pitcher_id
+        if lineup_starter is not None:
+            return int(lineup_starter)
+    if game is None:
+        return None
+    return _optional_int(game.get(f"{side}_starter_id"))
+
+
+def _schedule_value(game: Mapping[str, Any] | None, key: str) -> Any:
+    if game is None:
+        return None
+    return game.get(key)
+
+
+def _weather_signature(row: pd.Series | None) -> tuple[float | None, float | None, float | None]:
+    if row is None:
+        return (None, None, None)
+    return (
+        _coerce_optional_float(row.get("weather_composite")),
+        _coerce_optional_float(row.get("weather_wind_factor")),
+        _coerce_optional_float(row.get("weather_data_missing")),
+    )
+
+
+def _odds_market_signature(snapshots: Sequence[OddsSnapshot]) -> tuple[tuple[Any, ...], ...]:
+    return tuple(
+        sorted(
+            (
+                snapshot.market_type,
+                str(snapshot.book_name),
+                int(snapshot.home_odds),
+                int(snapshot.away_odds),
+                None if snapshot.home_point is None else float(snapshot.home_point),
+                None if snapshot.away_point is None else float(snapshot.away_point),
+            )
+            for snapshot in snapshots
+        )
+    )
+
+
+def _coerce_optional_float(value: Any) -> float | None:
+    if value is None or pd.isna(value):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _age_minutes(value: Any) -> float | None:
+    if value is None or pd.isna(value):
+        return None
+    try:
+        timestamp = pd.Timestamp(value)
+    except (TypeError, ValueError):
+        return None
+    if pd.isna(timestamp):
+        return None
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize("UTC")
+    else:
+        timestamp = timestamp.tz_convert("UTC")
+    return max(
+        0.0,
+        float((pd.Timestamp(datetime.now(UTC)) - timestamp).total_seconds() / 60.0),
+    )
+
+
+def _max_age_minutes(values: Sequence[Any]) -> float | None:
+    ages = [_age_minutes(value) for value in values]
+    resolved = [age for age in ages if age is not None]
+    if not resolved:
+        return None
+    return float(max(resolved))
+
+
+def _neutralize_missing_umpire_features(row_frame: pd.DataFrame) -> tuple[pd.DataFrame, bool]:
+    if row_frame.empty:
+        return row_frame, False
+    resolved = row_frame.copy()
+    plate_umpire_known = float(resolved.iloc[0].get("plate_umpire_known", 0.0) or 0.0)
+    if plate_umpire_known >= 1.0:
+        return resolved, False
+    umpire_columns = [column for column in resolved.columns if column.startswith("plate_umpire_")]
+    if not umpire_columns:
+        return resolved, False
+    for column in umpire_columns:
+        resolved.loc[:, column] = float(_default_feature_fill_value(column))
+    return resolved, True
+
+
+def _base_validation_reason(reason: str) -> str:
+    return str(reason).removesuffix(" after refresh")
 
 
 def _odds_source_label(book_name: str) -> str:
@@ -3128,37 +3470,42 @@ def _select_game_decision(
 
 
 def _select_forced_game_decision(candidates: Sequence[BetDecision]) -> BetDecision | None:
-    if not candidates:
+    bet365_candidates = [
+        candidate
+        for candidate in candidates
+        if _book_name_key(candidate.book_name) == "bet365"
+    ]
+    target_candidates = bet365_candidates or []
+    if not target_candidates:
         return None
     return max(
-        candidates,
+        target_candidates,
         key=lambda decision: (
             float(decision.edge_pct),
             float(decision.model_probability),
             float(decision.ev),
         ),
-    ).model_copy(update={"kelly_stake": 1.0})
+    )
 
 
 def _is_official_live_candidate(candidate: BetDecision) -> bool:
+    if _book_name_key(candidate.book_name) != "bet365":
+        return False
+    if str(candidate.book_name or "").startswith("estimate:"):
+        return False
     if candidate.odds_at_bet < DEFAULT_OFFICIAL_MIN_BET_ODDS:
         return False
     if candidate.odds_at_bet > DEFAULT_OFFICIAL_MAX_BET_ODDS:
         return False
-    if (
-        not str(candidate.book_name or "").startswith("estimate:")
-        and float(candidate.edge_pct) > DEFAULT_OFFICIAL_MAX_TRUSTED_EDGE
-    ):
+    if float(candidate.edge_pct) >= DEFAULT_OFFICIAL_MAX_TRUSTED_EDGE:
         return False
-    if candidate.market_type == "f5_ml":
-        return candidate.source_model in {"legacy_f5_ml", "run_count_f5_ml"}
-    if candidate.market_type == "f5_rl":
-        return candidate.source_model in {"rlv2_direct", "run_count_f5_rl"}
-    if candidate.market_type == "f5_total":
-        return candidate.source_model == "run_count_f5_total"
     if candidate.market_type == "full_game_ml":
         return candidate.source_model == "run_count_full_game_ml"
     if candidate.market_type == "full_game_rl":
+        if candidate.odds_at_bet < DEFAULT_OFFICIAL_RL_MIN_BET_ODDS:
+            return False
+        if candidate.odds_at_bet > DEFAULT_OFFICIAL_RL_MAX_BET_ODDS:
+            return False
         return candidate.source_model == "run_count_full_game_rl"
     if candidate.market_type == "full_game_total":
         return candidate.source_model == "run_count_full_game_total"

@@ -11,22 +11,91 @@ Usage:
 
 import argparse
 import asyncio
+import shutil
 from datetime import datetime
+from pathlib import Path
 
 from playwright.async_api import async_playwright
 from scraper import MLBOddsScraper, SQLiteStore, SEASON_DATES
 
 
-DB_PATH = "data/mlb_odds.db"
+DB_PATH = Path("data/mlb_odds.db")
+BACKUP_DB_PATH = Path("data/mlb_odds_backup.db")
 
 
-async def main(export_csv: bool = False):
+def _database_coverage(db_path: Path) -> tuple[str | None, str | None, int]:
+    if not db_path.exists():
+        return None, None, 0
+
+    db = SQLiteStore(db_path)
+    try:
+        earliest, latest = db.date_range()
+        return earliest, latest, db.count()
+    finally:
+        db.close()
+
+
+def _seed_active_db_from_backup() -> Path:
+    active_earliest, active_latest, active_rows = _database_coverage(DB_PATH)
+    backup_earliest, backup_latest, backup_rows = _database_coverage(BACKUP_DB_PATH)
+
+    if backup_rows == 0:
+        return DB_PATH
+
+    should_promote_backup = False
+    if active_rows == 0:
+        should_promote_backup = True
+    elif backup_earliest and (active_earliest is None or backup_earliest < active_earliest):
+        should_promote_backup = True
+    elif backup_rows > active_rows and backup_earliest == active_earliest:
+        should_promote_backup = True
+
+    if should_promote_backup:
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(BACKUP_DB_PATH, DB_PATH)
+        print(
+            f"Seeded active DB from backup: {BACKUP_DB_PATH} -> {DB_PATH} "
+            f"(backup rows={backup_rows:,}, range={backup_earliest} to {backup_latest})"
+        )
+    else:
+        print(
+            f"Using existing active DB: {DB_PATH} "
+            f"(rows={active_rows:,}, range={active_earliest} to {active_latest})"
+        )
+
+    return DB_PATH
+
+
+def _parse_cli_date(value: str) -> datetime:
+    return datetime.strptime(value, "%Y-%m-%d")
+
+
+async def main(
+    export_csv: bool = False,
+    *,
+    start_date_override: str | None = None,
+    end_date_override: str | None = None,
+    no_resume: bool = False,
+):
     scraper = MLBOddsScraper(output_dir="data", base_delay=2.0, max_parallel=3)
-    db = SQLiteStore(DB_PATH)
+    active_db_path = _seed_active_db_from_backup()
+    db = SQLiteStore(active_db_path)
 
     # Today backwards to the start of 2015 spring training
-    start_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    end_date = SEASON_DATES[2015]["spring_training_start"]
+    start_date = (
+        _parse_cli_date(start_date_override)
+        if start_date_override is not None
+        else datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    )
+    end_date = (
+        _parse_cli_date(end_date_override)
+        if end_date_override is not None
+        else SEASON_DATES[2015]["spring_training_start"]
+    )
+    if end_date > start_date:
+        raise ValueError(
+            f"end_date must be on or before start_date; got start={start_date.date()} end={end_date.date()}"
+        )
 
     # Show existing DB state
     existing = db.count()
@@ -35,11 +104,14 @@ async def main(export_csv: bool = False):
     print(f"{'=' * 60}")
     print(f"MLB Odds Scraper -> SQLite")
     print(f"  {start_date.date()} backwards to {end_date.date()}")
-    print(f"  DB: {DB_PATH}")
+    print(f"  DB: {active_db_path}")
     if existing:
         print(f"  Existing rows: {existing:,}")
         print(f"  Existing range: {date_range[0]} to {date_range[1]}")
-        print(f"  Will resume from earliest date in DB")
+        if no_resume:
+            print(f"  Resume disabled for this run")
+        else:
+            print(f"  Will resume from earliest date in DB")
     else:
         print(f"  Fresh database — starting from scratch")
     print(f"{'=' * 60}")
@@ -61,6 +133,7 @@ async def main(export_csv: bool = False):
                 start_date=start_date,
                 end_date=end_date,
                 db=db,
+                resume=not no_resume,
             )
         except KeyboardInterrupt:
             print("\nInterrupted! Data already saved to DB — resume anytime.")
@@ -107,5 +180,19 @@ async def main(export_csv: bool = False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Full historical MLB odds scrape to SQLite")
     parser.add_argument("--export", action="store_true", help="Export CSV after scraping")
+    parser.add_argument("--start-date", help="Optional YYYY-MM-DD start date override")
+    parser.add_argument("--end-date", help="Optional YYYY-MM-DD end date override")
+    parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Ignore earliest-date resume logic and scrape only the requested window",
+    )
     args = parser.parse_args()
-    asyncio.run(main(export_csv=args.export))
+    asyncio.run(
+        main(
+            export_csv=args.export,
+            start_date_override=args.start_date,
+            end_date_override=args.end_date,
+            no_resume=args.no_resume,
+        )
+    )

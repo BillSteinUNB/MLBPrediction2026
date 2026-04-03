@@ -10,3 +10,7 @@ export { useBenchmark } from './useBenchmark';
 export { useRunHistory } from './useRunHistory';
 export { useDualView } from './useDualView';
 export { useFrontendConnection } from './useFrontendConnection';
+export { useDailyPics } from './useDailyPics';
+export { usePlayOfTheDay } from './usePlayOfTheDay';
+export { useLiveSeasonDashboard } from './useLiveSeasonDashboard';
+export { useSeasonSlate } from './useSeasonSlate';

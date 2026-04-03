@@ -540,7 +540,13 @@ def _extract_full_game_context_for_event(
         "full_game_away_spread": None,
         "full_game_away_spread_odds": None,
         "full_game_away_spread_book": None,
+        "full_game_total": None,
+        "full_game_total_over_odds": None,
+        "full_game_total_under_odds": None,
+        "full_game_total_book": None,
         "full_game_ml_pairs": [],
+        "full_game_rl_pairs": [],
+        "full_game_total_pairs": [],
     }
 
     bookmakers = event_payload.get("bookmakers")
@@ -618,6 +624,59 @@ def _extract_full_game_context_for_event(
                         result["full_game_away_spread"] = float(point)
                         result["full_game_away_spread_odds"] = int(price)
                         result["full_game_away_spread_book"] = book_name
+                home_point = result.get("full_game_home_spread")
+                home_price = result.get("full_game_home_spread_odds")
+                away_point = result.get("full_game_away_spread")
+                away_price = result.get("full_game_away_spread_odds")
+                if (
+                    home_point is not None
+                    and home_price is not None
+                    and away_point is not None
+                    and away_price is not None
+                ):
+                    result["full_game_rl_pairs"].append(
+                        {
+                            "book_name": book_name,
+                            "home_point": home_point,
+                            "home_odds": home_price,
+                            "away_point": away_point,
+                            "away_odds": away_price,
+                        }
+                    )
+
+            if market_key == "totals":
+                market_found = True
+                over_price: int | None = None
+                under_price: int | None = None
+                total_point: float | None = None
+                for outcome in outcomes:
+                    if not isinstance(outcome, Mapping):
+                        continue
+                    label = str(outcome.get("name") or "").strip().lower()
+                    price = outcome.get("price")
+                    point = outcome.get("point")
+                    if not isinstance(price, (int, float)):
+                        continue
+                    if isinstance(point, (int, float)) and total_point is None:
+                        total_point = float(point)
+                    if label == "over":
+                        over_price = int(price)
+                    elif label == "under":
+                        under_price = int(price)
+                if over_price is not None and under_price is not None:
+                    result["full_game_total_pairs"].append(
+                        {
+                            "book_name": book_name,
+                            "total_point": total_point,
+                            "over_odds": over_price,
+                            "under_odds": under_price,
+                        }
+                    )
+                    if _is_better_price(over_price, result["full_game_total_over_odds"]):
+                        result["full_game_total"] = total_point
+                        result["full_game_total_over_odds"] = over_price
+                        result["full_game_total_under_odds"] = under_price
+                        result["full_game_total_book"] = book_name
 
         if market_found:
             result["full_game_odds_books"].append(book_name)
@@ -890,6 +949,27 @@ def _mark_key_limited(
     )
 
 
+def _clear_key_limited_status(
+    connection: sqlite3.Connection,
+    *,
+    api_key: str,
+) -> None:
+    _ensure_key_tracking_tables(connection)
+    key_fingerprint = _register_api_key(connection, api_key)
+    connection.execute(
+        """
+        UPDATE odds_api_key_status
+        SET is_limited = 0,
+            limited_at = NULL,
+            reset_at = NULL,
+            last_error = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE key_fingerprint = ?
+        """,
+        (key_fingerprint,),
+    )
+
+
 def _is_key_limited(connection: sqlite3.Connection, *, api_key: str) -> bool:
     _clear_expired_key_limits(connection)
     key_fingerprint = _register_api_key(connection, api_key)
@@ -1041,10 +1121,27 @@ def _select_available_api_key(
     _ensure_key_tracking_tables(connection)
     _clear_expired_key_limits(connection)
     reset_at = _first_of_next_month()
-    for candidate in api_keys:
+    candidates = list(api_keys)
+    limited_candidates: list[str] = []
+    for candidate in candidates:
         _register_api_key(connection, candidate)
         if _is_key_limited(connection, api_key=candidate):
+            limited_candidates.append(candidate)
             continue
+        try:
+            _ensure_key_quota_available(
+                connection,
+                api_key=candidate,
+                usage_month=usage_month,
+                additional_cost=max(1, additional_cost),
+                quota_limit=quota_limit,
+                allow_legacy_fallback=allow_legacy_fallback,
+            )
+            return candidate
+        except OddsApiRateLimitError:
+            continue
+
+    for candidate in limited_candidates:
         try:
             _ensure_key_quota_available(
                 connection,
@@ -1402,7 +1499,7 @@ def fetch_mlb_full_game_odds_context(
             params: dict[str, str] = {
                 "apiKey": resolved_api_key,
                 "regions": regions,
-                "markets": "h2h,spreads",
+                "markets": "h2h,spreads,totals",
                 "oddsFormat": "american",
                 "dateFormat": "iso",
             }
@@ -1415,6 +1512,7 @@ def fetch_mlb_full_game_odds_context(
             try:
                 response = http_client.get(ODDS_API_ODDS_PATH, params=params)
                 response.raise_for_status()
+                _clear_key_limited_status(connection, api_key=resolved_api_key)
                 break
             except httpx.HTTPStatusError as exc:
                 last_error = exc
