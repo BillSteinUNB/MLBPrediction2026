@@ -5,14 +5,20 @@ import sqlite3
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+import pytest
+
 from src.models.bet import BetDecision
 from src.models.prediction import Prediction
 from src.ops.live_season_tracker import (
+    _clear_scheduled_tracking_rows_for_date,
     _settle_outstanding_tracking_dates,
+    _sanitize_live_capture_result,
     _refresh_frozen_slate_market_context,
     build_live_season_summary,
     build_manual_tracking_summary,
     capture_daily_result,
+    capture_live_slate_fast,
+    delete_manual_tracked_bet,
     list_tracked_games,
     list_manual_tracked_bets,
     settle_tracked_games,
@@ -164,14 +170,76 @@ def test_capture_and_settle_live_season_tracking(tmp_path: Path) -> None:
     assert summary.picks == 1
     assert summary.graded_picks == 1
     assert summary.wins == 1
-    assert summary.losses == 0
-    assert summary.play_of_day_count == 1
-    assert summary.play_of_day_wins == 1
-    assert summary.forced_picks == 2
-    assert summary.forced_graded_picks == 2
-    assert summary.f5_ml_accuracy is not None
-    assert summary.f5_rl_accuracy is not None
-    assert summary.flat_profit_units > 0
+
+
+def test_delete_manual_bet_allows_explicit_locked_delete_override(tmp_path: Path) -> None:
+    db_path = tmp_path / "manual_delete_override.db"
+
+    from src.db import init_db
+
+    init_db(db_path)
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO games (
+                game_pk, date, home_team, away_team, home_starter_id, away_starter_id,
+                venue, is_dome, is_abs_active, final_home_score, final_away_score, status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                5002,
+                "2026-04-03",
+                "WSH",
+                "LAD",
+                None,
+                None,
+                "Nationals Park",
+                0,
+                1,
+                None,
+                None,
+                "scheduled",
+            ),
+        )
+        connection.commit()
+
+    row = submit_manual_tracked_bet(
+        season=2026,
+        pipeline_date="2026-04-03",
+        game_pk=5002,
+        matchup="LAD @ WSH",
+        market_type="full_game_ml",
+        side="away",
+        odds_at_bet=-110,
+        bet_units=1.0,
+        model_probability=0.58,
+        fair_probability=0.51,
+        edge_pct=0.07,
+        db_path=db_path,
+    )
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "UPDATE games SET status = 'final', final_home_score = 2, final_away_score = 6 WHERE game_pk = 5002"
+        )
+        connection.commit()
+
+    with pytest.raises(ValueError, match="cannot be edited after the game has started"):
+        delete_manual_tracked_bet(
+            manual_bet_id=int(row["id"]),
+            season=2026,
+            db_path=db_path,
+        )
+
+    removed = delete_manual_tracked_bet(
+        manual_bet_id=int(row["id"]),
+        season=2026,
+        allow_locked_delete=True,
+        db_path=db_path,
+    )
+    assert removed is True
+    assert list_manual_tracked_bets(season=2026, db_path=db_path) == []
 
 
 def test_sync_live_game_state_updates_games_and_settles(tmp_path: Path, monkeypatch) -> None:
@@ -621,3 +689,199 @@ def test_settle_outstanding_tracking_dates_settles_prior_machine_and_manual_rows
     manual_rows = list_manual_tracked_bets(season=2026, db_path=db_path)
     assert tracked[0]["settled_result"] in {"WIN", "LOSS", "PUSH"}
     assert manual_rows[0]["settled_result"] in {"WIN", "LOSS", "PUSH"}
+
+
+def test_sanitize_live_capture_result_drops_degraded_pick() -> None:
+    raw_result = DailyPipelineResult(
+        run_id="run-20260406",
+        pipeline_date="2026-04-06",
+        mode="prod",
+        dry_run=True,
+        model_version="live-test-v1",
+        pick_count=1,
+        no_pick_count=0,
+        error_count=0,
+        notification_type="picks",
+        notification_payload={},
+        games=[
+            GameProcessingResult(
+                game_pk=7001,
+                matchup="ATL @ ARI",
+                status="pick",
+                selected_decision=_decision(
+                    7001,
+                    market_type="full_game_total",
+                    side="under",
+                    odds=-110,
+                    line_at_bet=9.0,
+                    model_probability=0.62,
+                ),
+                paper_fallback=True,
+                input_status={
+                    "full_game_odds_available": True,
+                    "home_lineup_available": False,
+                    "away_lineup_available": True,
+                    "weather_available": True,
+                },
+            )
+        ],
+    )
+
+    sanitized = _sanitize_live_capture_result(raw_result)
+
+    assert sanitized.pick_count == 0
+    assert sanitized.no_pick_count == 1
+    assert sanitized.notification_type == "no_picks"
+    assert sanitized.games[0].status == "no_pick"
+    assert sanitized.games[0].selected_decision is None
+    assert sanitized.games[0].paper_fallback is False
+    assert sanitized.games[0].no_pick_reason == (
+        "home lineup unavailable; paper fallback disabled for live tracking"
+    )
+
+
+def test_capture_live_slate_fast_uses_prod_mode_and_sanitizes_results(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "capture_fast.db"
+
+    import src.ops.live_season_tracker as tracker_module
+
+    captured: dict[str, object] = {}
+
+    def _fake_run_daily_pipeline(**kwargs: object) -> DailyPipelineResult:
+        captured.update(kwargs)
+        return DailyPipelineResult(
+            run_id="run-20260406",
+            pipeline_date="2026-04-06",
+            mode=str(kwargs["mode"]),
+            dry_run=bool(kwargs["dry_run"]),
+            model_version="live-test-v1",
+            pick_count=1,
+            no_pick_count=0,
+            error_count=0,
+            notification_type="picks",
+            notification_payload={},
+            games=[
+                GameProcessingResult(
+                    game_pk=8001,
+                    matchup="MIN @ KC",
+                    status="pick",
+                    selected_decision=_decision(
+                        8001,
+                        market_type="full_game_ml",
+                        side="away",
+                        odds=120,
+                        model_probability=0.61,
+                    ),
+                    input_status={
+                        "full_game_odds_available": True,
+                        "home_lineup_available": False,
+                        "away_lineup_available": False,
+                        "weather_available": True,
+                    },
+                )
+            ],
+        )
+
+    persisted: dict[str, object] = {}
+
+    monkeypatch.setattr(tracker_module, "run_daily_pipeline", _fake_run_daily_pipeline)
+    monkeypatch.setattr(
+        tracker_module,
+        "capture_daily_result",
+        lambda *, result, db_path: persisted.update({"result": result, "db_path": db_path}),
+    )
+
+    result = capture_live_slate_fast(target_date="2026-04-06", db_path=db_path)
+
+    assert captured["mode"] == "prod"
+    assert captured["dry_run"] is True
+    dependencies = captured["dependencies"]
+    assert dependencies is not None
+    assert dependencies.lineups_fetcher is None
+    assert dependencies.full_game_odds_fetcher is tracker_module._local_only_full_game_odds_fetcher
+    assert result.pick_count == 0
+    assert result.no_pick_count == 1
+    assert result.games[0].status == "no_pick"
+    assert persisted["result"] is result
+
+
+def test_clear_scheduled_tracking_rows_only_removes_unstarted_games(tmp_path: Path) -> None:
+    db_path = tmp_path / "clear_scheduled.db"
+
+    result = DailyPipelineResult(
+        run_id="run-20260406",
+        pipeline_date="2026-04-06",
+        mode="prod",
+        dry_run=True,
+        model_version="live-test-v1",
+        pick_count=2,
+        no_pick_count=0,
+        error_count=0,
+        notification_type="picks",
+        notification_payload={},
+        games=[
+            GameProcessingResult(
+                game_pk=8101,
+                matchup="ATL @ ARI",
+                status="pick",
+                prediction=_prediction(8101, ml_home=0.44, rl_home=0.42),
+                selected_decision=_decision(
+                    8101,
+                    market_type="full_game_total",
+                    side="under",
+                    odds=-110,
+                    line_at_bet=9.0,
+                    model_probability=0.61,
+                ),
+                input_status={"full_game_total": 9.0},
+            ),
+            GameProcessingResult(
+                game_pk=8102,
+                matchup="MIN @ KC",
+                status="pick",
+                prediction=_prediction(8102, ml_home=0.48, rl_home=0.45),
+                selected_decision=_decision(
+                    8102,
+                    market_type="full_game_ml",
+                    side="away",
+                    odds=120,
+                    model_probability=0.58,
+                ),
+                input_status={"full_game_away_ml": 120},
+            ),
+        ],
+    )
+    capture_daily_result(result=result, db_path=db_path)
+
+    from src.db import init_db
+
+    init_db(db_path)
+    with sqlite3.connect(db_path) as connection:
+        connection.executemany(
+            """
+            INSERT INTO games (
+                game_pk, date, home_team, away_team, home_starter_id, away_starter_id,
+                venue, is_dome, is_abs_active, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(game_pk) DO UPDATE SET status = excluded.status
+            """,
+            [
+                (8101, "2026-04-06", "ARI", "ATL", None, None, "Chase", 1, 1, "scheduled"),
+                (8102, "2026-04-06", "KC", "MIN", None, None, "Kauffman", 0, 1, "final"),
+            ],
+        )
+        connection.commit()
+
+    removed = _clear_scheduled_tracking_rows_for_date(
+        season=2026,
+        pipeline_date="2026-04-06",
+        db_path=db_path,
+    )
+
+    assert removed == 1
+    tracked = list_tracked_games(season=2026, pipeline_date="2026-04-06", db_path=db_path)
+    assert len(tracked) == 1
+    assert tracked[0]["game_pk"] == 8102

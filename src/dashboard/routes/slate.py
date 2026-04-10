@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-from datetime import date as date_type, datetime
+from datetime import date as date_type
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Query
 from src.dashboard.schemas import MacSyncResponse, SlateResponse
 from src.engine.bankroll import calculate_kelly_stake
 from src.engine.edge_calculator import calculate_edge
-from src.model.score_pricing import spread_cover_probabilities, totals_probabilities
+from src.model.score_pricing import spread_outcome_probabilities, totals_outcome_probabilities
 from src.ops.live_release import live_release_metadata
 from src.ops.live_season_tracker import list_tracked_games
 from src.pipeline.daily import (
@@ -24,6 +24,23 @@ router = APIRouter(prefix="/api/slate", tags=["slate"])
 
 DEFAULT_FULL_GAME_HOME_STD = 3.13
 DEFAULT_FULL_GAME_AWAY_STD = 3.36
+
+
+def _recompute_slate_summary(payload: dict) -> None:
+    games = list(payload.get("games") or [])
+    pick_count = sum(1 for game in games if game.get("selected_decision"))
+    error_count = sum(1 for game in games if game.get("status") == "error")
+    no_pick_count = sum(1 for game in games if game.get("status") == "no_pick")
+    if pick_count > 0:
+        notification_type = "picks"
+    elif error_count > 0:
+        notification_type = "failure_alert"
+    else:
+        notification_type = "no_picks"
+    payload["pick_count"] = pick_count
+    payload["error_count"] = error_count
+    payload["no_pick_count"] = no_pick_count
+    payload["notification_type"] = notification_type
 
 
 def _mac_sync_enabled() -> bool:
@@ -150,7 +167,7 @@ def _append_missing_bet365_candidates(payload: dict) -> None:
             and input_status.get("bet365_full_game_away_spread") is not None
             and input_status.get("bet365_full_game_away_spread_odds") is not None
         ):
-            home_prob, away_prob = spread_cover_probabilities(
+            home_prob, away_prob, push_prob = spread_outcome_probabilities(
                 home_runs_mean=float(home_runs),
                 away_runs_mean=float(away_runs),
                 home_runs_std=DEFAULT_FULL_GAME_HOME_STD,
@@ -168,6 +185,7 @@ def _append_missing_bet365_candidates(payload: dict) -> None:
                     home_point=float(input_status["bet365_full_game_home_spread"]),
                     away_point=float(input_status["bet365_full_game_away_spread"]),
                     book_name="bet365",
+                    push_probability=float(push_prob or 0.0),
                 )
                 away_decision = calculate_edge(
                     game_pk=game_pk,
@@ -179,6 +197,7 @@ def _append_missing_bet365_candidates(payload: dict) -> None:
                     home_point=float(input_status["bet365_full_game_home_spread"]),
                     away_point=float(input_status["bet365_full_game_away_spread"]),
                     book_name="bet365",
+                    push_probability=float(push_prob or 0.0),
                 )
                 home_kelly = calculate_kelly_stake(100.0, decision=home_decision).stake
                 away_kelly = calculate_kelly_stake(100.0, decision=away_decision).stake
@@ -193,7 +212,7 @@ def _append_missing_bet365_candidates(payload: dict) -> None:
             and input_status.get("bet365_full_game_total_over_odds") is not None
             and input_status.get("bet365_full_game_total_under_odds") is not None
         ):
-            over_prob, under_prob = totals_probabilities(
+            over_prob, under_prob, push_prob = totals_outcome_probabilities(
                 home_runs_mean=float(home_runs),
                 away_runs_mean=float(away_runs),
                 home_runs_std=DEFAULT_FULL_GAME_HOME_STD,
@@ -211,6 +230,7 @@ def _append_missing_bet365_candidates(payload: dict) -> None:
                     home_point=float(input_status["bet365_full_game_total"]),
                     away_point=float(input_status["bet365_full_game_total"]),
                     book_name="bet365",
+                    push_probability=float(push_prob or 0.0),
                 )
                 under_decision = calculate_edge(
                     game_pk=game_pk,
@@ -222,6 +242,7 @@ def _append_missing_bet365_candidates(payload: dict) -> None:
                     home_point=float(input_status["bet365_full_game_total"]),
                     away_point=float(input_status["bet365_full_game_total"]),
                     book_name="bet365",
+                    push_probability=float(push_prob or 0.0),
                 )
                 over_kelly = calculate_kelly_stake(100.0, decision=over_decision).stake
                 under_kelly = calculate_kelly_stake(100.0, decision=under_decision).stake
@@ -356,6 +377,7 @@ async def get_slate(
         pipeline_date=resolved_date,
         db_path=db_path,
     )
+    _recompute_slate_summary(payload)
     payload.update(live_release_metadata())
     return SlateResponse.model_validate(payload)
 

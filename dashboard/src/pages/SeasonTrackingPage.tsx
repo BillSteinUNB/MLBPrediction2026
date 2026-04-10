@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useLiveSeasonDashboard } from '../hooks';
 import { EmptyState, ErrorState, GlassCard, LoadingState, MetricCard } from '../components';
 import type { LiveSeasonGame, LiveSeasonSummary } from '../types/liveSeason';
@@ -42,6 +43,14 @@ function fmtLine(value: number | null | undefined): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
+function isBackfilled(game: LiveSeasonGame): boolean {
+  return (game.tracking_source ?? 'live') !== 'live';
+}
+
+function trackingSourceLabel(game: LiveSeasonGame): string {
+  return (game.tracking_source ?? 'live').replace(/_/g, ' ');
+}
+
 function fmtPick(game: LiveSeasonGame): string {
   const market = game.selected_market_type ?? '';
   const side = game.selected_side ?? '';
@@ -81,6 +90,10 @@ function sortHistoricalGames(games: LiveSeasonGame[] | null | undefined): LiveSe
   });
 }
 
+function canRemoveManualBet(game: LiveSeasonGame): boolean {
+  return game.id != null;
+}
+
 function SummaryStrip({
   title,
   summary,
@@ -113,10 +126,16 @@ function TrackingTable({
   title,
   games,
   emptyMessage,
+  allowRemoval = false,
+  onRemove,
+  deletingIds,
 }: {
   title: string;
   games: LiveSeasonGame[];
   emptyMessage: string;
+  allowRemoval?: boolean;
+  onRemove?: (game: LiveSeasonGame) => void;
+  deletingIds?: Set<number>;
 }) {
   return (
     <GlassCard title={title}>
@@ -138,6 +157,7 @@ function TrackingTable({
                 <th className="px-3 py-3">Value</th>
                 <th className="px-3 py-3">Units</th>
                 <th className="px-3 py-3">Result</th>
+                {allowRemoval ? <th className="px-3 py-3 text-right">Edit</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -148,12 +168,42 @@ function TrackingTable({
                 >
                   <td className="px-3 py-3 text-ink-dim">{game.pipeline_date}</td>
                   <td className="px-3 py-3 font-medium">{game.matchup}</td>
-                  <td className="px-3 py-3">{fmtPick(game)}</td>
+                  <td className="px-3 py-3">
+                    {fmtPick(game)}
+                    {isBackfilled(game) ? (
+                      <span
+                        className="ml-1 align-top text-xs font-bold text-amber-300"
+                        title={`Backfilled from ${trackingSourceLabel(game)}`}
+                      >
+                        *
+                      </span>
+                    ) : null}
+                  </td>
                   <td className="px-3 py-3">{fmtPct(game.model_probability)}</td>
                   <td className="px-3 py-3">{fmtPct(game.edge_pct)}</td>
                   <td className="px-3 py-3">{fmtOdds(game.odds_at_bet)}</td>
                   <td className="px-3 py-3">{fmtUnits(game.bet_units)}</td>
                   <td className="px-3 py-3">{fmtResult(game)}</td>
+                  {allowRemoval ? (
+                    <td className="px-3 py-3 text-right">
+                      <button
+                        type="button"
+                        onClick={() => onRemove?.(game)}
+                        disabled={
+                          !canRemoveManualBet(game) ||
+                          (game.id != null && deletingIds?.has(game.id) === true)
+                        }
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-rose-500/30 bg-rose-500/10 text-sm font-bold text-rose-300 transition hover:border-rose-400/50 hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                        title={
+                          canRemoveManualBet(game)
+                            ? 'Remove from My Bets'
+                            : 'Unavailable'
+                        }
+                      >
+                        {game.id != null && deletingIds?.has(game.id) ? '…' : '-'}
+                      </button>
+                    </td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>
@@ -166,6 +216,42 @@ function TrackingTable({
 
 export default function SeasonTrackingPage() {
   const { data, loading, error, refetch } = useLiveSeasonDashboard();
+  const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
+
+  const removeManualBet = async (game: LiveSeasonGame) => {
+    if (!canRemoveManualBet(game)) return;
+    setDeletingIds((current) => new Set(current).add(game.id as number));
+    try {
+      const response = await fetch('/api/live-season/manual-bets', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          season: game.season,
+          pipeline_date: data?.pipeline_date ?? game.pipeline_date,
+          manual_bet_id: game.id,
+        }),
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        let detail = text || `HTTP ${response.status}`;
+        try {
+          const parsed = JSON.parse(text) as { detail?: string };
+          if (parsed.detail) detail = parsed.detail;
+        } catch {
+          // Use the raw response body when the server does not return JSON.
+        }
+        window.alert(detail);
+        return;
+      }
+      void refetch();
+    } finally {
+      setDeletingIds((current) => {
+        const next = new Set(current);
+        next.delete(game.id as number);
+        return next;
+      });
+    }
+  };
 
   if (loading) return <LoadingState rows={5} />;
   if (error && !data) return <ErrorState message={error} onRetry={refetch} />;
@@ -195,6 +281,7 @@ export default function SeasonTrackingPage() {
         <p className="text-xs font-medium text-ink-dim">
           {data.release_name} · {data.model_display_name} · {data.strategy_name} {data.strategy_version}
         </p>
+        <p className="text-xs text-ink-dim">* marks a backfilled model entry, not a live capture.</p>
       </header>
 
       <SummaryStrip title="My Bets" summary={manualSummary} />
@@ -202,11 +289,17 @@ export default function SeasonTrackingPage() {
         title="My Bets Today"
         games={todayManualGames}
         emptyMessage="No manual bets submitted for today."
+        allowRemoval
+        onRemove={(game) => void removeManualBet(game)}
+        deletingIds={deletingIds}
       />
       <TrackingTable
         title="My Historical Bets"
         games={historicalManualGames}
         emptyMessage="No manual bets have been submitted yet."
+        allowRemoval
+        onRemove={(game) => void removeManualBet(game)}
+        deletingIds={deletingIds}
       />
 
       <SummaryStrip title="Machine POTD" summary={modelSummary} />

@@ -4,7 +4,7 @@ from datetime import date as date_type
 from datetime import datetime, time, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from playwright.async_api import async_playwright
 
 from OddsScraper.scraper import MLBOddsScraper, SQLiteStore
@@ -13,6 +13,7 @@ from src.dashboard.schemas import (
     LiveSeasonCaptureResponse,
     LiveSeasonDashboardResponse,
     LiveSeasonGameResponse,
+    LiveSeasonManualBetDeleteRequest,
     LiveSeasonManualBetRequest,
     LiveSeasonSummaryResponse,
 )
@@ -21,6 +22,7 @@ from src.ops.live_season_tracker import (
     build_live_season_summary,
     build_manual_tracking_summary,
     capture_live_slate_once,
+    delete_manual_tracked_bet,
     list_tracked_games,
     list_manual_tracked_bets,
     submit_manual_tracked_bet,
@@ -384,6 +386,30 @@ async def submit_live_season_manual_bet(
         narrative=request.narrative,
         db_path=db_path,
     )
+    return _build_dashboard_response(
+        season=request.season,
+        pipeline_date=request.pipeline_date,
+        db_path=db_path,
+    )
+
+
+@router.delete("/manual-bets", response_model=LiveSeasonDashboardResponse)
+async def delete_live_season_manual_bet(
+    request: LiveSeasonManualBetDeleteRequest,
+    db_path: str = Query(
+        default=str(Path("data") / "mlb.db"),
+        description="SQLite path used by live season tracking.",
+    ),
+) -> LiveSeasonDashboardResponse:
+    try:
+        delete_manual_tracked_bet(
+            manual_bet_id=request.manual_bet_id,
+            season=request.season,
+            allow_locked_delete=True,
+            db_path=db_path,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _build_dashboard_response(
         season=request.season,
         pipeline_date=request.pipeline_date,

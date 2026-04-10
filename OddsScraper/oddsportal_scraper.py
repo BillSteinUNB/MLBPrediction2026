@@ -573,6 +573,11 @@ class OddsPortalScraper:
                     total_int = int(total)
                     one_page_int = max(1, int(one_page))
                     total_pages = max(1, (total_int + one_page_int - 1) // one_page_int)
+                    LOGGER.info(
+                        "OddsPortal archive enumeration started: %s total rows across about %s pages",
+                        total_int,
+                        total_pages,
+                    )
                 except (TypeError, ValueError):
                     total_pages = None
 
@@ -599,6 +604,16 @@ class OddsPortalScraper:
                     continue
                 seen_urls.add(event.url)
                 events.append(event)
+
+            if total_pages is not None and (
+                page_number == 1 or page_number % 10 == 0 or page_number == total_pages
+            ):
+                LOGGER.info(
+                    "OddsPortal archive enumeration progress: page %s/%s, collected %s events",
+                    page_number,
+                    total_pages,
+                    len(events),
+                )
 
             if max_pages is not None and page_number >= max_pages:
                 break
@@ -1036,6 +1051,7 @@ class OddsPortalScraper:
         progress_callback: Any = None,
         concurrency: int = 4,
     ) -> tuple[int, int]:
+        LOGGER.info("OddsPortal season %s: starting results enumeration", season)
         events = await self.enumerate_results_page_events(
             context,
             season=season,
@@ -1043,6 +1059,7 @@ class OddsPortalScraper:
             end_date=end_date,
             max_pages=max_pages,
         )
+        LOGGER.info("OddsPortal season %s: enumerated %s candidate events", season, len(events))
 
         inserted_rows = 0
         processed_events = 0
@@ -1050,6 +1067,11 @@ class OddsPortalScraper:
         pending_events = [event for event in events if _event_id_from_url(event.url) not in seen_event_ids]
         if max_events is not None:
             pending_events = pending_events[:max_events]
+        LOGGER.info(
+            "OddsPortal season %s: %s pending events after dedupe/resume filtering",
+            season,
+            len(pending_events),
+        )
 
         grouped_events: OrderedDict[str | None, list[OddsPortalEventInfo]] = OrderedDict()
         for event in pending_events:

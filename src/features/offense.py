@@ -24,6 +24,13 @@ from src.models.features import GameFeatures
 DEFAULT_WINDOWS: tuple[int, ...] = (7, 14, 30, 60)
 DEFAULT_REGRESSION_WEIGHT = int(get_regression_weight("offense"))
 DEFAULT_MIN_PERIODS = 1
+BAT_TRACKING_METRICS: tuple[str, ...] = (
+    "bat_speed",
+    "swing_length",
+    "swing_path_tilt",
+    "squared_up_rate_proxy",
+    "bat_tracking_coverage",
+)
 METRICS: tuple[str, ...] = (
     "wrc_plus",
     "woba",
@@ -34,7 +41,9 @@ METRICS: tuple[str, ...] = (
     "babip",
     "k_pct",
     "bb_pct",
+    *BAT_TRACKING_METRICS,
 )
+ROLLING_METRICS: tuple[str, ...] = tuple(metric for metric in METRICS if metric != "wrc_plus")
 WOBA_WEIGHTS = {
     "bb": 0.69,
     "hbp": 0.72,
@@ -46,10 +55,15 @@ WOBA_WEIGHTS = {
 LEAGUE_WOBA_BASELINE = 0.320
 LEAGUE_WRC_PLUS_BASELINE = 100.0
 LEAGUE_BARREL_PCT_BASELINE = 7.0
+LEAGUE_BAT_SPEED_BASELINE = 69.25
+LEAGUE_SWING_LENGTH_BASELINE = 7.22
+LEAGUE_SWING_PATH_TILT_BASELINE = 32.0
+LEAGUE_SQUARED_UP_RATE_PROXY_BASELINE = 18.0
+LEAGUE_BAT_TRACKING_COVERAGE_BASELINE = 0.0
 TEAM_PLATOON_SPLITS_TABLE = "team_platoon_splits"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DERIVED_CACHE_ROOT = REPO_ROOT / "data" / "raw" / "derived" / "offense"
-OFFENSE_STATCAST_CACHE_VERSION = 2
+OFFENSE_STATCAST_CACHE_VERSION = 3
 _TEAM_CODES = {str(team).strip().upper() for team in _load_settings_yaml().get("teams", {})}
 _TEAM_PLATOON_ABBR_NORMALIZATION = {
     "ANA": "LAA",
@@ -214,32 +228,14 @@ def compute_offensive_features(
             for window in windows:
                 current_window_metrics = _rolling_metrics_as_of(
                     team_frame=team_frame,
-                    metric_names=(
-                        "woba",
-                        "xwoba",
-                        "woba_minus_xwoba",
-                        "iso",
-                        "barrel_pct",
-                        "babip",
-                        "k_pct",
-                        "bb_pct",
-                    ),
+                    metric_names=ROLLING_METRICS,
                     window=window,
                     min_periods=min_periods,
                 )
 
                 current_team_values = {
                     metric: current_window_metrics[metric].value
-                    for metric in (
-                        "woba",
-                        "xwoba",
-                        "woba_minus_xwoba",
-                        "iso",
-                        "barrel_pct",
-                        "babip",
-                        "k_pct",
-                        "bb_pct",
-                    )
+                    for metric in ROLLING_METRICS
                 }
                 current_team_values["wrc_plus"] = _team_wrc_plus(
                     current_team_values["woba"],
@@ -551,32 +547,14 @@ def compute_offensive_features_for_schedule(
                     for window in windows:
                         current_window_metrics = _rolling_metrics_as_of(
                             team_frame=team_frame,
-                            metric_names=(
-                                "woba",
-                                "xwoba",
-                                "woba_minus_xwoba",
-                                "iso",
-                                "barrel_pct",
-                                "babip",
-                                "k_pct",
-                                "bb_pct",
-                            ),
+                            metric_names=ROLLING_METRICS,
                             window=window,
                             min_periods=min_periods,
                         )
 
                         current_team_values = {
                             metric: current_window_metrics[metric].value
-                            for metric in (
-                                "woba",
-                                "xwoba",
-                                "woba_minus_xwoba",
-                                "iso",
-                                "barrel_pct",
-                                "babip",
-                                "k_pct",
-                                "bb_pct",
-                            )
+                            for metric in ROLLING_METRICS
                         }
                         current_team_values["wrc_plus"] = _team_wrc_plus(
                             current_team_values["woba"],
@@ -738,10 +716,11 @@ def load_team_platoon_splits_lookup(
     season: int,
     *,
     db_path: str | Path = DEFAULT_DB_PATH,
+    allow_current_season_fallback: bool = False,
 ) -> dict[str, dict[str, float]]:
     target_season = int(season)
     prior_season = target_season - 1
-    fallback_season = target_season
+    seasons_to_load = (prior_season, target_season) if allow_current_season_fallback else (prior_season,)
 
     candidate_paths: list[Path] = [Path(db_path)]
     default_database_path = Path(DEFAULT_DB_PATH)
@@ -753,7 +732,7 @@ def load_team_platoon_splits_lookup(
     for database_path in candidate_paths:
         rows = _load_team_platoon_rows_from_path(
             database_path,
-            seasons=(prior_season, fallback_season),
+            seasons=seasons_to_load,
         )
         if rows.empty:
             continue
@@ -802,7 +781,11 @@ def build_db_backed_team_batting_splits_fetcher() -> Callable[..., dict[str, dic
         del target_day, refresh
         cache_key = (int(season), str(Path(db_path)))
         if cache_key not in cache:
-            cache[cache_key] = load_team_platoon_splits_lookup(season, db_path=db_path)
+            cache[cache_key] = load_team_platoon_splits_lookup(
+                season,
+                db_path=db_path,
+                allow_current_season_fallback=False,
+            )
 
         cached_lookup = cache[cache_key]
         return {
@@ -933,6 +916,11 @@ def _build_prior_team_baselines(
             else 0.0,
             "iso": _series_mean(prior_frame["iso"]),
             "barrel_pct": _series_mean(prior_frame["barrel_pct"]),
+            "bat_speed": _series_mean(prior_frame["bat_speed"]),
+            "swing_length": _series_mean(prior_frame["swing_length"]),
+            "swing_path_tilt": _series_mean(prior_frame["swing_path_tilt"]),
+            "squared_up_rate_proxy": _series_mean(prior_frame["squared_up_rate_proxy"]),
+            "bat_tracking_coverage": _series_mean(prior_frame["bat_tracking_coverage"]),
             "babip": _series_mean(prior_frame["babip"]),
             "k_pct": _series_mean(prior_frame["k_pct"]),
             "bb_pct": _series_mean(prior_frame["bb_pct"]),
@@ -957,6 +945,11 @@ def _summarize_prior_team_baseline_frame(prior_frame: pd.DataFrame) -> dict[str,
         ),
         "iso": _series_mean(prior_frame["iso"]),
         "barrel_pct": _series_mean(prior_frame["barrel_pct"]),
+        "bat_speed": _series_mean(prior_frame["bat_speed"]),
+        "swing_length": _series_mean(prior_frame["swing_length"]),
+        "swing_path_tilt": _series_mean(prior_frame["swing_path_tilt"]),
+        "squared_up_rate_proxy": _series_mean(prior_frame["squared_up_rate_proxy"]),
+        "bat_tracking_coverage": _series_mean(prior_frame["bat_tracking_coverage"]),
         "babip": _series_mean(prior_frame["babip"]),
         "k_pct": _series_mean(prior_frame["k_pct"]),
         "bb_pct": _series_mean(prior_frame["bb_pct"]),
@@ -1219,6 +1212,34 @@ def _aggregate_lineup_window_metrics(
                 weights=bbe_weights,
                 default=_default_metric_baseline("barrel_pct"),
             )
+            metrics["squared_up_rate_proxy"] = _weighted_metric_mean(
+                sampled_statcast["squared_up_rate_proxy"],
+                weights=bbe_weights,
+                default=_default_metric_baseline("squared_up_rate_proxy"),
+            )
+        else:
+            metrics["squared_up_rate_proxy"] = _default_metric_baseline("squared_up_rate_proxy")
+
+        bat_tracking_weights = sampled_statcast["bat_tracking_events"].where(
+            sampled_statcast["bat_tracking_events"] > 0,
+            0.0,
+        ).astype(float)
+        if float(bat_tracking_weights.sum()) > 0:
+            for metric in ("bat_speed", "swing_length", "swing_path_tilt"):
+                metrics[metric] = _weighted_metric_mean(
+                    sampled_statcast[metric],
+                    weights=bat_tracking_weights,
+                    default=_default_metric_baseline(metric),
+                )
+        else:
+            for metric in ("bat_speed", "swing_length", "swing_path_tilt"):
+                metrics[metric] = _default_metric_baseline(metric)
+
+        metrics["bat_tracking_coverage"] = _weighted_metric_mean(
+            sampled_statcast["bat_tracking_coverage"],
+            weights=xwoba_weights,
+            default=_default_metric_baseline("bat_tracking_coverage"),
+        )
 
     if "xwoba" not in metrics and "woba" in metrics:
         metrics["xwoba"] = metrics["woba"]
@@ -1276,6 +1297,11 @@ def _aggregate_prior_lineup_metrics(
 
         xwoba_value: float | None = None
         barrel_pct_value: float | None = None
+        squared_up_rate_proxy_value: float | None = None
+        bat_tracking_coverage_value: float | None = None
+        bat_tracking_metric_values: dict[str, float | None] = {
+            metric: None for metric in ("bat_speed", "swing_length", "swing_path_tilt")
+        }
         if not player_statcast.empty:
             expected_weights = (
                 player_statcast["pa"].where(player_statcast["pa"] > 0, 1.0).astype(float)
@@ -1296,6 +1322,32 @@ def _aggregate_prior_lineup_metrics(
                     weights=bbe_weights,
                     default=_default_metric_baseline("barrel_pct"),
                 )
+                squared_up_rate_proxy_value = _weighted_metric_mean(
+                    player_statcast["squared_up_rate_proxy"],
+                    weights=bbe_weights,
+                    default=_default_metric_baseline("squared_up_rate_proxy"),
+                )
+            else:
+                squared_up_rate_proxy_value = _default_metric_baseline("squared_up_rate_proxy")
+
+            bat_tracking_weights = (
+                player_statcast["bat_tracking_events"].where(
+                    player_statcast["bat_tracking_events"] > 0,
+                    0.0,
+                ).astype(float)
+            )
+            if float(bat_tracking_weights.sum()) > 0:
+                for metric in bat_tracking_metric_values:
+                    bat_tracking_metric_values[metric] = _weighted_metric_mean(
+                        player_statcast[metric],
+                        weights=bat_tracking_weights,
+                        default=_default_metric_baseline(metric),
+                    )
+            bat_tracking_coverage_value = _weighted_metric_mean(
+                player_statcast["bat_tracking_coverage"],
+                weights=expected_weights,
+                default=_default_metric_baseline("bat_tracking_coverage"),
+            )
         elif actual_woba is not None:
             xwoba_value = actual_woba
         elif statcast_source_available:
@@ -1307,6 +1359,20 @@ def _aggregate_prior_lineup_metrics(
             barrel_pct_value = _default_metric_baseline("barrel_pct")
         if barrel_pct_value is not None:
             metric_rows["barrel_pct"].append(barrel_pct_value)
+        if squared_up_rate_proxy_value is None and (statcast_source_available or actual_source_available):
+            squared_up_rate_proxy_value = _default_metric_baseline("squared_up_rate_proxy")
+        if squared_up_rate_proxy_value is not None:
+            metric_rows["squared_up_rate_proxy"].append(squared_up_rate_proxy_value)
+        for metric, value in bat_tracking_metric_values.items():
+            resolved_value = value
+            if resolved_value is None and (statcast_source_available or actual_source_available):
+                resolved_value = _default_metric_baseline(metric)
+            if resolved_value is not None:
+                metric_rows[metric].append(resolved_value)
+        if bat_tracking_coverage_value is None and (statcast_source_available or actual_source_available):
+            bat_tracking_coverage_value = _default_metric_baseline("bat_tracking_coverage")
+        if bat_tracking_coverage_value is not None:
+            metric_rows["bat_tracking_coverage"].append(bat_tracking_coverage_value)
 
         if actual_woba is not None and xwoba_value is not None:
             metric_rows["woba_minus_xwoba"].append(actual_woba - xwoba_value)
@@ -1358,6 +1424,17 @@ def _normalize_batting_stats(dataframe: pd.DataFrame) -> pd.DataFrame:
             normalized,
             ("barrel_pct", "barrel%", "barrel_rate", "barrel_batted_rate"),
         ),
+        "bat_speed": _first_column(normalized, ("bat_speed", "avg_bat_speed")),
+        "swing_length": _first_column(normalized, ("swing_length",)),
+        "swing_path_tilt": _first_column(normalized, ("swing_path_tilt",)),
+        "squared_up_rate_proxy": _first_column(
+            normalized,
+            ("squared_up_rate_proxy", "squared_up_pct", "squared_up_rate"),
+        ),
+        "bat_tracking_coverage": _first_column(
+            normalized,
+            ("bat_tracking_coverage", "bat_tracking_available_rate"),
+        ),
         "babip": _first_column(normalized, ("BABIP", "babip")),
         "k_pct": _first_column(normalized, ("K%", "k_pct", "SO%")),
         "bb_pct": _first_column(normalized, ("BB%", "bb_pct")),
@@ -1380,6 +1457,8 @@ def _normalize_batting_stats(dataframe: pd.DataFrame) -> pd.DataFrame:
                 result[output_column] = pd.Series(float("nan"), index=normalized.index, dtype=float)
             elif output_column == "barrel_pct":
                 result[output_column] = pd.Series(float("nan"), index=normalized.index, dtype=float)
+            elif output_column in BAT_TRACKING_METRICS:
+                result[output_column] = pd.Series(float("nan"), index=normalized.index, dtype=float)
             else:
                 result[output_column] = derived_metrics[output_column]
             continue
@@ -1397,6 +1476,8 @@ def _normalize_batting_stats(dataframe: pd.DataFrame) -> pd.DataFrame:
         result["woba"] - result["xwoba"]
     )
     result["barrel_pct"] = pd.to_numeric(result["barrel_pct"], errors="coerce")
+    for metric in BAT_TRACKING_METRICS:
+        result[metric] = pd.to_numeric(result[metric], errors="coerce")
     result = result.fillna(
         {
             "iso": _default_metric_baseline("iso"),
@@ -1528,9 +1609,44 @@ def _compute_game_level_metrics(
         statcast_metrics=statcast_metrics,
         metric="barrel_pct",
     ).fillna(_default_metric_baseline("barrel_pct"))
+    bat_speed = _align_statcast_team_metric(
+        raw_logs=raw_logs,
+        game_dates=result["game_date"],
+        statcast_metrics=statcast_metrics,
+        metric="bat_speed",
+    ).fillna(_default_metric_baseline("bat_speed"))
+    swing_length = _align_statcast_team_metric(
+        raw_logs=raw_logs,
+        game_dates=result["game_date"],
+        statcast_metrics=statcast_metrics,
+        metric="swing_length",
+    ).fillna(_default_metric_baseline("swing_length"))
+    swing_path_tilt = _align_statcast_team_metric(
+        raw_logs=raw_logs,
+        game_dates=result["game_date"],
+        statcast_metrics=statcast_metrics,
+        metric="swing_path_tilt",
+    ).fillna(_default_metric_baseline("swing_path_tilt"))
+    squared_up_rate_proxy = _align_statcast_team_metric(
+        raw_logs=raw_logs,
+        game_dates=result["game_date"],
+        statcast_metrics=statcast_metrics,
+        metric="squared_up_rate_proxy",
+    ).fillna(_default_metric_baseline("squared_up_rate_proxy"))
+    bat_tracking_coverage = _align_statcast_team_metric(
+        raw_logs=raw_logs,
+        game_dates=result["game_date"],
+        statcast_metrics=statcast_metrics,
+        metric="bat_tracking_coverage",
+    ).fillna(_default_metric_baseline("bat_tracking_coverage"))
     result["xwoba"] = _series_from_value(xwoba)
     result["woba_minus_xwoba"] = _series_from_value(result["woba"] - result["xwoba"])
     result["barrel_pct"] = _series_from_value(barrel_pct)
+    result["bat_speed"] = _series_from_value(bat_speed)
+    result["swing_length"] = _series_from_value(swing_length)
+    result["swing_path_tilt"] = _series_from_value(swing_path_tilt)
+    result["squared_up_rate_proxy"] = _series_from_value(squared_up_rate_proxy)
+    result["bat_tracking_coverage"] = _series_from_value(bat_tracking_coverage)
     result = (
         result.dropna(subset=["game_date"])
         .sort_values(["game_date", "game_pk"])
@@ -1551,6 +1667,11 @@ def _empty_game_metrics_frame() -> pd.DataFrame:
             "woba_minus_xwoba": pd.Series([], dtype=float),
             "iso": pd.Series([], dtype=float),
             "barrel_pct": pd.Series([], dtype=float),
+            "bat_speed": pd.Series([], dtype=float),
+            "swing_length": pd.Series([], dtype=float),
+            "swing_path_tilt": pd.Series([], dtype=float),
+            "squared_up_rate_proxy": pd.Series([], dtype=float),
+            "bat_tracking_coverage": pd.Series([], dtype=float),
             "babip": pd.Series([], dtype=float),
             "k_pct": pd.Series([], dtype=float),
             "bb_pct": pd.Series([], dtype=float),
@@ -1567,8 +1688,14 @@ def _empty_statcast_offense_metrics_frame() -> pd.DataFrame:
             "player_id": pd.Series(dtype="int64"),
             "pa": pd.Series(dtype="float64"),
             "bbe": pd.Series(dtype="float64"),
+            "bat_tracking_events": pd.Series(dtype="float64"),
             "xwoba": pd.Series(dtype="float64"),
             "barrel_pct": pd.Series(dtype="float64"),
+            "bat_speed": pd.Series(dtype="float64"),
+            "swing_length": pd.Series(dtype="float64"),
+            "swing_path_tilt": pd.Series(dtype="float64"),
+            "squared_up_rate_proxy": pd.Series(dtype="float64"),
+            "bat_tracking_coverage": pd.Series(dtype="float64"),
         }
     )
 
@@ -1627,6 +1754,9 @@ def _build_statcast_offense_metrics(
     bb_type_column = _first_column(terminal, ("bb_type",))
     launch_speed_column = _first_column(terminal, ("launch_speed",))
     launch_angle_column = _first_column(terminal, ("launch_angle",))
+    bat_speed_column = _first_column(terminal, ("bat_speed",))
+    swing_length_column = _first_column(terminal, ("swing_length",))
+    swing_path_tilt_column = _first_column(terminal, ("swing_path_tilt",))
     if game_pk_column is None or batter_column is None:
         return _empty_statcast_offense_metrics_frame()
 
@@ -1655,6 +1785,21 @@ def _build_statcast_offense_metrics(
         if launch_angle_column is not None
         else pd.Series(float("nan"), index=terminal.index, dtype=float)
     )
+    bat_speed = (
+        pd.to_numeric(terminal[bat_speed_column], errors="coerce")
+        if bat_speed_column is not None
+        else pd.Series(float("nan"), index=terminal.index, dtype=float)
+    )
+    swing_length = (
+        pd.to_numeric(terminal[swing_length_column], errors="coerce")
+        if swing_length_column is not None
+        else pd.Series(float("nan"), index=terminal.index, dtype=float)
+    )
+    swing_path_tilt = (
+        pd.to_numeric(terminal[swing_path_tilt_column], errors="coerce")
+        if swing_path_tilt_column is not None
+        else pd.Series(float("nan"), index=terminal.index, dtype=float)
+    )
     batted_ball_mask = (
         terminal[bb_type_column].notna() & bb_type.ne("")
         if bb_type_column is not None
@@ -1663,15 +1808,24 @@ def _build_statcast_offense_metrics(
     barrel_mask = (
         _is_barrel_mask(launch_speed=launch_speed, launch_angle=launch_angle) & batted_ball_mask
     )
+    squared_up_proxy_mask = (
+        launch_speed.ge(95.0) & launch_angle.ge(8.0) & launch_angle.le(32.0) & batted_ball_mask
+    )
+    bat_tracking_mask = bat_speed.notna() | swing_length.notna() | swing_path_tilt.notna()
 
     metrics = pd.DataFrame(
         {
             "game_pk": pd.to_numeric(terminal[game_pk_column], errors="coerce").astype("Int64"),
             "player_id": pd.to_numeric(terminal[batter_column], errors="coerce").astype("Int64"),
             "team": team_values.astype(str).str.strip().str.upper(),
+            "bat_tracking_events": bat_tracking_mask.astype(float),
             "xwoba": xwoba_values,
             "bbe": batted_ball_mask.astype(float),
             "barrel": barrel_mask.astype(float),
+            "bat_speed": bat_speed,
+            "swing_length": swing_length,
+            "swing_path_tilt": swing_path_tilt,
+            "squared_up_proxy": squared_up_proxy_mask.astype(float),
         }
     )
     metrics = metrics.dropna(subset=["game_pk", "player_id"]).copy()
@@ -1693,21 +1847,33 @@ def _build_statcast_offense_metrics(
         metrics.groupby(["game_pk", "game_date", "team", "player_id"], dropna=True)
         .agg(
             pa=("player_id", "size"),
+            bat_tracking_events=("bat_tracking_events", "sum"),
             xwoba=("xwoba", "mean"),
             bbe=("bbe", "sum"),
             barrels=("barrel", "sum"),
+            bat_speed=("bat_speed", "mean"),
+            swing_length=("swing_length", "mean"),
+            swing_path_tilt=("swing_path_tilt", "mean"),
+            squared_up_proxy_events=("squared_up_proxy", "sum"),
         )
         .reset_index()
     )
     grouped["game_pk"] = grouped["game_pk"].astype(int)
     grouped["player_id"] = grouped["player_id"].astype(int)
     grouped["pa"] = grouped["pa"].astype(float)
+    grouped["bat_tracking_events"] = grouped["bat_tracking_events"].astype(float)
     grouped["bbe"] = grouped["bbe"].astype(float)
     grouped["xwoba"] = grouped["xwoba"].astype(float)
     grouped["barrel_pct"] = _series_from_value(
         (grouped["barrels"] / grouped["bbe"].replace(0, pd.NA)) * 100.0
     )
-    grouped = grouped.drop(columns=["barrels"])
+    grouped["squared_up_rate_proxy"] = _series_from_value(
+        (grouped["squared_up_proxy_events"] / grouped["bbe"].replace(0, pd.NA)) * 100.0
+    )
+    grouped["bat_tracking_coverage"] = _series_from_value(
+        grouped["bat_tracking_events"] / grouped["pa"].replace(0, pd.NA)
+    )
+    grouped = grouped.drop(columns=["barrels", "squared_up_proxy_events"])
     return grouped.sort_values(["game_date", "game_pk", "team", "player_id"]).reset_index(drop=True)
 
 
@@ -1723,9 +1889,24 @@ def _normalize_statcast_offense_metrics(dataframe: pd.DataFrame) -> pd.DataFrame
     pa_column = _first_column(normalized, ("pa", "plate_appearances"))
     xwoba_column = _first_column(normalized, ("xwoba", "estimated_woba_using_speedangle"))
     bbe_column = _first_column(normalized, ("bbe", "batted_ball_events"))
+    bat_tracking_events_column = _first_column(
+        normalized,
+        ("bat_tracking_events", "bat_tracking_pa", "bat_tracking_swings"),
+    )
     barrel_pct_column = _first_column(
         normalized,
         ("barrel_pct", "barrel%", "barrel_rate", "barrel_batted_rate"),
+    )
+    bat_speed_column = _first_column(normalized, ("bat_speed", "avg_bat_speed"))
+    swing_length_column = _first_column(normalized, ("swing_length",))
+    swing_path_tilt_column = _first_column(normalized, ("swing_path_tilt",))
+    squared_up_rate_proxy_column = _first_column(
+        normalized,
+        ("squared_up_rate_proxy", "squared_up_pct", "squared_up_rate"),
+    )
+    bat_tracking_coverage_column = _first_column(
+        normalized,
+        ("bat_tracking_coverage", "bat_tracking_available_rate"),
     )
     if game_pk_column is None or game_date_column is None or player_id_column is None:
         return _empty_statcast_offense_metrics_frame()
@@ -1754,6 +1935,11 @@ def _normalize_statcast_offense_metrics(dataframe: pd.DataFrame) -> pd.DataFrame
                 if bbe_column is not None
                 else pd.Series(0.0, index=normalized.index, dtype=float)
             ),
+            "bat_tracking_events": (
+                pd.to_numeric(normalized[bat_tracking_events_column], errors="coerce")
+                if bat_tracking_events_column is not None
+                else pd.Series(float("nan"), index=normalized.index, dtype=float)
+            ),
             "xwoba": (
                 pd.to_numeric(normalized[xwoba_column], errors="coerce")
                 if xwoba_column is not None
@@ -1762,6 +1948,31 @@ def _normalize_statcast_offense_metrics(dataframe: pd.DataFrame) -> pd.DataFrame
             "barrel_pct": (
                 pd.to_numeric(normalized[barrel_pct_column], errors="coerce")
                 if barrel_pct_column is not None
+                else pd.Series(float("nan"), index=normalized.index, dtype=float)
+            ),
+            "bat_speed": (
+                pd.to_numeric(normalized[bat_speed_column], errors="coerce")
+                if bat_speed_column is not None
+                else pd.Series(float("nan"), index=normalized.index, dtype=float)
+            ),
+            "swing_length": (
+                pd.to_numeric(normalized[swing_length_column], errors="coerce")
+                if swing_length_column is not None
+                else pd.Series(float("nan"), index=normalized.index, dtype=float)
+            ),
+            "swing_path_tilt": (
+                pd.to_numeric(normalized[swing_path_tilt_column], errors="coerce")
+                if swing_path_tilt_column is not None
+                else pd.Series(float("nan"), index=normalized.index, dtype=float)
+            ),
+            "squared_up_rate_proxy": (
+                pd.to_numeric(normalized[squared_up_rate_proxy_column], errors="coerce")
+                if squared_up_rate_proxy_column is not None
+                else pd.Series(float("nan"), index=normalized.index, dtype=float)
+            ),
+            "bat_tracking_coverage": (
+                pd.to_numeric(normalized[bat_tracking_coverage_column], errors="coerce")
+                if bat_tracking_coverage_column is not None
                 else pd.Series(float("nan"), index=normalized.index, dtype=float)
             ),
         }
@@ -1774,8 +1985,27 @@ def _normalize_statcast_offense_metrics(dataframe: pd.DataFrame) -> pd.DataFrame
     result["player_id"] = result["player_id"].astype(int)
     result["pa"] = result["pa"].fillna(0.0).astype(float)
     result["bbe"] = result["bbe"].fillna(0.0).astype(float)
+    if result["bat_tracking_events"].isna().all():
+        tracking_mask = result[["bat_speed", "swing_length", "swing_path_tilt"]].notna().any(axis=1)
+        result["bat_tracking_events"] = result["pa"].where(tracking_mask, 0.0)
+    else:
+        derived_tracking_events = result["pa"] * result["bat_tracking_coverage"].fillna(0.0)
+        result["bat_tracking_events"] = pd.to_numeric(
+            result["bat_tracking_events"],
+            errors="coerce",
+        ).fillna(derived_tracking_events)
+    result["bat_tracking_events"] = result["bat_tracking_events"].fillna(0.0).astype(float)
     result["xwoba"] = result["xwoba"].astype(float)
     result["barrel_pct"] = result["barrel_pct"].astype(float)
+    result["bat_speed"] = result["bat_speed"].astype(float)
+    result["swing_length"] = result["swing_length"].astype(float)
+    result["swing_path_tilt"] = result["swing_path_tilt"].astype(float)
+    result["squared_up_rate_proxy"] = result["squared_up_rate_proxy"].astype(float)
+    if result["bat_tracking_coverage"].isna().all():
+        result["bat_tracking_coverage"] = _series_from_value(
+            result["bat_tracking_events"] / result["pa"].replace(0, pd.NA)
+        )
+    result["bat_tracking_coverage"] = result["bat_tracking_coverage"].astype(float)
     return result.sort_values(["game_date", "game_pk", "team", "player_id"]).reset_index(drop=True)
 
 
@@ -1864,7 +2094,19 @@ def _align_statcast_team_metric(
 
 def _aggregate_team_statcast_game_metrics(statcast_metrics: pd.DataFrame) -> pd.DataFrame:
     if statcast_metrics.empty:
-        return pd.DataFrame(columns=["game_pk", "game_date", "xwoba", "barrel_pct"])
+        return pd.DataFrame(
+            columns=[
+                "game_pk",
+                "game_date",
+                "xwoba",
+                "barrel_pct",
+                "bat_speed",
+                "swing_length",
+                "swing_path_tilt",
+                "squared_up_rate_proxy",
+                "bat_tracking_coverage",
+            ]
+        )
 
     rows: list[dict[str, float | int | pd.Timestamp]] = []
     for (game_pk, game_date), group in statcast_metrics.groupby(
@@ -1872,6 +2114,10 @@ def _aggregate_team_statcast_game_metrics(statcast_metrics: pd.DataFrame) -> pd.
     ):
         weights = group["pa"].where(group["pa"] > 0, 1.0).astype(float)
         bbe_weights = group["bbe"].where(group["bbe"] > 0, 0.0).astype(float)
+        bat_tracking_weights = group["bat_tracking_events"].where(
+            group["bat_tracking_events"] > 0,
+            0.0,
+        ).astype(float)
         rows.append(
             {
                 "game_pk": int(game_pk),
@@ -1885,6 +2131,31 @@ def _aggregate_team_statcast_game_metrics(statcast_metrics: pd.DataFrame) -> pd.
                     group["barrel_pct"],
                     weights=bbe_weights,
                     default=_default_metric_baseline("barrel_pct"),
+                ),
+                "bat_speed": _weighted_metric_mean(
+                    group["bat_speed"],
+                    weights=bat_tracking_weights,
+                    default=_default_metric_baseline("bat_speed"),
+                ),
+                "swing_length": _weighted_metric_mean(
+                    group["swing_length"],
+                    weights=bat_tracking_weights,
+                    default=_default_metric_baseline("swing_length"),
+                ),
+                "swing_path_tilt": _weighted_metric_mean(
+                    group["swing_path_tilt"],
+                    weights=bat_tracking_weights,
+                    default=_default_metric_baseline("swing_path_tilt"),
+                ),
+                "squared_up_rate_proxy": _weighted_metric_mean(
+                    group["squared_up_rate_proxy"],
+                    weights=bbe_weights,
+                    default=_default_metric_baseline("squared_up_rate_proxy"),
+                ),
+                "bat_tracking_coverage": _weighted_metric_mean(
+                    group["bat_tracking_coverage"],
+                    weights=weights,
+                    default=_default_metric_baseline("bat_tracking_coverage"),
                 ),
             }
         )
@@ -2085,6 +2356,16 @@ def _default_metric_baseline(metric: str) -> float:
         return LEAGUE_WOBA_BASELINE
     if metric == "barrel_pct":
         return LEAGUE_BARREL_PCT_BASELINE
+    if metric == "bat_speed":
+        return LEAGUE_BAT_SPEED_BASELINE
+    if metric == "swing_length":
+        return LEAGUE_SWING_LENGTH_BASELINE
+    if metric == "swing_path_tilt":
+        return LEAGUE_SWING_PATH_TILT_BASELINE
+    if metric == "squared_up_rate_proxy":
+        return LEAGUE_SQUARED_UP_RATE_PROXY_BASELINE
+    if metric == "bat_tracking_coverage":
+        return LEAGUE_BAT_TRACKING_COVERAGE_BASELINE
     if metric == "woba_minus_xwoba":
         return 0.0
     return 0.0

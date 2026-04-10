@@ -4,21 +4,24 @@ import argparse
 import json
 import math
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta, timezone
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Sequence
 
 from src.db import DEFAULT_DB_PATH, init_db
 from src.engine.edge_calculator import payout_for_american_odds
 from src.model.data_builder import _normalize_game_status, _normalize_team_code
+from src.models.bet import BetDecision
 from src.models.weather import WeatherData
 from src.clients.odds_client import fetch_mlb_full_game_odds_context
 from src.pipeline.daily import (
     DailyPipelineResult,
     GameProcessingResult,
+    FULL_GAME_ODDS_CACHE_TTL_MINUTES,
     PipelineDependencies,
     SCRAPER_ODDS_DB_PATH,
+    _default_feature_frame_builder,
     _default_full_game_odds_context_fetcher,
     _default_schedule_fetcher,
     _load_cached_full_game_odds_context,
@@ -35,6 +38,9 @@ UTC_TZ = timezone.utc
 _LOG_LOSS_EPSILON = 1e-15
 DEFAULT_PLAY_OF_DAY_MIN_EDGE = 0.06
 DEFAULT_LIVE_GAME_STATE_PATH = Path("OddsScraper") / "data" / "live_game_state.json"
+TRACKING_SOURCE_LIVE = "live"
+TRACKING_SOURCE_CACHE_BACKFILL = "cache_backfill"
+TRACKING_SOURCE_RETROSPECTIVE = "retrospective_backfill"
 
 
 class _TrackerNoopNotifier:
@@ -74,6 +80,97 @@ def _neutral_weather_fetcher(
     )
 
 
+def _local_only_full_game_odds_fetcher(
+    target_day: date,
+    _mode: str,
+    repo_db_path: str | Path,
+) -> dict[int, dict[str, Any]]:
+    scraper_context = _load_scraper_full_game_odds_context(
+        target_date=target_day,
+        scraper_db_path=SCRAPER_ODDS_DB_PATH,
+        repo_db_path=repo_db_path,
+    )
+    if scraper_context:
+        return scraper_context
+    cached_context = _load_cached_full_game_odds_context(
+        repo_db_path,
+        target_day,
+        max_age=timedelta(minutes=FULL_GAME_ODDS_CACHE_TTL_MINUTES),
+    )
+    if cached_context:
+        return cached_context
+    return _load_cached_full_game_odds_context(
+        repo_db_path,
+        target_day,
+        max_age=None,
+    )
+
+
+def _live_capture_quality_reasons(game: GameProcessingResult) -> list[str]:
+    input_status = dict(game.input_status or {})
+    reasons: list[str] = []
+    if not bool(input_status.get("full_game_odds_available")):
+        reasons.append("full-game odds unavailable")
+    if not bool(input_status.get("home_lineup_available")):
+        reasons.append("home lineup unavailable")
+    if not bool(input_status.get("away_lineup_available")):
+        reasons.append("away lineup unavailable")
+    if not bool(input_status.get("weather_available")):
+        reasons.append("weather unavailable")
+    if bool(game.paper_fallback):
+        reasons.append("paper fallback disabled for live tracking")
+    deduped: list[str] = []
+    for reason in reasons:
+        if reason not in deduped:
+            deduped.append(reason)
+    return deduped
+
+
+def _cached_live_feature_frame_builder(**kwargs: Any):
+    kwargs = dict(kwargs)
+    kwargs["refresh"] = False
+    return _default_feature_frame_builder(**kwargs)
+
+
+def _sanitize_live_capture_result(result: DailyPipelineResult) -> DailyPipelineResult:
+    sanitized_games = list(result.games)
+    for game in sanitized_games:
+        if game.status != "pick" or game.selected_decision is None:
+            continue
+        rejection_reasons = _live_capture_quality_reasons(game)
+        if not rejection_reasons:
+            continue
+        game.status = "no_pick"
+        game.selected_decision = None
+        game.paper_fallback = False
+        existing_reason = str(game.no_pick_reason or "").strip()
+        combined_reasons = rejection_reasons[:]
+        if existing_reason:
+            combined_reasons.append(existing_reason)
+        deduped: list[str] = []
+        for reason in combined_reasons:
+            if reason and reason not in deduped:
+                deduped.append(reason)
+        game.no_pick_reason = "; ".join(deduped)
+
+    pick_count = sum(game.status == "pick" for game in sanitized_games)
+    no_pick_count = sum(game.status == "no_pick" for game in sanitized_games)
+    error_count = sum(game.status == "error" for game in sanitized_games)
+    if pick_count > 0:
+        notification_type = "picks"
+    elif sanitized_games and all(game.status == "error" for game in sanitized_games):
+        notification_type = "failure_alert"
+    else:
+        notification_type = "no_picks"
+    return replace(
+        result,
+        pick_count=pick_count,
+        no_pick_count=no_pick_count,
+        error_count=error_count,
+        notification_type=notification_type,
+    )
+
+
 LIVE_SEASON_TRACKING_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS live_season_tracking (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,6 +180,7 @@ CREATE TABLE IF NOT EXISTS live_season_tracking (
     matchup TEXT NOT NULL,
     run_id TEXT NOT NULL,
     captured_at TEXT NOT NULL,
+    tracking_source TEXT NOT NULL DEFAULT 'live',
     model_version TEXT,
     status TEXT NOT NULL CHECK (status IN ('pick', 'no_pick', 'error')),
     paper_fallback INTEGER NOT NULL DEFAULT 0 CHECK (paper_fallback IN (0, 1)),
@@ -288,6 +386,12 @@ class LiveSeasonSummary:
 
 def _ensure_live_season_tracking_table(connection: sqlite3.Connection) -> None:
     connection.execute(LIVE_SEASON_TRACKING_TABLE_SQL)
+    _ensure_column(
+        connection,
+        table_name="live_season_tracking",
+        column_name="tracking_source",
+        column_sql="TEXT NOT NULL DEFAULT 'live'",
+    )
     _ensure_column(
         connection,
         table_name="live_season_tracking",
@@ -716,6 +820,7 @@ def capture_daily_result(
     result: DailyPipelineResult,
     db_path: str | Path = DEFAULT_DB_PATH,
     captured_at: datetime | None = None,
+    tracking_source: str = TRACKING_SOURCE_LIVE,
 ) -> int:
     pipeline_day = date.fromisoformat(result.pipeline_date)
     database_path = init_db(db_path)
@@ -733,6 +838,7 @@ def capture_daily_result(
                 matchup,
                 run_id,
                 captured_at,
+                tracking_source,
                 model_version,
                 status,
                 paper_fallback,
@@ -772,12 +878,13 @@ def capture_daily_result(
                 narrative,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(season, game_pk) DO UPDATE SET
                 pipeline_date = excluded.pipeline_date,
                 matchup = excluded.matchup,
                 run_id = excluded.run_id,
                 captured_at = excluded.captured_at,
+                tracking_source = live_season_tracking.tracking_source,
                 model_version = excluded.model_version,
                 status = CASE
                     WHEN live_season_tracking.selected_market_type IS NOT NULL
@@ -940,6 +1047,7 @@ def capture_daily_result(
                     game.matchup,
                     result.run_id,
                     captured_timestamp.isoformat(),
+                    str(tracking_source),
                     game.prediction.model_version if game.prediction else result.model_version,
                     game.status,
                     int(game.paper_fallback),
@@ -1020,31 +1128,24 @@ def capture_live_slate_fast(
             _load_fresh_odds_from_db_for_date(
                 repo_db_path,
                 target_day,
-                max_age=None,
+                max_age=timedelta(minutes=15),
             )
         ),
     ]
-    local_full_game_odds_fetcher = lambda target_day, _mode, repo_db_path: (  # noqa: E731
-        _default_full_game_odds_context_fetcher(
-            target_day,
-            "prod",
-            repo_db_path,
-        )
-    )
     dependencies = PipelineDependencies(
-        lineups_fetcher=lambda _target_date: [],
-        weather_fetcher=_neutral_weather_fetcher,
         notifier=_TrackerNoopNotifier(),
         odds_fetcher=local_odds_fetcher,
-        full_game_odds_fetcher=local_full_game_odds_fetcher,
+        full_game_odds_fetcher=_local_only_full_game_odds_fetcher,
+        feature_frame_builder=_cached_live_feature_frame_builder,
     )
-    result = run_daily_pipeline(
+    raw_result = run_daily_pipeline(
         target_date=target_date,
-        mode="backtest",
+        mode="prod",
         dry_run=True,
         db_path=resolved_db_path,
         dependencies=dependencies,
     )
+    result = _sanitize_live_capture_result(raw_result)
     capture_daily_result(result=result, db_path=resolved_db_path)
     return result
 
@@ -1186,6 +1287,11 @@ def capture_live_slate_once(
         db_path=db_path,
     )
     if existing_rows:
+        _clear_scheduled_tracking_rows_for_date(
+            season=target_day.year,
+            pipeline_date=target_day.isoformat(),
+            db_path=db_path,
+        )
         result = (
             capture_live_slate_fast(target_date=target_day, db_path=db_path)
             if fast
@@ -1239,6 +1345,44 @@ def capture_live_slate_once(
         "notification_type": result.notification_type,
         "refreshed_games": int(refreshed_games),
     }
+
+
+def _clear_scheduled_tracking_rows_for_date(
+    *,
+    season: int,
+    pipeline_date: str,
+    db_path: str | Path = DEFAULT_DB_PATH,
+) -> int:
+    database_path = init_db(db_path)
+    with sqlite3.connect(database_path) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT tracker.game_pk, games.status AS game_status
+            FROM live_season_tracking AS tracker
+            LEFT JOIN games ON games.game_pk = tracker.game_pk
+            WHERE tracker.season = ?
+              AND tracker.pipeline_date = ?
+            """,
+            (int(season), str(pipeline_date)),
+        ).fetchall()
+        removable_game_pks = [
+            int(row["game_pk"])
+            for row in rows
+            if row["game_pk"] is not None
+            and _normalize_game_status(row["game_status"]) == "scheduled"
+        ]
+        if not removable_game_pks:
+            return 0
+        connection.executemany(
+            """
+            DELETE FROM live_season_tracking
+            WHERE season = ? AND game_pk = ?
+            """,
+            [(int(season), int(game_pk)) for game_pk in removable_game_pks],
+        )
+        connection.commit()
+    return len(removable_game_pks)
 
 
 def _settle_outstanding_tracking_dates(
@@ -1454,6 +1598,7 @@ def settle_tracked_games(
     season: int | None = None,
     db_path: str | Path = DEFAULT_DB_PATH,
     settled_at: datetime | None = None,
+    refresh_schedule: bool = True,
 ) -> int:
     database_path = init_db(db_path)
     normalized_settled_at = _normalize_timestamp(settled_at)
@@ -1478,16 +1623,17 @@ def settle_tracked_games(
             ).fetchall()
             refresh_dates = [str(row[0]) for row in date_rows]
 
-        for tracked_date in refresh_dates:
-            try:
-                refreshed_schedule = _default_schedule_fetcher(
-                    date.fromisoformat(tracked_date), "prod"
-                )
-                if not refreshed_schedule.empty:
-                    _upsert_games(database_path, refreshed_schedule)
-            except Exception:
-                # Leave existing DB state intact if live schedule refresh fails.
-                pass
+        if refresh_schedule:
+            for tracked_date in refresh_dates:
+                try:
+                    refreshed_schedule = _default_schedule_fetcher(
+                        date.fromisoformat(tracked_date), "prod"
+                    )
+                    if not refreshed_schedule.empty:
+                        _upsert_games(database_path, refreshed_schedule)
+                except Exception:
+                    # Leave existing DB state intact if live schedule refresh fails.
+                    pass
 
         where_clauses: list[str] = []
         params: list[Any] = []
@@ -1781,6 +1927,49 @@ def submit_manual_tracked_bet(
             (int(season), manual_bet_key),
         ).fetchone()
     return dict(row) if row is not None else {}
+
+
+def delete_manual_tracked_bet(
+    *,
+    manual_bet_id: int,
+    season: int | None = None,
+    allow_locked_delete: bool = False,
+    db_path: str | Path = DEFAULT_DB_PATH,
+) -> bool:
+    database_path = init_db(db_path)
+    with sqlite3.connect(database_path) as connection:
+        connection.row_factory = sqlite3.Row
+        _ensure_live_manual_tracking_table(connection)
+
+        where_sql = "id = ?"
+        params: list[Any] = [int(manual_bet_id)]
+        if season is not None:
+            where_sql += " AND season = ?"
+            params.append(int(season))
+
+        row = connection.execute(
+            f"""
+            SELECT tracker.id, tracker.game_pk, games.status AS game_status
+            FROM live_manual_tracking AS tracker
+            LEFT JOIN games ON games.game_pk = tracker.game_pk
+            WHERE {where_sql}
+            LIMIT 1
+            """,
+            params,
+        ).fetchone()
+        if row is None:
+            raise ValueError("Manual tracked bet was not found.")
+
+        game_status = row["game_status"]
+        if not allow_locked_delete and game_status not in {None, "scheduled"}:
+            raise ValueError("Manual tracking cannot be edited after the game has started.")
+
+        cursor = connection.execute(
+            "DELETE FROM live_manual_tracking WHERE id = ?",
+            (int(manual_bet_id),),
+        )
+        connection.commit()
+        return cursor.rowcount > 0
 
 
 def settle_manual_tracked_bets(

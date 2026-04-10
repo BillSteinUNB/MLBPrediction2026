@@ -19,11 +19,14 @@ export interface LiveSeasonSummary {
 }
 
 export interface LiveSeasonGame {
+  id: number | null;
   season: number;
   pipeline_date: string;
   game_pk: number;
   matchup: string;
+  bet_key: string | null;
   captured_at: string;
+  tracking_source?: string;
   model_version: string | null;
   status: string;
   paper_fallback: boolean;

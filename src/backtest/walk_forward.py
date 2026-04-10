@@ -127,6 +127,9 @@ class WalkForwardBacktestResult:
     output_fingerprint: str
     aggregate_brier_score: float
     aggregate_roi: float
+    aggregate_clv: float | None
+    clv_coverage: float
+    clv_bet_count: int
     bankroll_return_pct: float
     ending_bankroll_units: float
     peak_bankroll_units: float
@@ -483,6 +486,19 @@ def run_walk_forward_backtest(
     total_staked = float(predictions["bet_stake_units"].sum())
     total_profit = float(predictions["bet_profit_units"].sum())
     aggregate_roi = float(total_profit / total_staked) if total_staked else 0.0
+    aggregate_clv = (
+        float(predictions.loc[predictions["clv_available"] == 1, "clv"].mean())
+        if int(predictions["clv_available"].sum()) > 0
+        else None
+    )
+    total_bets = int(predictions["is_bet"].sum())
+    clv_bet_count = int(predictions["clv_available"].sum())
+    clv_coverage = float(clv_bet_count / max(1, total_bets))
+    aggregate_positive_clv_rate = (
+        float((predictions.loc[predictions["clv_available"] == 1, "clv"] > 0.0).mean())
+        if clv_bet_count > 0
+        else None
+    )
     ending_bankroll_units = float(predictions["bankroll_after_units"].iloc[-1])
     peak_bankroll_units = float(predictions["peak_bankroll_units"].max())
     max_drawdown_pct = float(predictions["bankroll_drawdown_pct"].max())
@@ -523,6 +539,7 @@ def run_walk_forward_backtest(
         "max_edge_to_bet": max_edge_to_bet,
         "market_vig": market_vig,
         "time_series_splits": time_series_splits,
+        "clv_basis": _resolve_clv_basis(historical_odds_snapshot_selection),
         "starting_bankroll_units": float(starting_bankroll_units),
         "staking_mode": staking_mode,
         "flat_bet_size_units": float(flat_bet_size_units),
@@ -543,12 +560,19 @@ def run_walk_forward_backtest(
         "window_count": int(len(window_metrics)),
         "aggregate_brier_score": aggregate_brier,
         "aggregate_roi": aggregate_roi,
+        "aggregate_average_clv": aggregate_clv,
+        "aggregate_clv_coverage": clv_coverage,
+        "aggregate_clv_bet_count": clv_bet_count,
+        "aggregate_positive_clv_rate": aggregate_positive_clv_rate,
+        "aggregate_closing_historical_odds_coverage": float(
+            predictions["closing_market_source"].eq("historical").mean()
+        ),
         "bankroll_return_pct": bankroll_return_pct,
         "ending_bankroll_units": ending_bankroll_units,
         "peak_bankroll_units": peak_bankroll_units,
         "max_drawdown_pct": max_drawdown_pct,
         "longest_losing_streak": longest_losing_streak,
-        "total_bets": int(predictions["is_bet"].sum()),
+        "total_bets": total_bets,
         "profitability_metrics_valid": profitability_metrics_valid,
         "total_profit_units": total_profit,
         "total_staked_units": total_staked,
@@ -573,6 +597,9 @@ def run_walk_forward_backtest(
         output_fingerprint=output_fingerprint,
         aggregate_brier_score=aggregate_brier,
         aggregate_roi=aggregate_roi,
+        aggregate_clv=aggregate_clv,
+        clv_coverage=clv_coverage,
+        clv_bet_count=clv_bet_count,
         bankroll_return_pct=bankroll_return_pct,
         ending_bankroll_units=ending_bankroll_units,
         peak_bankroll_units=peak_bankroll_units,
@@ -939,6 +966,23 @@ def _evaluate_window(
         historical_odds_book_name=historical_odds_book_name,
         historical_odds_snapshot_selection=historical_odds_snapshot_selection,
     )
+    closing_test_frame = test_frame.copy()
+    closing_test_frame["as_of_timestamp"] = closing_test_frame["scheduled_start"]
+    (
+        _closing_market_home_fair_prob,
+        _closing_market_away_fair_prob,
+        closing_home_implied_prob,
+        closing_away_implied_prob,
+        closing_home_odds,
+        closing_away_odds,
+        closing_market_source,
+    ) = _resolve_market_pricing(
+        test_frame=closing_test_frame,
+        market_vig=market_vig,
+        historical_odds_db_path=historical_odds_db_path,
+        historical_odds_book_name=historical_odds_book_name,
+        historical_odds_snapshot_selection="latest",
+    )
     edge_home = model_home_prob - market_home_fair_prob
     edge_away = (1.0 - model_home_prob) - market_away_fair_prob
     actual_home_win = pd.to_numeric(test_frame["f5_ml_result"], errors="raise").astype(int).to_numpy()
@@ -986,6 +1030,44 @@ def _evaluate_window(
         bet_side == "home",
         model_home_prob,
         np.where(bet_side == "away", 1.0 - model_home_prob, 0.0),
+    )
+    bet_market_implied_prob = np.where(
+        bet_side == "home",
+        home_implied_prob,
+        np.where(bet_side == "away", away_implied_prob, np.nan),
+    )
+    bet_closing_odds = np.where(
+        bet_side == "home",
+        closing_home_odds,
+        np.where(bet_side == "away", closing_away_odds, 0),
+    )
+    bet_closing_probability = np.where(
+        bet_side == "home",
+        closing_home_implied_prob,
+        np.where(bet_side == "away", closing_away_implied_prob, np.nan),
+    )
+    clv_available = (
+        (bet_side != "none")
+        & (market_source == "historical")
+        & (closing_market_source == "historical")
+    ).astype(int)
+    clv = np.where(
+        clv_available == 1,
+        bet_closing_probability - bet_market_implied_prob,
+        np.nan,
+    )
+    clv_status = np.where(
+        bet_side == "none",
+        "not_a_bet",
+        np.where(
+            market_source != "historical",
+            "entry_snapshot_unavailable",
+            np.where(
+                closing_market_source != "historical",
+                "closing_snapshot_unavailable",
+                "available",
+            ),
+        ),
     )
     bet_expected_value = np.array(
         [
@@ -1037,11 +1119,23 @@ def _evaluate_window(
             "home_odds": home_odds,
             "away_odds": away_odds,
             "market_source": market_source,
+            "closing_market_home_implied_prob": closing_home_implied_prob,
+            "closing_market_away_implied_prob": closing_away_implied_prob,
+            "closing_home_odds": closing_home_odds,
+            "closing_away_odds": closing_away_odds,
+            "closing_market_source": closing_market_source,
             "edge_home": edge_home,
             "edge_away": edge_away,
             "bet_side": bet_side,
             "bet_edge": bet_edge,
             "bet_odds": bet_odds,
+            "bet_market_implied_prob": bet_market_implied_prob,
+            "bet_closing_odds": bet_closing_odds,
+            "bet_closing_probability": bet_closing_probability,
+            "clv_basis": _resolve_clv_basis(historical_odds_snapshot_selection),
+            "clv_available": clv_available,
+            "clv": clv,
+            "clv_status": clv_status,
             "bet_model_prob": bet_model_prob,
             "bet_expected_value": bet_expected_value,
             "bet_result": bet_result,
@@ -1076,6 +1170,7 @@ def _evaluate_window(
     total_staked = float(predictions["bet_stake_units"].sum())
     total_profit = float(predictions["bet_profit_units"].sum())
     roi = float(total_profit / total_staked) if total_staked else 0.0
+    clv_bet_count = int(predictions["clv_available"].sum())
 
     metrics = {
         "window_index": window.window_index,
@@ -1094,6 +1189,19 @@ def _evaluate_window(
         "loss_count": int(predictions["bet_result"].eq("LOSS").sum()),
         "brier_score": brier_score,
         "roi": roi,
+        "clv_basis": _resolve_clv_basis(historical_odds_snapshot_selection),
+        "clv_bet_count": clv_bet_count,
+        "clv_coverage": float(clv_bet_count / max(1, int(predictions["is_bet"].sum()))),
+        "average_clv": (
+            float(predictions.loc[predictions["clv_available"] == 1, "clv"].mean())
+            if clv_bet_count > 0
+            else np.nan
+        ),
+        "positive_clv_rate": (
+            float((predictions.loc[predictions["clv_available"] == 1, "clv"] > 0.0).mean())
+            if clv_bet_count > 0
+            else np.nan
+        ),
         "total_profit_units": total_profit,
         "total_staked_units": total_staked,
         "max_edge_to_bet": max_edge_to_bet,
@@ -1115,6 +1223,9 @@ def _evaluate_window(
         "mean_model_home_prob": float(predictions["model_home_prob"].mean()),
         "mean_market_home_fair_prob": float(predictions["market_home_fair_prob"].mean()),
         "historical_odds_coverage": float((predictions["market_source"] == "historical").mean()),
+        "closing_historical_odds_coverage": float(
+            (predictions["closing_market_source"] == "historical").mean()
+        ),
         "profitability_metrics_valid": profitability_metrics_valid,
         "calibration_method": model_bundle.calibration_method,
         "window_version_hash": _compute_window_version_hash(
@@ -1168,7 +1279,7 @@ def _resolve_market_pricing(
 
     historical = load_historical_odds_for_games(
         db_path=historical_odds_db_path,
-        game_pks=test_frame["game_pk"].astype(int).tolist(),
+        games_frame=test_frame,
         market_type="f5_ml",
         book_name=historical_odds_book_name,
         snapshot_selection=historical_odds_snapshot_selection,
@@ -1691,6 +1802,12 @@ def _payout_for_american_odds(odds: int) -> float:
     if odds <= -100:
         return 100.0 / abs(float(odds))
     raise ValueError("American odds must be <= -100 or >= 100")
+
+
+def _resolve_clv_basis(snapshot_selection: Literal["latest", "opening"]) -> str:
+    if snapshot_selection == "opening":
+        return "opening_vs_closing"
+    return "bet_time_vs_closing"
 
 
 def _expected_value(model_probability: float, odds: int) -> float:

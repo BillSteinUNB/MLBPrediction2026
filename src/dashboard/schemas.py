@@ -365,12 +365,15 @@ class LiveSeasonSummaryResponse(BaseModel):
 class LiveSeasonGameResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    id: Optional[int] = None
     season: int
     pipeline_date: str
     game_pk: int
     matchup: str
+    bet_key: Optional[str] = None
     run_id: str
     captured_at: str
+    tracking_source: str = "live"
     model_version: Optional[str] = None
     status: str
     paper_fallback: bool
@@ -457,6 +460,14 @@ class LiveSeasonManualBetRequest(BaseModel):
     source_model_version: Optional[str] = None
     input_status: Optional[Dict[str, Any]] = None
     narrative: Optional[str] = None
+
+
+class LiveSeasonManualBetDeleteRequest(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    season: int
+    pipeline_date: str
+    manual_bet_id: int
 
 
 class LiveSeasonDashboardResponse(BaseModel):

@@ -7,6 +7,10 @@ from scipy.stats import nbinom, skellam
 DEFAULT_TOTAL_OVERDISPERSION_FACTOR = 2.3
 
 
+def _is_whole_number_line(value: float, *, tolerance: float = 1e-9) -> bool:
+    return math.isclose(float(value), round(float(value)), abs_tol=tolerance)
+
+
 def normal_cdf(value: float) -> float:
     """Return the standard normal cumulative distribution function."""
 
@@ -143,16 +147,50 @@ def spread_cover_probabilities(
     home_point: float,
     correlation: float = 0.0,
 ) -> tuple[float | None, float | None]:
-    """Return home/away run-line cover probabilities for a given home point."""
+    """Return home/away run-line win probabilities for a given home point."""
+
+    home_probability, away_probability, _ = spread_outcome_probabilities(
+        home_runs_mean=home_runs_mean,
+        away_runs_mean=away_runs_mean,
+        home_runs_std=home_runs_std,
+        away_runs_std=away_runs_std,
+        home_point=home_point,
+        correlation=correlation,
+    )
+    return home_probability, away_probability
+
+
+def spread_outcome_probabilities(
+    *,
+    home_runs_mean: float,
+    away_runs_mean: float,
+    home_runs_std: float,
+    away_runs_std: float,
+    home_point: float,
+    correlation: float = 0.0,
+) -> tuple[float | None, float | None, float | None]:
+    """Return home/away run-line win probabilities plus push probability."""
 
     _ = home_runs_std, away_runs_std, correlation
     home_mean = max(float(home_runs_mean), 1e-6)
     away_mean = max(float(away_runs_mean), 1e-6)
-    threshold = math.floor(-float(home_point))
-    home_probability = 1.0 - float(skellam.cdf(threshold, home_mean, away_mean))
+    resolved_home_point = float(home_point)
+
+    if _is_whole_number_line(resolved_home_point):
+        push_margin = int(round(-resolved_home_point))
+        push_probability = float(skellam.pmf(push_margin, home_mean, away_mean))
+        home_probability = 1.0 - float(skellam.cdf(push_margin, home_mean, away_mean))
+        away_probability = float(skellam.cdf(push_margin - 1, home_mean, away_mean))
+    else:
+        threshold = math.floor(-resolved_home_point)
+        home_probability = 1.0 - float(skellam.cdf(threshold, home_mean, away_mean))
+        away_probability = float(skellam.cdf(threshold, home_mean, away_mean))
+        push_probability = 0.0
+
     home_probability = max(0.0, min(1.0, home_probability))
-    away_probability = 1.0 - home_probability
-    return home_probability, away_probability
+    away_probability = max(0.0, min(1.0, away_probability))
+    push_probability = max(0.0, min(1.0, push_probability))
+    return home_probability, away_probability, push_probability
 
 
 def totals_probabilities(
@@ -164,7 +202,29 @@ def totals_probabilities(
     total_point: float,
     correlation: float = 0.0,
 ) -> tuple[float | None, float | None]:
-    """Return over/under probabilities for a posted total."""
+    """Return over/under win probabilities for a posted total."""
+
+    over_probability, under_probability, _ = totals_outcome_probabilities(
+        home_runs_mean=home_runs_mean,
+        away_runs_mean=away_runs_mean,
+        home_runs_std=home_runs_std,
+        away_runs_std=away_runs_std,
+        total_point=total_point,
+        correlation=correlation,
+    )
+    return over_probability, under_probability
+
+
+def totals_outcome_probabilities(
+    *,
+    home_runs_mean: float,
+    away_runs_mean: float,
+    home_runs_std: float,
+    away_runs_std: float,
+    total_point: float,
+    correlation: float = 0.0,
+) -> tuple[float | None, float | None, float | None]:
+    """Return over/under win probabilities plus push probability for a posted total."""
 
     total_mean = projected_total(
         home_runs_mean=home_runs_mean,
@@ -178,14 +238,26 @@ def totals_probabilities(
         correlation=correlation,
     )
     if total_variance is None:
-        return None, None
+        return None, None, None
 
     shape, probability = _nbinom_shape_params(mean=total_mean, variance=total_variance)
-    threshold = math.floor(float(total_point))
-    over_probability = 1.0 - float(nbinom.cdf(threshold, shape, probability))
+    resolved_total_point = float(total_point)
+
+    if _is_whole_number_line(resolved_total_point):
+        push_total = int(round(resolved_total_point))
+        push_probability = float(nbinom.pmf(push_total, shape, probability))
+        over_probability = 1.0 - float(nbinom.cdf(push_total, shape, probability))
+        under_probability = float(nbinom.cdf(push_total - 1, shape, probability))
+    else:
+        threshold = math.floor(resolved_total_point)
+        over_probability = 1.0 - float(nbinom.cdf(threshold, shape, probability))
+        under_probability = float(nbinom.cdf(threshold, shape, probability))
+        push_probability = 0.0
+
     over_probability = max(0.0, min(1.0, over_probability))
-    under_probability = 1.0 - over_probability
-    return over_probability, under_probability
+    under_probability = max(0.0, min(1.0, under_probability))
+    push_probability = max(0.0, min(1.0, push_probability))
+    return over_probability, under_probability, push_probability
 
 
 def moneyline_probability(
@@ -283,7 +355,9 @@ __all__ = [
     "projected_total",
     "spread_cover_probability",
     "spread_cover_probabilities",
+    "spread_outcome_probabilities",
     "totals_over_probability",
     "totals_probabilities",
+    "totals_outcome_probabilities",
     "totals_under_probability",
 ]

@@ -9,7 +9,15 @@ from typing import Literal, Sequence
 
 from src.clients.odds_client import american_to_implied
 from src.db import DEFAULT_DB_PATH, init_db
-from src.models._base import AmericanOdds, ModelBase, NonNegativeFloat, Probability, UtcDatetime
+from src.models._base import (
+    AmericanOdds,
+    BetSide,
+    MarketType,
+    ModelBase,
+    NonNegativeFloat,
+    Probability,
+    UtcDatetime,
+)
 from src.models.bet import BetDecision, BetResult
 
 
@@ -28,8 +36,8 @@ class PerformanceBetRecord(ModelBase):
 
     bet_id: int
     game_pk: int
-    market_type: Literal["f5_ml", "f5_rl"]
-    side: Literal["home", "away"]
+    market_type: MarketType
+    side: BetSide
     book_name: str
     model_probability: Probability
     market_probability: Probability

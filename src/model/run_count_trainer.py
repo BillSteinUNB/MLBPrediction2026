@@ -81,6 +81,15 @@ DEFAULT_RUN_COUNT_LIGHTGBM_PARAM_MODE = "independent"
 DEFAULT_RUN_COUNT_XGBOOST_EVAL_METRIC = "poisson-nloglik"
 DEFAULT_RUN_COUNT_LIGHTGBM_EVAL_METRIC = "poisson"
 DEFAULT_MIN_POISSON_PREDICTION = 1e-9
+_NEAR_CONSTANT_RUN_COUNT_FEATURES = frozenset(
+    {
+        "abs_active",
+        "abs_walk_rate_delta",
+        "abs_strikeout_rate_delta",
+        "weather_precip_probability",
+        "weather_data_missing",
+    }
+)
 _RUN_COUNT_OFFENSE_METRICS = (
     "wrc_plus",
     "woba",
@@ -119,12 +128,12 @@ DEFAULT_RUN_COUNT_MODEL_SPECS: tuple[dict[str, str], ...] = (
 def _resolve_run_count_optuna_workers() -> int:
     configured = os.getenv("MLB_OPTUNA_N_JOBS")
     if configured is None:
-        return 1
+        return 2
     try:
         return max(1, int(configured))
     except ValueError:
         logger.warning("Ignoring invalid MLB_OPTUNA_N_JOBS value: %s", configured)
-        return 1
+        return 2
 
 
 DEFAULT_RUN_COUNT_OPTUNA_WORKERS = _resolve_run_count_optuna_workers()
@@ -258,13 +267,12 @@ def train_run_count_models(
 ) -> RunCountTrainingResult:
     """Train and persist run-count regressors for full-game and F5 score targets."""
 
+    if feature_selection_mode != "flat" and int(forced_delta_feature_count) > 0:
+        raise ValueError("forced_delta_feature_count is currently supported only with flat selection mode")
+
     validated_training_data = validate_run_count_training_data(training_data)
     training_data_inspection = inspect_run_count_training_data(validated_training_data)
     dataset = _load_training_dataframe(validated_training_data)
-    candidate_resolution = _resolve_run_count_candidate_feature_columns(dataset)
-    candidate_feature_columns = candidate_resolution.candidate_columns
-    if not candidate_feature_columns:
-        raise ValueError("Training data does not contain any numeric feature columns")
 
     effective_holdout_season = _resolve_holdout_season(dataset, holdout_season)
     data_version_hash = _resolve_data_version_hash(dataset)
@@ -288,8 +296,6 @@ def train_run_count_models(
             dataset=dataset,
             model_name=model_name,
             target_column=target_column,
-            candidate_feature_columns=candidate_feature_columns,
-            excluded_candidate_counts=candidate_resolution.excluded_candidate_counts,
             output_dir=resolved_output_dir,
             model_version=model_version,
             holdout_season=effective_holdout_season,
@@ -432,8 +438,6 @@ def _train_single_model(
     dataset: pd.DataFrame,
     model_name: str,
     target_column: str,
-    candidate_feature_columns: Sequence[str],
-    excluded_candidate_counts: Mapping[str, int],
     output_dir: Path,
     model_version: str,
     holdout_season: int,
@@ -460,35 +464,10 @@ def _train_single_model(
         raise ValueError(f"No training rows found before holdout season {holdout_season}")
     if holdout_frame.empty:
         raise ValueError(f"No holdout rows found for season {holdout_season}")
-    if feature_selection_mode == "flat":
-        selection_result = _select_run_count_feature_columns_flat(
-            train_frame,
-            target_column=target_column,
-            candidate_feature_columns=candidate_feature_columns,
-            max_feature_count=DEFAULT_RUN_COUNT_MAX_FEATURE_COUNT,
-            forced_delta_count=forced_delta_feature_count,
-        )
-    elif feature_selection_mode == "bucketed":
-        if forced_delta_feature_count > 0:
-            raise ValueError("forced_delta_feature_count is currently supported only with flat selection mode")
-        selection_result = _select_run_count_feature_columns_bucketed(
-            train_frame,
-            target_column=target_column,
-            candidate_feature_columns=candidate_feature_columns,
-            max_feature_count=DEFAULT_RUN_COUNT_MAX_FEATURE_COUNT,
-        )
-    else:
-        if forced_delta_feature_count > 0:
-            raise ValueError("forced_delta_feature_count is currently supported only with flat selection mode")
-        selection_result = _select_run_count_feature_columns(
-            train_frame,
-            target_column=target_column,
-            candidate_feature_columns=candidate_feature_columns,
-            max_feature_count=DEFAULT_RUN_COUNT_MAX_FEATURE_COUNT,
-        )
-    feature_columns = selection_result.feature_columns
-    if not feature_columns:
-        raise ValueError(f"No run-count features selected for target {target_column}")
+    candidate_resolution = _resolve_run_count_candidate_feature_columns(train_frame)
+    candidate_feature_columns = candidate_resolution.candidate_columns
+    if not candidate_feature_columns:
+        raise ValueError(f"No run-count candidate features resolved for target {target_column}")
 
     (
         best_params,
@@ -501,7 +480,7 @@ def _train_single_model(
         cv_diagnostics,
     ) = _run_optuna_search(
         train_frame=train_frame,
-        feature_columns=feature_columns,
+        candidate_feature_columns=candidate_feature_columns,
         target_column=target_column,
         model_name=model_name,
         output_dir=output_dir,
@@ -514,7 +493,21 @@ def _train_single_model(
         optuna_workers=optuna_workers,
         cv_aggregation_mode=cv_aggregation_mode,
         lightgbm_param_mode=lightgbm_param_mode,
+        feature_selection_mode=feature_selection_mode,
+        forced_delta_feature_count=forced_delta_feature_count,
+        max_feature_count=DEFAULT_RUN_COUNT_MAX_FEATURE_COUNT,
     )
+    selection_result = _select_run_count_feature_columns_for_mode(
+        train_frame,
+        target_column=target_column,
+        candidate_feature_columns=candidate_feature_columns,
+        feature_selection_mode=feature_selection_mode,
+        forced_delta_feature_count=forced_delta_feature_count,
+        max_feature_count=DEFAULT_RUN_COUNT_MAX_FEATURE_COUNT,
+    )
+    feature_columns = selection_result.feature_columns
+    if not feature_columns:
+        raise ValueError(f"No run-count features selected for target {target_column}")
     (
         best_estimator,
         blend_selection,
@@ -631,7 +624,7 @@ def _train_single_model(
         "forced_delta_features": list(selection_result.forced_delta_features),
         "omitted_top_features_by_bucket": selection_result.omitted_top_features_by_bucket,
         "feature_selection_family_decisions": selection_result.family_decisions,
-        "excluded_candidate_counts": dict(excluded_candidate_counts),
+        "excluded_candidate_counts": dict(candidate_resolution.excluded_candidate_counts),
         "feature_health_diagnostics": feature_health_diagnostics,
         "feature_selection_diagnostics": {
             "mode": feature_selection_mode,
@@ -641,7 +634,7 @@ def _train_single_model(
             "forced_delta_features": list(selection_result.forced_delta_features),
             "omitted_top_features_by_bucket": selection_result.omitted_top_features_by_bucket,
             "family_decisions": selection_result.family_decisions,
-            "excluded_candidate_counts": dict(excluded_candidate_counts),
+            "excluded_candidate_counts": dict(candidate_resolution.excluded_candidate_counts),
             "feature_health_diagnostics": feature_health_diagnostics,
         },
         "search_space": {
@@ -710,7 +703,7 @@ def _train_single_model(
             for bucket, items in selection_result.omitted_top_features_by_bucket.items()
         },
         feature_selection_family_decisions=[dict(item) for item in selection_result.family_decisions],
-        excluded_candidate_counts=dict(excluded_candidate_counts),
+        excluded_candidate_counts=dict(candidate_resolution.excluded_candidate_counts),
         feature_health_diagnostics=feature_health_diagnostics,
     )
     summary_path = output_dir / f"{model_name}_training_run_{model_version}.json"
@@ -1022,7 +1015,7 @@ def _round_metric(value: float | None, digits: int = 4) -> float | None:
 def _run_optuna_search(
     *,
     train_frame: pd.DataFrame,
-    feature_columns: Sequence[str],
+    candidate_feature_columns: Sequence[str],
     target_column: str,
     model_name: str,
     output_dir: Path,
@@ -1035,6 +1028,9 @@ def _run_optuna_search(
     optuna_workers: int,
     cv_aggregation_mode: str,
     lightgbm_param_mode: str,
+    feature_selection_mode: str,
+    forced_delta_feature_count: int,
+    max_feature_count: int,
 ) -> tuple[dict[str, float | int], float, int, int, str, Path, int, RunCountCvDiagnostics]:
     resolved_iterations = _resolve_search_iterations(search_space, search_iterations)
     splitter = create_time_series_split(
@@ -1109,13 +1105,16 @@ def _run_optuna_search(
                 lambda trial: _objective_poisson_deviance(
                     trial,
                     train_frame=train_frame,
-                    feature_columns=feature_columns,
+                    candidate_feature_columns=candidate_feature_columns,
                     target_column=target_column,
                     search_space=search_space,
                     splitter=splitter,
                     random_state=random_state,
                     cv_aggregation_mode=cv_aggregation_mode,
                     lightgbm_param_mode=lightgbm_param_mode,
+                    feature_selection_mode=feature_selection_mode,
+                    forced_delta_feature_count=forced_delta_feature_count,
+                    max_feature_count=max_feature_count,
                 ),
                 n_trials=remaining_trials,
                 n_jobs=max(1, int(optuna_workers)),
@@ -1175,13 +1174,16 @@ def _objective_poisson_deviance(
     trial: optuna.trial.Trial,
     *,
     train_frame: pd.DataFrame,
-    feature_columns: Sequence[str],
+    candidate_feature_columns: Sequence[str],
     target_column: str,
     search_space: Mapping[str, Sequence[float | int]],
     splitter: TimeSeriesSplit,
     random_state: int,
     cv_aggregation_mode: str,
     lightgbm_param_mode: str,
+    feature_selection_mode: str,
+    forced_delta_feature_count: int,
+    max_feature_count: int,
 ) -> float:
     params = _suggest_optuna_regressor_params(
         trial,
@@ -1192,7 +1194,6 @@ def _objective_poisson_deviance(
         params,
         lightgbm_param_mode=lightgbm_param_mode,
     )
-    feature_frame = train_frame[list(feature_columns)]
     target_series = train_frame[target_column]
     fold_losses: list[float] = []
     fold_weights = _resolve_run_count_cv_fold_weights(
@@ -1203,21 +1204,34 @@ def _objective_poisson_deviance(
     for fold_index, (train_indices, test_indices) in enumerate(
         splitter.split(train_frame), start=1
     ):
+        fold_train_frame = train_frame.iloc[train_indices].copy()
+        fold_selection = _select_run_count_feature_columns_for_mode(
+            fold_train_frame,
+            target_column=target_column,
+            candidate_feature_columns=candidate_feature_columns,
+            feature_selection_mode=feature_selection_mode,
+            forced_delta_feature_count=forced_delta_feature_count,
+            max_feature_count=max_feature_count,
+        )
+        fold_feature_columns = fold_selection.feature_columns
+        if not fold_feature_columns:
+            raise ValueError(f"No fold-local run-count features selected for {target_column}")
+        fold_test_frame = train_frame.iloc[test_indices][list(fold_feature_columns)]
         xgboost_estimator = _build_estimator(random_state=random_state)
         xgboost_estimator.set_params(**xgboost_params)
         xgboost_estimator.fit(
-            feature_frame.iloc[train_indices],
+            fold_train_frame[list(fold_feature_columns)],
             target_series.iloc[train_indices],
         )
         lightgbm_estimator = _build_lightgbm_estimator(random_state=random_state)
         lightgbm_estimator.set_params(**lightgbm_params)
         lightgbm_estimator.fit(
-            feature_frame.iloc[train_indices],
+            fold_train_frame[list(fold_feature_columns)],
             target_series.iloc[train_indices],
         )
         predictions = _blend_run_count_predictions(
-            xgboost_estimator.predict(feature_frame.iloc[test_indices]),
-            lightgbm_estimator.predict(feature_frame.iloc[test_indices]),
+            xgboost_estimator.predict(fold_test_frame),
+            lightgbm_estimator.predict(fold_test_frame),
         )
         fold_loss = _compute_poisson_deviance(target_series.iloc[test_indices], predictions)
         fold_losses.append(fold_loss)
@@ -1793,7 +1807,11 @@ def _resolve_run_count_candidate_feature_columns(
     excluded_14_window_count = 0
     excluded_60_window_count = 0
     excluded_redundant_team_offense_count = 0
+    excluded_near_constant_count = 0
     for column in candidate_columns:
+        if column in _NEAR_CONSTANT_RUN_COUNT_FEATURES:
+            excluded_near_constant_count += 1
+            continue
         if any(token in column for token in ("_14g", "_14s")):
             excluded_14_window_count += 1
             continue
@@ -1810,6 +1828,7 @@ def _resolve_run_count_candidate_feature_columns(
             "14_window": excluded_14_window_count,
             "60_window": excluded_60_window_count,
             "redundant_team_offense": excluded_redundant_team_offense_count,
+            "near_constant": excluded_near_constant_count,
         },
     )
 
@@ -1947,6 +1966,42 @@ def _resolve_run_count_bucket_targets(*, max_feature_count: int) -> dict[str, in
         "delta": base_targets["delta"],
         "context": base_targets["context"] + (max_feature_count - base_total),
     }
+
+
+def _select_run_count_feature_columns_for_mode(
+    dataframe: pd.DataFrame,
+    *,
+    target_column: str,
+    candidate_feature_columns: Sequence[str],
+    feature_selection_mode: str,
+    forced_delta_feature_count: int,
+    max_feature_count: int,
+) -> RunCountFeatureSelectionResult:
+    if feature_selection_mode == "flat":
+        return _select_run_count_feature_columns_flat(
+            dataframe,
+            target_column=target_column,
+            candidate_feature_columns=candidate_feature_columns,
+            max_feature_count=max_feature_count,
+            forced_delta_count=forced_delta_feature_count,
+        )
+    if feature_selection_mode == "bucketed":
+        if forced_delta_feature_count > 0:
+            raise ValueError("forced_delta_feature_count is currently supported only with flat selection mode")
+        return _select_run_count_feature_columns_bucketed(
+            dataframe,
+            target_column=target_column,
+            candidate_feature_columns=candidate_feature_columns,
+            max_feature_count=max_feature_count,
+        )
+    if forced_delta_feature_count > 0:
+        raise ValueError("forced_delta_feature_count is currently supported only with flat selection mode")
+    return _select_run_count_feature_columns(
+        dataframe,
+        target_column=target_column,
+        candidate_feature_columns=candidate_feature_columns,
+        max_feature_count=max_feature_count,
+    )
 
 
 def _rank_run_count_candidate_features(

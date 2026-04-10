@@ -167,6 +167,9 @@ def compute_umpire_features(
 
         for window in windows:
             history_slice = umpire_history.tail(int(window))
+            abs_history_slice = history_slice.loc[history_slice.get("is_abs_active", 0) > 0].copy()
+            history_count = float(len(history_slice))
+            abs_history_count = float(len(abs_history_slice))
             features.extend(
                 [
                     GameFeatures(
@@ -199,7 +202,41 @@ def compute_umpire_features(
                     GameFeatures(
                         game_pk=game_pk,
                         feature_name=f"plate_umpire_sample_size_{int(window)}g",
-                        feature_value=float(len(history_slice)),
+                        feature_value=history_count,
+                        window_size=int(window),
+                        as_of_timestamp=as_of_timestamp,
+                    ),
+                    GameFeatures(
+                        game_pk=game_pk,
+                        feature_name=f"plate_umpire_abs_active_share_{int(window)}g",
+                        feature_value=(abs_history_count / history_count) if history_count > 0.0 else 0.0,
+                        window_size=int(window),
+                        as_of_timestamp=as_of_timestamp,
+                    ),
+                    GameFeatures(
+                        game_pk=game_pk,
+                        feature_name=f"plate_umpire_abs_active_sample_size_{int(window)}g",
+                        feature_value=abs_history_count,
+                        window_size=int(window),
+                        as_of_timestamp=as_of_timestamp,
+                    ),
+                    GameFeatures(
+                        game_pk=game_pk,
+                        feature_name=f"plate_umpire_abs_total_runs_avg_{int(window)}g",
+                        feature_value=_safe_mean(
+                            abs_history_slice.get("total_runs"),
+                            DEFAULT_TOTAL_RUNS_AVG,
+                        ),
+                        window_size=int(window),
+                        as_of_timestamp=as_of_timestamp,
+                    ),
+                    GameFeatures(
+                        game_pk=game_pk,
+                        feature_name=f"plate_umpire_abs_f5_total_runs_avg_{int(window)}g",
+                        feature_value=_safe_mean(
+                            abs_history_slice.get("f5_total_runs"),
+                            DEFAULT_F5_TOTAL_RUNS_AVG,
+                        ),
                         window_size=int(window),
                         as_of_timestamp=as_of_timestamp,
                     ),
@@ -254,7 +291,8 @@ def _load_prior_games(db_path: Path, target_day: date) -> pd.DataFrame:
                 final_home_score,
                 final_away_score,
                 f5_home_score,
-                f5_away_score
+                f5_away_score,
+                is_abs_active
             FROM games
             WHERE status = 'final'
               AND date < ?
@@ -269,6 +307,7 @@ def _load_prior_games(db_path: Path, target_day: date) -> pd.DataFrame:
 
     for column in ("final_home_score", "final_away_score", "f5_home_score", "f5_away_score"):
         games[column] = pd.to_numeric(games[column], errors="coerce")
+    games["is_abs_active"] = pd.to_numeric(games.get("is_abs_active"), errors="coerce").fillna(1.0)
     games["total_runs"] = games["final_home_score"].fillna(0) + games["final_away_score"].fillna(0)
     games["f5_total_runs"] = games["f5_home_score"].fillna(0) + games["f5_away_score"].fillna(0)
     games["home_win"] = (
@@ -540,6 +579,34 @@ def _persist_defaults(
                         game_pk=game_pk,
                         feature_name=f"plate_umpire_sample_size_{int(window)}g",
                         feature_value=0.0,
+                        window_size=int(window),
+                        as_of_timestamp=as_of_timestamp,
+                    ),
+                    GameFeatures(
+                        game_pk=game_pk,
+                        feature_name=f"plate_umpire_abs_active_share_{int(window)}g",
+                        feature_value=0.0,
+                        window_size=int(window),
+                        as_of_timestamp=as_of_timestamp,
+                    ),
+                    GameFeatures(
+                        game_pk=game_pk,
+                        feature_name=f"plate_umpire_abs_active_sample_size_{int(window)}g",
+                        feature_value=0.0,
+                        window_size=int(window),
+                        as_of_timestamp=as_of_timestamp,
+                    ),
+                    GameFeatures(
+                        game_pk=game_pk,
+                        feature_name=f"plate_umpire_abs_total_runs_avg_{int(window)}g",
+                        feature_value=DEFAULT_TOTAL_RUNS_AVG,
+                        window_size=int(window),
+                        as_of_timestamp=as_of_timestamp,
+                    ),
+                    GameFeatures(
+                        game_pk=game_pk,
+                        feature_name=f"plate_umpire_abs_f5_total_runs_avg_{int(window)}g",
+                        feature_value=DEFAULT_F5_TOTAL_RUNS_AVG,
                         window_size=int(window),
                         as_of_timestamp=as_of_timestamp,
                     ),

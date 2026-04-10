@@ -18,6 +18,7 @@ from src.db import DEFAULT_DB_PATH, init_db, sqlite_connection
 from src.features.adjustments.abs_adjustment import (
     DEFAULT_ABS_RETENTION_FACTOR,
     adjust_framing_for_abs,
+    estimate_framing_retention_proxy,
 )
 from src.features.marcel_blend import blend_value, get_regression_weight
 from src.models.features import GameFeatures
@@ -1101,6 +1102,11 @@ def _build_feature_values(
         regression_weight=regression_weight,
         roster_turnover_pct=roster_turnover_pct,
     )
+    adjusted_framing = adjust_framing_runs(
+        blended_raw_framing,
+        retention_factor=abs_retention_factor,
+        abs_active=abs_active,
+    )
     return {
         "drs": blend_value(
             _history_mean(
@@ -1144,10 +1150,13 @@ def _build_feature_values(
             regression_weight=regression_weight,
             roster_turnover_pct=roster_turnover_pct,
         ),
-        "adjusted_framing": adjust_framing_runs(
+        "raw_framing": blended_raw_framing,
+        "adjusted_framing": adjusted_framing,
+        "framing_retention_proxy": estimate_framing_retention_proxy(
             blended_raw_framing,
-            retention_factor=abs_retention_factor,
+            adjusted_framing_runs=adjusted_framing,
             abs_active=abs_active,
+            retention_factor=abs_retention_factor,
         ),
     }
 

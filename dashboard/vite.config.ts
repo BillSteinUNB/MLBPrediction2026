@@ -100,6 +100,46 @@ function dataFilesPlugin(): Plugin {
           return
         }
 
+        const picsMatch = reqPath?.match(/^\/api\/pics\/(.+)$/)
+
+        if (picsMatch) {
+          const filename = picsMatch[1]
+          const filePath = path.resolve(projectRoot, 'data/reports/pics', filename)
+
+          // Security: Ensure file is within allowed directory
+          const resolvedPath = path.resolve(filePath)
+          const allowedDir = path.resolve(projectRoot, 'data/reports/pics')
+          if (!resolvedPath.startsWith(allowedDir)) {
+            res.statusCode = 403
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ error: 'Access denied' }))
+            return
+          }
+
+          // Check if file exists
+          if (!fs.existsSync(filePath)) {
+            res.statusCode = 404
+            res.setHeader('Content-Type', 'application/json')
+            res.setHeader('Cache-Control', 'no-cache')
+            res.end(JSON.stringify({ error: 'File not found' }))
+            return
+          }
+
+          // Serve file with appropriate headers
+          try {
+            const content = fs.readFileSync(filePath, 'utf-8')
+            res.statusCode = 200
+            res.setHeader('Content-Type', 'application/json')
+            res.setHeader('Cache-Control', 'no-cache')
+            res.end(content)
+          } catch (err) {
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ error: 'Internal server error' }))
+          }
+          return
+        }
+
         next()
       })
     },

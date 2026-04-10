@@ -1,6 +1,6 @@
 # Run Count Dual View
 
-Generated at: `2026-03-30T06:05:20.620635+00:00`
+Generated at: `2026-04-02T11:43:13.996417+00:00`
 
 ## Lanes
 
@@ -23,5 +23,5 @@ Generated at: `2026-03-30T06:05:20.620635+00:00`
 | Pair | Mean gap | Shutout gap | P>=3 gap | P>=5 gap | Any flag |
 | --- | ---: | ---: | ---: | ---: | --- |
 | Control mean lane vs Best distribution lane | 0.153 | 0.002 | 0.021 | 0.003 | no |
-| Control mean lane vs Best MCMC lane | 0.002 | 0.008 | 0.001 | 0.015 | no |
-| Best distribution lane vs Best MCMC lane | 0.150 | 0.007 | 0.023 | 0.012 | no |
+| Control mean lane vs Best MCMC lane | 0.002 | 0.008 | 0.002 | 0.015 | no |
+| Best distribution lane vs Best MCMC lane | 0.150 | 0.006 | 0.023 | 0.012 | no |

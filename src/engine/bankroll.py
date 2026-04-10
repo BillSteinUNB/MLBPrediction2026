@@ -284,16 +284,38 @@ def _bet_notes(decision: BetDecision, action: str, extra_notes: str | None) -> s
 def _store_pending_bet(connection: sqlite3.Connection, decision: BetDecision) -> int:
     cursor = connection.execute(
         """
-        INSERT INTO bets (game_pk, market_type, side, edge_pct, kelly_stake, odds_at_bet, result)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO bets (
+            game_pk,
+            market_type,
+            side,
+            book_name,
+            source_model,
+            source_model_version,
+            model_probability,
+            fair_probability,
+            edge_pct,
+            ev,
+            kelly_stake,
+            odds_at_bet,
+            line_at_bet,
+            result
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             decision.game_pk,
             decision.market_type,
             decision.side,
+            decision.book_name,
+            decision.source_model,
+            decision.source_model_version,
+            decision.model_probability,
+            decision.fair_probability,
             decision.edge_pct,
+            decision.ev,
             decision.kelly_stake,
             decision.odds_at_bet,
+            decision.line_at_bet,
             BetResult.PENDING.value,
         ),
     )
@@ -323,21 +345,22 @@ def _upsert_settled_bet(
     decision: BetDecision,
     profit_loss: float,
 ) -> int:
-    row = connection.execute(
-        """
+    query = """
         SELECT id
         FROM bets
         WHERE game_pk = ? AND market_type = ? AND side = ? AND result = ?
-        ORDER BY id DESC
-        LIMIT 1
-        """,
-        (
-            decision.game_pk,
-            decision.market_type,
-            decision.side,
-            BetResult.PENDING.value,
-        ),
-    ).fetchone()
+    """
+    params: list[object] = [
+        decision.game_pk,
+        decision.market_type,
+        decision.side,
+        BetResult.PENDING.value,
+    ]
+    if decision.book_name:
+        query += " AND COALESCE(book_name, '') = ?"
+        params.append(decision.book_name)
+    query += " ORDER BY id DESC LIMIT 1"
+    row = connection.execute(query, tuple(params)).fetchone()
 
     settled_at = decision.settled_at.isoformat() if decision.settled_at else None
     if row is None:
@@ -347,22 +370,36 @@ def _upsert_settled_bet(
                 game_pk,
                 market_type,
                 side,
+                book_name,
+                source_model,
+                source_model_version,
+                model_probability,
+                fair_probability,
                 edge_pct,
+                ev,
                 kelly_stake,
                 odds_at_bet,
+                line_at_bet,
                 result,
                 settled_at,
                 profit_loss
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 decision.game_pk,
                 decision.market_type,
                 decision.side,
+                decision.book_name,
+                decision.source_model,
+                decision.source_model_version,
+                decision.model_probability,
+                decision.fair_probability,
                 decision.edge_pct,
+                decision.ev,
                 decision.kelly_stake,
                 decision.odds_at_bet,
+                decision.line_at_bet,
                 decision.result.value,
                 settled_at,
                 profit_loss,
@@ -373,18 +410,32 @@ def _upsert_settled_bet(
     connection.execute(
         """
         UPDATE bets
-        SET edge_pct = ?,
+        SET book_name = ?,
+            source_model = ?,
+            source_model_version = ?,
+            model_probability = ?,
+            fair_probability = ?,
+            edge_pct = ?,
+            ev = ?,
             kelly_stake = ?,
             odds_at_bet = ?,
+            line_at_bet = ?,
             result = ?,
             settled_at = ?,
             profit_loss = ?
         WHERE id = ?
         """,
         (
+            decision.book_name,
+            decision.source_model,
+            decision.source_model_version,
+            decision.model_probability,
+            decision.fair_probability,
             decision.edge_pct,
+            decision.ev,
             decision.kelly_stake,
             decision.odds_at_bet,
+            decision.line_at_bet,
             decision.result.value,
             settled_at,
             profit_loss,

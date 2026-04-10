@@ -17,6 +17,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.ops.run_count_dual_view import resolve_stage5_inputs  # noqa: E402
+from src.ops.run_count_tracker import (  # noqa: E402
+    DEFAULT_RUN_COUNT_TRACKING_DIR,
+    record_run_count_workflow_run,
+    write_frontend_connection_contract,
+)
 
 
 console = Console()
@@ -100,6 +105,11 @@ def main(argv: list[str] | None = None) -> int:
         default="off",
     )
     parser.add_argument("--skip-dual-view", action="store_true")
+    parser.add_argument("--tracker-dir", default=str(DEFAULT_RUN_COUNT_TRACKING_DIR))
+    parser.add_argument("--tracker-hypothesis", default=None)
+    parser.add_argument("--tracker-run-label", default=None)
+    parser.add_argument("--set-as-benchmark", action="store_true")
+    parser.add_argument("--benchmark-label", default=None)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
@@ -324,6 +334,51 @@ def main(argv: list[str] | None = None) -> int:
         },
         "dual_view": dual_view_result,
     }
+    if dual_view_result is not None:
+        tracker_record = record_run_count_workflow_run(
+            stage3_report_path=stage3_report_json,
+            stage3_vs_control_path=str(stage3_report_json).replace(".distribution_eval.json", ".vs_control.json"),
+            stage4_report_path=stage4_report_json,
+            stage4_vs_control_path=str(stage4_report_json).replace(".mcmc_eval.json", ".vs_control.json"),
+            stage4_vs_stage3_path=str(stage4_report_json).replace(".mcmc_eval.json", ".vs_stage3.json"),
+            stage3_walk_forward_path=stage3_walk_forward_json,
+            stage4_walk_forward_path=stage4_walk_forward_json,
+            dual_view_path=Path(args.dual_view_output_dir) / "current_dual_view.json",
+            training_data_path=args.training_data,
+            start_year=args.start_year,
+            end_year=args.end_year,
+            holdout_season=args.holdout_season,
+            folds=args.folds,
+            feature_selection_mode=args.feature_selection_mode,
+            forced_delta_count=args.forced_delta_count,
+            xgb_workers=args.xgb_workers,
+            enable_market_priors=args.enable_market_priors,
+            historical_odds_db=args.historical_odds_db,
+            historical_market_book=args.historical_market_book,
+            mu_delta_mode=args.mu_delta_mode,
+            stage3_experiment=stage3_experiment,
+            stage4_experiment=stage4_experiment,
+            stage3_research_lane_name=args.stage3_research_lane_name,
+            stage4_research_lane_name=args.stage4_research_lane_name,
+            tracking_dir=args.tracker_dir,
+            hypothesis=args.tracker_hypothesis,
+            run_label=args.tracker_run_label,
+            set_as_benchmark=args.set_as_benchmark,
+            benchmark_label=args.benchmark_label,
+        )
+        connection_contract = write_frontend_connection_contract(tracking_dir=args.tracker_dir)
+        payload["tracker"] = {
+            "tracking_dir": str(_resolve_path(args.tracker_dir)),
+            "latest_run_path": str(_resolve_path(Path(args.tracker_dir) / "latest_run.json")),
+            "benchmark_path": str(_resolve_path(Path(args.tracker_dir) / "benchmark.json")),
+            "history_index_path": str(_resolve_path(Path(args.tracker_dir) / "run_history_index.json")),
+            "connection_contract_path": str(_resolve_path(Path(args.tracker_dir) / "frontend_connection.json")),
+            "run_id": tracker_record["run_id"],
+            "benchmark_status": tracker_record["benchmark_status"],
+            "benchmark_label": tracker_record["benchmark_label"],
+            "headline_result": tracker_record["summary"]["headline_result"],
+            "connection_contract_generated_at": connection_contract["generated_at"],
+        }
     console.print("[bold green]Workflow complete[/bold green]")
     console.print(json.dumps(payload, indent=2))
     return 0

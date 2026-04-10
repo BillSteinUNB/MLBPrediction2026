@@ -252,6 +252,68 @@ def _seed_old_scraper_backfill_opening_odds_db(db_path: Path) -> Path:
     return db_path
 
 
+def _seed_oddsportal_old_scraper_historical_odds_db(db_path: Path) -> Path:
+    with sqlite3.connect(db_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE games (
+                game_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT,
+                game_date TEXT NOT NULL,
+                commence_time_utc TEXT,
+                away_team TEXT NOT NULL,
+                home_team TEXT NOT NULL,
+                game_type TEXT,
+                away_pitcher TEXT,
+                home_pitcher TEXT
+            );
+            CREATE TABLE odds (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT,
+                game_date TEXT NOT NULL,
+                commence_time TEXT,
+                away_team TEXT NOT NULL,
+                home_team TEXT NOT NULL,
+                game_type TEXT,
+                away_pitcher TEXT,
+                home_pitcher TEXT,
+                fetched_at TEXT,
+                bookmaker TEXT NOT NULL,
+                market_type TEXT NOT NULL,
+                side TEXT NOT NULL,
+                point TEXT,
+                price TEXT NOT NULL,
+                commence_time_utc TEXT,
+                is_opening INTEGER DEFAULT 0,
+                game_id INTEGER
+            );
+            INSERT INTO games (event_id, game_date, commence_time_utc, away_team, home_team, game_type)
+            VALUES ('evt-op-1001', '2025-04-01', '2025-04-01T23:05:00Z', 'BOS', 'NYY', 'R');
+            """
+        )
+        connection.executemany(
+            """
+            INSERT INTO odds (
+                event_id, game_date, commence_time, away_team, home_team, fetched_at,
+                bookmaker, market_type, side, point, price, commence_time_utc, is_opening
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("evt-op-1001", "2025-04-01", "2025-04-01T23:05:00Z", "BOS", "NYY", "2025-04-01T16:00:00Z", "OddsPortal:provider_899", "f5_ml", "away", "", "118", "2025-04-01T23:05:00Z", 1),
+                ("evt-op-1001", "2025-04-01", "2025-04-01T23:05:00Z", "BOS", "NYY", "2025-04-01T16:00:00Z", "OddsPortal:provider_899", "f5_ml", "home", "", "-128", "2025-04-01T23:05:00Z", 1),
+                ("evt-op-1001", "2025-04-01", "2025-04-01T23:05:00Z", "BOS", "NYY", "2025-04-01T16:00:00Z", "OddsPortal:provider_899", "f5_total", "over", "4.5", "-102", "2025-04-01T23:05:00Z", 1),
+                ("evt-op-1001", "2025-04-01", "2025-04-01T23:05:00Z", "BOS", "NYY", "2025-04-01T16:00:00Z", "OddsPortal:provider_899", "f5_total", "under", "4.5", "-118", "2025-04-01T23:05:00Z", 1),
+                ("evt-op-1001", "2025-04-01", "2025-04-01T23:05:00Z", "BOS", "NYY", "2025-04-01T16:00:00Z", "OddsPortal:provider_899", "full_game_ml", "away", "", "132", "2025-04-01T23:05:00Z", 1),
+                ("evt-op-1001", "2025-04-01", "2025-04-01T23:05:00Z", "BOS", "NYY", "2025-04-01T16:00:00Z", "OddsPortal:provider_899", "full_game_ml", "home", "", "-142", "2025-04-01T23:05:00Z", 1),
+                ("evt-op-1001", "2025-04-01", "2025-04-01T23:05:00Z", "BOS", "NYY", "2025-04-01T16:00:00Z", "OddsPortal:provider_899", "full_game_total", "over", "8.5", "-102", "2025-04-01T23:05:00Z", 1),
+                ("evt-op-1001", "2025-04-01", "2025-04-01T23:05:00Z", "BOS", "NYY", "2025-04-01T16:00:00Z", "OddsPortal:provider_899", "full_game_total", "under", "8.5", "-118", "2025-04-01T23:05:00Z", 1),
+            ],
+        )
+        connection.commit()
+    return db_path
+
+
 def test_market_priors_attach_when_historical_f5_rows_exist(tmp_path: Path) -> None:
     db_path = _seed_historical_odds_db(tmp_path / "historical_odds.db")
 
@@ -311,6 +373,24 @@ def test_market_priors_attach_from_old_scraper_backfill_opener_rows(tmp_path: Pa
     assert row["market_full_game_total_line"] == 8.5
     assert row["market_full_game_away_team_total_line"] == 4.5
     assert row["market_implied_full_game_away_runs"] == 4.5
+
+
+def test_market_priors_metadata_reports_hybrid_old_scraper_sources(tmp_path: Path) -> None:
+    legacy_db = _seed_old_scraper_historical_odds_db(tmp_path / "legacy_old_scraper.db")
+    oddsportal_db = _seed_oddsportal_old_scraper_historical_odds_db(tmp_path / "oddsportal_old_scraper.db")
+
+    result = augment_run_research_features(
+        _base_frame(),
+        enable_market_priors=True,
+        historical_odds_db_path=f"{legacy_db};{oddsportal_db}",
+    )
+
+    assert result.metadata.market_priors.coverage_pct == 1.0
+    assert result.metadata.market_priors.source_name == "historical_market_archive_old_scraper"
+    assert "legacy_old_scraper" in result.metadata.market_priors.source_origins
+    assert "oddsportal" in result.metadata.market_priors.source_origins
+    assert str(legacy_db) in result.metadata.market_priors.source_db_paths
+    assert str(oddsportal_db) in result.metadata.market_priors.source_db_paths
 
 
 def test_market_priors_fall_back_cleanly_when_local_historical_data_is_missing() -> None:

@@ -4,9 +4,10 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+from src.clients.odds_client import american_to_implied
 from src.db import DEFAULT_DB_PATH, init_db
 from src.engine.bankroll import update_bankroll
-from src.engine.edge_calculator import payout_for_american_odds
+from src.engine.edge_calculator import expected_value, payout_for_american_odds
 from src.models.bet import BetDecision, BetResult
 
 
@@ -95,30 +96,75 @@ def _profit_loss_for_result(decision: BetDecision, result: BetResult) -> float:
 def _load_pending_bets(connection: sqlite3.Connection, game_pk: int) -> list[BetDecision]:
     rows = connection.execute(
         """
-        SELECT game_pk, market_type, side, edge_pct, kelly_stake, odds_at_bet, result
+        SELECT
+            bets.id,
+            bets.game_pk,
+            bets.market_type,
+            bets.side,
+            bets.book_name,
+            bets.source_model,
+            bets.source_model_version,
+            bets.model_probability,
+            bets.fair_probability,
+            bets.edge_pct,
+            bets.ev,
+            bets.kelly_stake,
+            bets.odds_at_bet,
+            bets.line_at_bet,
+            bets.result,
+            bet_performance.book_name,
+            bet_performance.model_probability,
+            bet_performance.market_probability
         FROM bets
-        WHERE game_pk = ? AND result = ?
-        ORDER BY id DESC
+        LEFT JOIN bet_performance ON bet_performance.bet_id = bets.id
+        WHERE bets.game_pk = ? AND bets.result = ?
+        ORDER BY bets.id DESC
         """,
         (game_pk, BetResult.PENDING.value),
     ).fetchall()
 
-    return [
-        BetDecision(
-            game_pk=row[0],
-            market_type=row[1],
-            side=row[2],
-            model_probability=0.5,
-            fair_probability=0.5,
-            edge_pct=row[3],
-            ev=0.0,
-            is_positive_ev=row[3] >= 0.03,
-            kelly_stake=row[4],
-            odds_at_bet=row[5],
-            result=BetResult(row[6]),
+    decisions: list[BetDecision] = []
+    for row in rows:
+        edge_pct = float(row[9])
+        odds_at_bet = int(row[12])
+        implied_probability = float(american_to_implied(odds_at_bet))
+        model_probability_raw = row[7]
+        if model_probability_raw is None:
+            model_probability_raw = row[16]
+        model_probability = (
+            float(model_probability_raw)
+            if model_probability_raw is not None
+            else min(0.99, max(0.01, implied_probability + edge_pct))
         )
-        for row in rows
-    ]
+        fair_probability_raw = row[8]
+        if fair_probability_raw is None:
+            fair_probability_raw = model_probability - edge_pct
+        fair_probability = float(fair_probability_raw)
+        ev_raw = row[10]
+        ev = float(ev_raw) if ev_raw is not None else float(expected_value(model_probability, odds_at_bet))
+        book_name = row[4]
+        if book_name is None and row[15] not in (None, "", "manual"):
+            book_name = row[15]
+        decisions.append(
+            BetDecision(
+                game_pk=int(row[1]),
+                market_type=str(row[2]),
+                side=str(row[3]),
+                book_name=None if book_name is None else str(book_name),
+                source_model=None if row[5] is None else str(row[5]),
+                source_model_version=None if row[6] is None else str(row[6]),
+                model_probability=min(0.99, max(0.01, float(model_probability))),
+                fair_probability=min(0.99, max(0.01, float(fair_probability))),
+                edge_pct=edge_pct,
+                ev=ev,
+                is_positive_ev=edge_pct >= 0.03,
+                kelly_stake=float(row[11]),
+                odds_at_bet=odds_at_bet,
+                line_at_bet=None if row[13] is None else float(row[13]),
+                result=BetResult(row[14]),
+            )
+        )
+    return decisions
 
 
 def settle_bet(

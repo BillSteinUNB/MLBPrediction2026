@@ -56,5 +56,8 @@ def test_build_mcmc_feature_bundle_reanchors_extreme_environment_rows() -> None:
 
     assert extreme.mean_anchor_applied is True
     assert abs(extreme.post_anchor_implied_mean_runs - 5.8) <= 0.5
+    assert extreme.pre_anchor_implied_mean_runs < 8.10
+    assert extreme.run_environment_factor < 1.06
+    assert extreme.power_factor < 1.15
     assert extreme.starter_profile.out >= 0.56
     assert extreme.starter_profile.home_run <= 0.055

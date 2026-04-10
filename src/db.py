@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 DEFAULT_DB_PATH = Path("data") / "mlb.db"
 BUILDER_SQLITE_CACHE_SIZE_KB = 64_000
 
@@ -108,11 +108,29 @@ SCHEMA_STATEMENTS = (
     CREATE TABLE IF NOT EXISTS bets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         game_pk INTEGER NOT NULL,
-        market_type TEXT NOT NULL CHECK (market_type IN ('f5_ml', 'f5_rl')),
-        side TEXT NOT NULL CHECK (side IN ('home', 'away')),
+        market_type TEXT NOT NULL CHECK (
+            market_type IN (
+                'f5_ml',
+                'f5_rl',
+                'f5_total',
+                'full_game_ml',
+                'full_game_rl',
+                'full_game_total',
+                'full_game_team_total_home',
+                'full_game_team_total_away'
+            )
+        ),
+        side TEXT NOT NULL CHECK (side IN ('home', 'away', 'over', 'under')),
+        book_name TEXT,
+        source_model TEXT,
+        source_model_version TEXT,
+        model_probability REAL CHECK (model_probability BETWEEN 0 AND 1),
+        fair_probability REAL CHECK (fair_probability BETWEEN 0 AND 1),
         edge_pct REAL NOT NULL,
+        ev REAL,
         kelly_stake REAL NOT NULL CHECK (kelly_stake >= 0),
         odds_at_bet INTEGER NOT NULL,
+        line_at_bet REAL,
         result TEXT NOT NULL DEFAULT 'PENDING' CHECK (
             result IN ('WIN', 'LOSS', 'PUSH', 'NO_ACTION', 'PENDING')
         ),
@@ -138,8 +156,19 @@ SCHEMA_STATEMENTS = (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         bet_id INTEGER NOT NULL UNIQUE,
         game_pk INTEGER NOT NULL,
-        market_type TEXT NOT NULL CHECK (market_type IN ('f5_ml', 'f5_rl')),
-        side TEXT NOT NULL CHECK (side IN ('home', 'away')),
+        market_type TEXT NOT NULL CHECK (
+            market_type IN (
+                'f5_ml',
+                'f5_rl',
+                'f5_total',
+                'full_game_ml',
+                'full_game_rl',
+                'full_game_total',
+                'full_game_team_total_home',
+                'full_game_team_total_away'
+            )
+        ),
+        side TEXT NOT NULL CHECK (side IN ('home', 'away', 'over', 'under')),
         book_name TEXT NOT NULL DEFAULT 'manual',
         model_probability REAL NOT NULL CHECK (model_probability BETWEEN 0 AND 1),
         market_probability REAL NOT NULL CHECK (market_probability BETWEEN 0 AND 1),
@@ -234,6 +263,32 @@ def _column_exists(connection: sqlite3.Connection, table_name: str, column_name:
 
 def _apply_migrations(connection: sqlite3.Connection) -> None:
     _refresh_odds_snapshots_market_type_constraint(connection)
+    if _table_exists(connection, "bets") and not _column_exists(connection, "bets", "book_name"):
+        connection.execute("ALTER TABLE bets ADD COLUMN book_name TEXT")
+    if _table_exists(connection, "bets") and not _column_exists(connection, "bets", "source_model"):
+        connection.execute("ALTER TABLE bets ADD COLUMN source_model TEXT")
+    if _table_exists(connection, "bets") and not _column_exists(
+        connection,
+        "bets",
+        "source_model_version",
+    ):
+        connection.execute("ALTER TABLE bets ADD COLUMN source_model_version TEXT")
+    if _table_exists(connection, "bets") and not _column_exists(
+        connection,
+        "bets",
+        "model_probability",
+    ):
+        connection.execute("ALTER TABLE bets ADD COLUMN model_probability REAL")
+    if _table_exists(connection, "bets") and not _column_exists(
+        connection,
+        "bets",
+        "fair_probability",
+    ):
+        connection.execute("ALTER TABLE bets ADD COLUMN fair_probability REAL")
+    if _table_exists(connection, "bets") and not _column_exists(connection, "bets", "ev"):
+        connection.execute("ALTER TABLE bets ADD COLUMN ev REAL")
+    if _table_exists(connection, "bets") and not _column_exists(connection, "bets", "line_at_bet"):
+        connection.execute("ALTER TABLE bets ADD COLUMN line_at_bet REAL")
     if _table_exists(connection, "bet_performance") and not _column_exists(
         connection,
         "bet_performance",
@@ -254,6 +309,7 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
         "away_point",
     ):
         connection.execute("ALTER TABLE odds_snapshots ADD COLUMN away_point REAL")
+    _refresh_betting_table_constraints(connection)
 
 
 def _refresh_odds_snapshots_market_type_constraint(connection: sqlite3.Connection) -> None:
@@ -338,6 +394,250 @@ def _refresh_odds_snapshots_market_type_constraint(connection: sqlite3.Connectio
         """
     )
     connection.execute("DROP TABLE odds_snapshots_legacy")
+
+
+def _refresh_betting_table_constraints(connection: sqlite3.Connection) -> None:
+    if not _table_exists(connection, "bets") and not _table_exists(connection, "bet_performance"):
+        return
+
+    bets_create_sql = ""
+    if _table_exists(connection, "bets"):
+        bets_row = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'bets'"
+        ).fetchone()
+        bets_create_sql = str(bets_row[0]) if bets_row and bets_row[0] is not None else ""
+    performance_create_sql = ""
+    if _table_exists(connection, "bet_performance"):
+        performance_row = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'bet_performance'"
+        ).fetchone()
+        performance_create_sql = (
+            str(performance_row[0]) if performance_row and performance_row[0] is not None else ""
+        )
+
+    required_market_types = (
+        "f5_total",
+        "full_game_ml",
+        "full_game_rl",
+        "full_game_total",
+        "full_game_team_total_home",
+        "full_game_team_total_away",
+    )
+    bets_ready = all(token in bets_create_sql for token in required_market_types) and all(
+        token in bets_create_sql for token in ("'over'", "'under'")
+    )
+    performance_ready = all(
+        token in performance_create_sql for token in required_market_types
+    ) and all(token in performance_create_sql for token in ("'over'", "'under'"))
+    if bets_ready and performance_ready:
+        return
+
+    connection.commit()
+    connection.execute("PRAGMA foreign_keys = OFF")
+    try:
+        if _table_exists(connection, "bets"):
+            connection.execute("ALTER TABLE bets RENAME TO bets_legacy")
+        if _table_exists(connection, "bet_performance"):
+            connection.execute("ALTER TABLE bet_performance RENAME TO bet_performance_legacy")
+
+        connection.execute(
+            """
+            CREATE TABLE bets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_pk INTEGER NOT NULL,
+                market_type TEXT NOT NULL CHECK (
+                    market_type IN (
+                        'f5_ml',
+                        'f5_rl',
+                        'f5_total',
+                        'full_game_ml',
+                        'full_game_rl',
+                        'full_game_total',
+                        'full_game_team_total_home',
+                        'full_game_team_total_away'
+                    )
+                ),
+                side TEXT NOT NULL CHECK (side IN ('home', 'away', 'over', 'under')),
+                book_name TEXT,
+                source_model TEXT,
+                source_model_version TEXT,
+                model_probability REAL CHECK (model_probability BETWEEN 0 AND 1),
+                fair_probability REAL CHECK (fair_probability BETWEEN 0 AND 1),
+                edge_pct REAL NOT NULL,
+                ev REAL,
+                kelly_stake REAL NOT NULL CHECK (kelly_stake >= 0),
+                odds_at_bet INTEGER NOT NULL,
+                line_at_bet REAL,
+                result TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+                    result IN ('WIN', 'LOSS', 'PUSH', 'NO_ACTION', 'PENDING')
+                ),
+                settled_at TEXT,
+                profit_loss REAL,
+                FOREIGN KEY (game_pk) REFERENCES games (game_pk)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE bet_performance (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                bet_id INTEGER NOT NULL UNIQUE,
+                game_pk INTEGER NOT NULL,
+                market_type TEXT NOT NULL CHECK (
+                    market_type IN (
+                        'f5_ml',
+                        'f5_rl',
+                        'f5_total',
+                        'full_game_ml',
+                        'full_game_rl',
+                        'full_game_total',
+                        'full_game_team_total_home',
+                        'full_game_team_total_away'
+                    )
+                ),
+                side TEXT NOT NULL CHECK (side IN ('home', 'away', 'over', 'under')),
+                book_name TEXT NOT NULL DEFAULT 'manual',
+                model_probability REAL NOT NULL CHECK (model_probability BETWEEN 0 AND 1),
+                market_probability REAL NOT NULL CHECK (market_probability BETWEEN 0 AND 1),
+                edge_pct REAL NOT NULL,
+                odds_at_bet INTEGER NOT NULL,
+                stake REAL NOT NULL CHECK (stake >= 0),
+                result TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+                    result IN ('WIN', 'LOSS', 'PUSH', 'NO_ACTION', 'PENDING')
+                ),
+                profit_loss REAL,
+                closing_odds INTEGER,
+                closing_probability REAL CHECK (
+                    closing_probability IS NULL OR (closing_probability BETWEEN 0 AND 1)
+                ),
+                clv REAL,
+                placed_at TEXT NOT NULL,
+                settled_at TEXT,
+                FOREIGN KEY (bet_id) REFERENCES bets (id),
+                FOREIGN KEY (game_pk) REFERENCES games (game_pk)
+            )
+            """
+        )
+
+        if _table_exists(connection, "bets_legacy"):
+            legacy_columns = {
+                row_info[1] for row_info in connection.execute("PRAGMA table_info(bets_legacy)").fetchall()
+            }
+            select_book_name = "book_name" if "book_name" in legacy_columns else "NULL"
+            select_source_model = "source_model" if "source_model" in legacy_columns else "NULL"
+            select_source_model_version = (
+                "source_model_version" if "source_model_version" in legacy_columns else "NULL"
+            )
+            select_model_probability = (
+                "model_probability" if "model_probability" in legacy_columns else "NULL"
+            )
+            select_fair_probability = (
+                "fair_probability" if "fair_probability" in legacy_columns else "NULL"
+            )
+            select_ev = "ev" if "ev" in legacy_columns else "NULL"
+            select_line_at_bet = "line_at_bet" if "line_at_bet" in legacy_columns else "NULL"
+            connection.execute(
+                f"""
+                INSERT INTO bets (
+                    id,
+                    game_pk,
+                    market_type,
+                    side,
+                    book_name,
+                    source_model,
+                    source_model_version,
+                    model_probability,
+                    fair_probability,
+                    edge_pct,
+                    ev,
+                    kelly_stake,
+                    odds_at_bet,
+                    line_at_bet,
+                    result,
+                    settled_at,
+                    profit_loss
+                )
+                SELECT
+                    id,
+                    game_pk,
+                    market_type,
+                    side,
+                    {select_book_name},
+                    {select_source_model},
+                    {select_source_model_version},
+                    {select_model_probability},
+                    {select_fair_probability},
+                    edge_pct,
+                    {select_ev},
+                    kelly_stake,
+                    odds_at_bet,
+                    {select_line_at_bet},
+                    result,
+                    settled_at,
+                    profit_loss
+                FROM bets_legacy
+                """
+            )
+            connection.execute("DROP TABLE bets_legacy")
+
+        if _table_exists(connection, "bet_performance_legacy"):
+            legacy_columns = {
+                row_info[1]
+                for row_info in connection.execute(
+                    "PRAGMA table_info(bet_performance_legacy)"
+                ).fetchall()
+            }
+            select_book_name = (
+                "book_name" if "book_name" in legacy_columns else "'manual'"
+            )
+            connection.execute(
+                f"""
+                INSERT INTO bet_performance (
+                    id,
+                    bet_id,
+                    game_pk,
+                    market_type,
+                    side,
+                    book_name,
+                    model_probability,
+                    market_probability,
+                    edge_pct,
+                    odds_at_bet,
+                    stake,
+                    result,
+                    profit_loss,
+                    closing_odds,
+                    closing_probability,
+                    clv,
+                    placed_at,
+                    settled_at
+                )
+                SELECT
+                    id,
+                    bet_id,
+                    game_pk,
+                    market_type,
+                    side,
+                    {select_book_name},
+                    model_probability,
+                    market_probability,
+                    edge_pct,
+                    odds_at_bet,
+                    stake,
+                    result,
+                    profit_loss,
+                    closing_odds,
+                    closing_probability,
+                    clv,
+                    placed_at,
+                    settled_at
+                FROM bet_performance_legacy
+                """
+            )
+            connection.execute("DROP TABLE bet_performance_legacy")
+        connection.commit()
+    finally:
+        connection.execute("PRAGMA foreign_keys = ON")
 
 
 def _patch_data_builder_team_platoon_splits_fetcher() -> None:

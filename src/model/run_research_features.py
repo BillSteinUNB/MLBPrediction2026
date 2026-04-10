@@ -36,6 +36,8 @@ class MarketPriorMetadata:
     rows_with_market_data: int
     coverage_pct: float
     fallback_reason: str | None
+    source_origins: tuple[str, ...]
+    source_db_paths: tuple[str, ...]
     notes: tuple[str, ...]
 
 
@@ -184,6 +186,8 @@ def _attach_market_prior_features(
             rows_with_market_data=0,
             coverage_pct=0.0,
             fallback_reason="market priors disabled for this lane",
+            source_origins=(),
+            source_db_paths=(),
             notes=(
                 "Stage 3 and Stage 4 can opt into market priors without touching the control lane.",
             ),
@@ -197,6 +201,8 @@ def _attach_market_prior_features(
             rows_with_market_data=0,
             coverage_pct=0.0,
             fallback_reason="historical odds database path was not supplied",
+            source_origins=(),
+            source_db_paths=(),
             notes=(
                 "Historical away team totals are not available in the current repo-local data.",
                 "The fallback uses neutral market anchors so the lane wiring stays auditable.",
@@ -246,6 +252,8 @@ def _attach_market_prior_features(
             rows_with_market_data=0,
             coverage_pct=0.0,
             fallback_reason="no matching historical market rows were found for the supplied game ids",
+            source_origins=(),
+            source_db_paths=(),
             notes=(
                 "Current local odds storage contains no matching historical market rows for the supplied away-run frame.",
                 "The fallback keeps the market-prior lane plumbed while honestly marking zero coverage.",
@@ -258,6 +266,24 @@ def _attach_market_prior_features(
             str(frame["source_schema"].iloc[0])
             for frame in loaded_markets
             if not frame.empty and "source_schema" in frame.columns
+        }
+    )
+    market_origins = sorted(
+        {
+            str(origin).strip()
+            for frame in loaded_markets
+            if not frame.empty and "source_origin" in frame.columns
+            for origin in frame["source_origin"].dropna().tolist()
+            if str(origin).strip()
+        }
+    )
+    market_db_paths = sorted(
+        {
+            str(path_value).strip()
+            for frame in loaded_markets
+            if not frame.empty and "source_db_path" in frame.columns
+            for path_value in frame["source_db_path"].dropna().tolist()
+            if str(path_value).strip()
         }
     )
 
@@ -603,6 +629,8 @@ def _attach_market_prior_features(
             if coverage > 0.0
             else "historical market lookup resolved but did not produce usable rows"
         ),
+        source_origins=tuple(market_origins),
+        source_db_paths=tuple(market_db_paths),
         notes=(
             (
                 "Market priors use F5 and full-game totals plus ML/RL, and prefer direct away-team totals when present."
@@ -612,6 +640,12 @@ def _attach_market_prior_features(
             ),
             (
                 f"Historical market book selection: {historical_market_book_name or 'consensus across available books'}."
+            ),
+            (
+                f"Historical market source origins: {', '.join(market_origins) if market_origins else 'none'}."
+            ),
+            (
+                f"Historical market source DBs: {', '.join(market_db_paths) if market_db_paths else 'none'}."
             ),
         ),
     )

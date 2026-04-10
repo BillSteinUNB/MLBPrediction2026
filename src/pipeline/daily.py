@@ -27,7 +27,7 @@ from src.clients.odds_client import (
 from src.clients.weather_client import fetch_game_weather
 from src.config import _load_settings_yaml
 from src.db import DEFAULT_DB_PATH, init_db
-from src.engine.bankroll import calculate_kelly_stake, get_bankroll_summary, update_bankroll
+from src.engine.bankroll import get_bankroll_summary, update_bankroll
 from src.engine.edge_calculator import calculate_edge
 from src.engine.settlement import settle_game_bets
 from src.features.adjustments.abs_adjustment import is_abs_active
@@ -47,7 +47,9 @@ from src.model.margin_pricing import margin_to_cover_probability
 from src.model.run_count_trainer import BlendedRunCountRegressor
 from src.model.score_pricing import (
     moneyline_probabilities,
+    spread_outcome_probabilities,
     spread_cover_probabilities,
+    totals_outcome_probabilities,
     totals_probabilities,
 )
 from src.model.xgboost_trainer import DEFAULT_MODEL_OUTPUT_DIR
@@ -681,7 +683,11 @@ class ArtifactOrFallbackPredictionEngine:
                     or not isinstance(book_name, str)
                 ):
                     continue
-                full_game_rl_home_probability, full_game_rl_away_probability = spread_cover_probabilities(
+                (
+                    full_game_rl_home_probability,
+                    full_game_rl_away_probability,
+                    full_game_rl_push_probability,
+                ) = spread_outcome_probabilities(
                     home_runs_mean=prediction.projected_full_game_home_runs,
                     away_runs_mean=prediction.projected_full_game_away_runs,
                     home_runs_std=self._resolve_run_count_std(self.run_count_full_home) or 3.13,
@@ -706,6 +712,7 @@ class ArtifactOrFallbackPredictionEngine:
                         db_path=db_path,
                         source_model="run_count_full_game_rl",
                         source_model_version=self.model_version,
+                        push_probability=full_game_rl_push_probability or 0.0,
                     )
                 )
 
@@ -721,7 +728,11 @@ class ArtifactOrFallbackPredictionEngine:
                     or not isinstance(book_name, str)
                 ):
                     continue
-                total_over_probability, total_under_probability = totals_probabilities(
+                (
+                    total_over_probability,
+                    total_under_probability,
+                    total_push_probability,
+                ) = totals_outcome_probabilities(
                     home_runs_mean=prediction.projected_full_game_home_runs,
                     away_runs_mean=prediction.projected_full_game_away_runs,
                     home_runs_std=self._resolve_run_count_std(self.run_count_full_home) or 3.13,
@@ -746,6 +757,7 @@ class ArtifactOrFallbackPredictionEngine:
                         db_path=db_path,
                         source_model="run_count_full_game_total",
                         source_model_version=self.model_version,
+                        push_probability=total_push_probability or 0.0,
                     )
                 )
 
@@ -872,6 +884,9 @@ class ArtifactOrFallbackPredictionEngine:
             return None
 
         holdout_metrics = metadata_payload.get("holdout_metrics", {})
+        resolved_holdout_season = self._resolve_legacy_holdout_season(
+            metadata_payload=metadata_payload,
+        )
         if variant == "base":
             holdout_log_loss = holdout_metrics.get("log_loss")
             holdout_roc_auc = holdout_metrics.get("roc_auc")
@@ -903,7 +918,7 @@ class ArtifactOrFallbackPredictionEngine:
                 variant=variant,
                 feature_columns=list(loaded_model.stacking_model.base_feature_columns),
                 raw_meta_feature_columns=list(loaded_model.stacking_model.raw_meta_feature_columns),
-                holdout_season=int(metadata_payload.get("holdout_season", 0)),
+                holdout_season=resolved_holdout_season,
                 holdout_log_loss=float(holdout_log_loss),
                 holdout_roc_auc=(None if holdout_roc_auc is None else float(holdout_roc_auc)),
                 holdout_accuracy=(None if holdout_accuracy is None else float(holdout_accuracy)),
@@ -923,12 +938,44 @@ class ArtifactOrFallbackPredictionEngine:
             variant=variant,
             feature_columns=feature_columns,
             raw_meta_feature_columns=raw_meta_feature_columns,
-            holdout_season=int(metadata_payload.get("holdout_season", 0)),
+            holdout_season=resolved_holdout_season,
             holdout_log_loss=float(holdout_log_loss),
             holdout_roc_auc=None if holdout_roc_auc is None else float(holdout_roc_auc),
             holdout_accuracy=None if holdout_accuracy is None else float(holdout_accuracy),
             holdout_brier=None if holdout_brier is None else float(holdout_brier),
         )
+
+    def _resolve_legacy_holdout_season(self, *, metadata_payload: Mapping[str, Any]) -> int:
+        direct_holdout = metadata_payload.get("holdout_season")
+        if direct_holdout is not None:
+            try:
+                return int(direct_holdout)
+            except (TypeError, ValueError):
+                pass
+
+        for related_key in ("base_model_path", "stacking_model_path"):
+            related_value = metadata_payload.get(related_key)
+            if not isinstance(related_value, str) or not related_value.strip():
+                continue
+            related_model_path = Path(related_value)
+            if not related_model_path.is_absolute():
+                related_model_path = Path.cwd() / related_model_path
+            related_metadata_path = related_model_path.with_suffix(".metadata.json")
+            if not related_metadata_path.exists():
+                continue
+            try:
+                related_payload = json.loads(related_metadata_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                continue
+            related_holdout = related_payload.get("holdout_season")
+            if related_holdout is None:
+                continue
+            try:
+                return int(related_holdout)
+            except (TypeError, ValueError):
+                continue
+
+        return 0
 
     def _predict_legacy_home_probability(
         self,
@@ -1190,6 +1237,7 @@ class ArtifactOrFallbackPredictionEngine:
         db_path: str | Path,
         source_model: str,
         source_model_version: str | None,
+        push_probability: float = 0.0,
     ) -> list[BetDecision]:
         decisions = [
             calculate_edge(
@@ -1203,6 +1251,7 @@ class ArtifactOrFallbackPredictionEngine:
                 away_point=second_point,
                 book_name=book_name,
                 db_path=db_path,
+                push_probability=push_probability,
             ),
             calculate_edge(
                 game_pk=game_pk,
@@ -1215,6 +1264,7 @@ class ArtifactOrFallbackPredictionEngine:
                 away_point=second_point,
                 book_name=book_name,
                 db_path=db_path,
+                push_probability=push_probability,
             ),
         ]
         return [

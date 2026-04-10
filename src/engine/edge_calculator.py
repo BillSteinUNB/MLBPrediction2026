@@ -93,15 +93,27 @@ def payout_for_american_odds(odds: int) -> float:
     return 100.0 / abs(validated_odds)
 
 
-def expected_value(model_probability: float, odds: int, *, stake: float = 1.0) -> float:
+def expected_value(
+    model_probability: float,
+    odds: int,
+    *,
+    stake: float = 1.0,
+    push_probability: float = 0.0,
+) -> float:
     """Compute expected value using the American-odds payout structure."""
 
     validated_probability = _PROBABILITY_ADAPTER.validate_python(model_probability)
     if stake <= 0:
         raise ValueError("stake must be positive")
+    resolved_push_probability = float(push_probability)
+    if not 0.0 <= resolved_push_probability <= 1.0:
+        raise ValueError("push_probability must be between 0 and 1")
+    if validated_probability + resolved_push_probability > 1.0 + 1e-9:
+        raise ValueError("model_probability + push_probability must not exceed 1")
 
     profit = payout_for_american_odds(odds) * stake
-    return float((validated_probability * profit) - ((1.0 - validated_probability) * stake))
+    loss_probability = max(0.0, 1.0 - validated_probability - resolved_push_probability)
+    return float((validated_probability * profit) - (loss_probability * stake))
 
 
 def _resolve_threshold(edge_threshold: float | None) -> float:
@@ -201,6 +213,7 @@ def calculate_edge(
     db_path: str | Path = DEFAULT_DB_PATH,
     edge_threshold: float | None = None,
     calculated_at: datetime | None = None,
+    push_probability: float = 0.0,
 ) -> BetDecision:
     """Calculate edge, expected value, recommendation status, and log the result."""
 
@@ -210,6 +223,11 @@ def calculate_edge(
     resolved_threshold = _resolve_threshold(edge_threshold)
     normalized_timestamp = _normalize_timestamp(calculated_at)
     resolved_book_name = book_name.strip() or "manual"
+    resolved_push_probability = float(push_probability)
+    if not 0.0 <= resolved_push_probability <= 1.0:
+        raise ValueError("push_probability must be between 0 and 1")
+    if validated_model_probability + resolved_push_probability > 1.0 + 1e-9:
+        raise ValueError("model_probability + push_probability must not exceed 1")
 
     home_implied_probability = american_to_implied(validated_home_odds)
     away_implied_probability = american_to_implied(validated_away_odds)
@@ -219,16 +237,20 @@ def calculate_edge(
     )
 
     if side in {"home", "over"}:
-        fair_probability = home_fair_probability
+        fair_probability = home_fair_probability * (1.0 - resolved_push_probability)
         odds_at_bet = validated_home_odds
         line_at_bet = home_point
     else:
-        fair_probability = away_fair_probability
+        fair_probability = away_fair_probability * (1.0 - resolved_push_probability)
         odds_at_bet = validated_away_odds
         line_at_bet = away_point
 
     edge_pct = float(validated_model_probability - fair_probability)
-    ev = expected_value(validated_model_probability, odds_at_bet)
+    ev = expected_value(
+        validated_model_probability,
+        odds_at_bet,
+        push_probability=resolved_push_probability,
+    )
     is_positive_ev = bool(edge_pct >= resolved_threshold)
 
     decision = BetDecision(

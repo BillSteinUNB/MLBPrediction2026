@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 import unicodedata
 from dataclasses import dataclass
+from datetime import datetime
 from math import cos, radians
 
 from src.config import _load_settings_yaml
@@ -24,6 +26,7 @@ MIN_FACTOR = 0.85
 MAX_FACTOR = 1.15
 
 _SETTINGS_PAYLOAD = _load_settings_yaml()
+logger = logging.getLogger(__name__)
 
 
 def _normalize_text(value: str | None) -> str:
@@ -215,6 +218,19 @@ def _wind_multiplier(wind_factor: float) -> float:
     return _clamp(multiplier, MIN_FACTOR, MAX_FACTOR)
 
 
+def _is_valid_pregame_weather_snapshot(
+    weather: WeatherData,
+    *,
+    scheduled_start: datetime | None,
+) -> bool:
+    if scheduled_start is None:
+        return True
+    return all(
+        timestamp is None or timestamp <= scheduled_start
+        for timestamp in (weather.forecast_time, weather.fetched_at)
+    )
+
+
 def compute_weather_adjustment(
     weather: WeatherData,
     *,
@@ -223,6 +239,7 @@ def compute_weather_adjustment(
     is_dome: bool | None = None,
     center_field_orientation_deg: float | None = None,
     precipitation_probability: float | None = None,
+    scheduled_start: datetime | None = None,
 ) -> WeatherAdjustment:
     """Compute weather adjustment factors and a composite score for a game."""
 
@@ -230,6 +247,13 @@ def compute_weather_adjustment(
     resolved_is_dome = bool(weather.is_dome_default) if is_dome is None else bool(is_dome)
     resolved_is_dome = resolved_is_dome or context.is_dome
     if resolved_is_dome:
+        return _neutral_weather_adjustment()
+    if not _is_valid_pregame_weather_snapshot(weather, scheduled_start=scheduled_start):
+        logger.warning(
+            "Falling back to neutral weather adjustment due to invalid timing: team=%s venue=%s",
+            team_code,
+            venue,
+        )
         return _neutral_weather_adjustment()
 
     resolved_orientation = (
